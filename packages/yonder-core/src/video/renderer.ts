@@ -84,7 +84,7 @@ export class PipelineRenderer implements Renderer {
     //
     // Capture each recipe after earlier live commands have settled.
     const running = config.cameras
-      .map((camera) => ({ camera, current: this.supervisor.argv(camera.id) }))
+      .map((camera) => ({ camera, current: this.supervisor.recipe(camera.id) }))
       .filter((r): r is { camera: Camera; current: readonly string[] } => r.current !== null);
     if (running.length === 0) return;
 
@@ -171,6 +171,9 @@ export class PipelineRenderer implements Renderer {
         continue;
       }
 
+      // An operator Stop during the encoder probe still wins. Crash backoff
+      // retains a recipe so apply and rollback can correct its next retry.
+      if (this.supervisor.recipe(camera.id) === null) continue;
       const targetRates = encodesIn(next);
       const observed = this.channel?.inForce(camera.id);
       const fixedRateDiffers = observed != null && (["stream", "preview"] as const).some((branch) =>
@@ -196,10 +199,11 @@ export class PipelineRenderer implements Renderer {
           this.log(`video: ${camera.id} could not retune (${(e as Error).message}); trying its new launch line`);
         }
         // A Stop/crash during the request must never be turned into a Start.
-        if (generation !== this.supervisor.generation(camera.id) || this.supervisor.argv(camera.id) === null) {
+        if (this.supervisor.recipe(camera.id) === null) {
           this.reports.set(camera.id, { outcome: "failed", interruption: ["the pipeline stopped before its settings could be applied"] });
           continue;
         }
+        if (generation !== this.supervisor.generation(camera.id)) accepted = false;
         if (accepted) {
           this.supervisor.adoptArgv(camera.id, next);
           this.reports.set(camera.id, { outcome: "retuned", continuous,

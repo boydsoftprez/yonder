@@ -3,6 +3,7 @@ import { systemClock, type Clock } from "../apply/types.js";
 import { PREVIEW_RUNGS, type Camera, type PreviewRung } from "../schema/config.js";
 import type { Ack } from "./encoder.js";
 import type { EncodeName, PreviewShape, RunningEncodes } from "./pipeline.js";
+import { FeedbackRate } from "./feedback-rate.js";
 import { atIp, fromIp } from "./present.js";
 
 /**
@@ -88,7 +89,8 @@ export interface LinkReport {
   /** What is leaving on this path, kb/s at IP. */
   readonly egress: number;
   /** What this path is measured to carry, kb/s at IP. */
-  readonly capacity: number;
+  readonly capacity: number | null;
+  readonly encode?: EncodeName;
   readonly at: number;
 }
 
@@ -235,20 +237,7 @@ export class RateController {
   /** The latest report from each viewer, replaced as they arrive and judged
    *  for freshness only at the moment a decision is taken. */
   private readonly reports = new Map<string, LinkReport>();
-  /**
-   * The lowest round trip any viewer has reported, which is this link's own
-   * idea of uncongested. Nothing absolute could stand in for it: 60 ms is a
-   * queue on a good cellular link and a bargain on a bad one.
-   *
-   * It only ever falls, so a reading taken on a path much shorter than the
-   * one being flown — a browser on the bench beside the board, before the
-   * aircraft is on cellular — sets a baseline the real link never returns to,
-   * and the ladder then never steps *up*. That exposure is bounded in two
-   * ways and neither is silent: this figure gates a step up and nothing else,
-   * so the picture holds rather than shrinking, and the hold names both
-   * numbers, so an operator reading the reason sees the implausible baseline
-   * rather than an automatic mode that has quietly stopped climbing.
-   */
+  /** Recent baseline of the selected viewer, so a LAN baseline expires on LTE. */
   private rttFloor: number | null = null;
 
   private pinnedSince: number | null = null;
@@ -257,10 +246,12 @@ export class RateController {
   private readonly refusedRate = new Map<EncodeName, Refusal<number>>();
   private refusedSize: Refusal<PreviewRung> | null = null;
 
-  private outstanding: Promise<unknown>[] = [];
+  private readonly outstanding = new Set<Promise<unknown>>();
+  private readonly feedback: FeedbackRate;
 
   constructor(opts: RateControllerOptions) {
     this.channel = opts.channel;
+    this.feedback = new FeedbackRate(opts.channel, opts.thresholds, work => this.track(work));
     this.policy = opts.policy;
     this.clock = opts.clock ?? systemClock;
     this.tDown = opts.thresholds.tDown;
@@ -281,13 +272,14 @@ export class RateController {
    * than bad evidence, which is a state nothing could see.
    */
   observe(report: LinkReport): void {
-    const numbers = [report.rtt, report.loss, report.egress, report.capacity, report.at];
+    const numbers = [report.rtt, report.loss, report.egress, report.at];
     if (!numbers.every((n) => typeof n === "number" && Number.isFinite(n))) return;
     if (report.loss < 0 || report.loss > 1) return;
-    if (report.rtt < 0 || report.egress < 0 || report.capacity < 0) return;
+    if (report.rtt < 0 || report.egress < 0) return;
+    if (report.capacity !== null && (!Number.isFinite(report.capacity) || report.capacity < 0)) return;
     if (typeof report.viewer !== "string" || report.viewer === "") return;
     this.reports.set(report.viewer, report);
-    this.rttFloor = this.rttFloor === null ? report.rtt : Math.min(this.rttFloor, report.rtt);
+    this.feedback.observe(report);
   }
 
   /**
@@ -314,7 +306,17 @@ export class RateController {
         `nothing is running on ${camera.name} to command: no pipeline, no encoder, no rate`);
     }
 
+    if (this.feedback.pending) return this.allHolds(camera, running, now, "Waiting for the encoder to confirm the preceding change.");
     const link = this.evidence(now);
+    const fresh = [...this.reports.values()].filter(r => r.at <= now);
+    const outside = (["stream", "preview"] as const).some(encode => {
+      const policy = camera[encode], rate = running[encode];
+      return policy.mode === "adaptive" && rate !== null && (rate < policy.floor_kbps || rate > policy.ceiling_kbps);
+    });
+    if (fresh.some(r => r.capacity === null) || (link === null && outside)) {
+      this.pinnedSince = null; this.headroomSince = null;
+      return this.feedback.tick(camera, running, fresh, now);
+    }
     if (link === null) {
       // Not merely "no change": the waits are abandoned. A step down is
       // earned by *observed* pinning for tDown, and a gap in the evidence is
@@ -326,10 +328,15 @@ export class RateController {
         + "what the link can carry is unknown, so nothing moves");
     }
 
+    // WebRTC estimates belong to the subscribed encode/connection, not to
+    // every configured output on the board. Never subtract unrelated RTSP.
+    if (fresh.every(report => report.encode !== undefined)) return this.scoped(camera, running, fresh, now);
+
     // What the path is actually getting through, rather than what it
     // measured: a link losing a tenth of what is put on it is not carrying
     // the capacity it reported.
-    const carrying = Math.max(0, Math.floor(link.capacity * (1 - link.loss)));
+    const carrying = Math.max(0, Math.floor(link.capacity! * (1 - link.loss)));
+    this.rttFloor = this.feedback.baseline(link, now);
 
     /*
      * The decision point, and the one R-CMD-04 asks about (see the file
@@ -352,7 +359,8 @@ export class RateController {
     // the path carries beyond whatever the stream is running once this tick's
     // decision has been carried out — the rate just commanded, or the rate it
     // is holding at. Never a share of the whole.
-    const reserved = atIp(stream.spend ?? camera.stream.floor_kbps);
+    const fullConsumer = camera.outputs.some(output => output.enabled) || fresh.some(report => report.encode === "stream");
+    const reserved = fullConsumer ? atIp(stream.spend ?? camera.stream.floor_kbps) : 0;
     const left = Math.max(0, carrying - reserved);
 
     const preview = this.rateFor(camera, "preview", {
@@ -383,11 +391,7 @@ export class RateController {
    * would be asserting that the delay was long enough.
    */
   async settled(): Promise<void> {
-    while (this.outstanding.length > 0) {
-      const batch = this.outstanding;
-      this.outstanding = [];
-      await Promise.all(batch);
-    }
+    while (this.outstanding.size > 0) await Promise.all([...this.outstanding]);
   }
 
   /**
@@ -413,7 +417,7 @@ export class RateController {
     }
     const fresh = [...this.reports.values()].filter((r) => r.at <= now);
     if (fresh.length === 0) return null;
-    const carrying = (r: LinkReport): number => r.capacity * (1 - r.loss);
+    const carrying = (r: LinkReport): number => (r.capacity ?? Infinity) * (1 - r.loss);
     return fresh.reduce((worst, r) => {
       if (carrying(r) < carrying(worst)) return r;
       if (carrying(r) > carrying(worst)) return worst;
@@ -423,6 +427,29 @@ export class RateController {
 
   /** One encode's rate: what it may have, whether that is a change worth
    *  making, and what it will be spending once this tick is carried out. */
+  private scoped(camera: Camera, running: RunningEncodes, reports: readonly LinkReport[], now: number): Decision[] {
+    const decisions: Decision[] = [];
+    let size: Decision = this.holdSize(camera, running.shape?.size ?? null, now, "No preview receiver feedback; its size is held.");
+    for (const encode of ["stream", "preview"] as const) {
+      const matching = reports.filter(report => report.encode === encode && report.capacity !== null);
+      if (!matching.length) {
+        decisions.push(this.holdRate(camera, encode, running[encode], now, "No receiver feedback for this output; its bitrate is held."));
+        continue;
+      }
+      const link = matching.reduce((a,b) => a.capacity! * (1-a.loss) <= b.capacity! * (1-b.loss) ? a : b);
+      const carrying = Math.max(0, Math.floor(link.capacity! * (1-link.loss)));
+      const policy = camera[encode];
+      const result = this.rateFor(camera, encode, { now, running, floor:policy.floor_kbps, ceiling:policy.ceiling_kbps,
+        fixed:policy.mode === "fixed", available:carrying, fixedReason:"Fixed bitrate is selected." });
+      decisions.push(result.decision);
+      if (encode === "preview") {
+        this.rttFloor = this.feedback.baseline(link,now);
+        size = this.sizeFor(camera,{now,running,allowance:result.allowance,shortfall:result.decision.action === "shortfall",link,carrying});
+      }
+    }
+    return [...decisions,size];
+  }
+
   private rateFor(camera: Camera, encode: EncodeName, ctx: {
     now: number; running: RunningEncodes; available: number;
     floor: number; ceiling: number; fixed: boolean; fixedReason: string;
@@ -709,8 +736,13 @@ export class RateController {
    * `supervisor.ts` swallows an EPIPE: an unhandled rejection takes the whole
    * daemon down, and the daemon is the device.
    */
+  private track(work: Promise<unknown>): void {
+    this.outstanding.add(work);
+    void work.then(() => this.outstanding.delete(work), () => this.outstanding.delete(work));
+  }
+
   private issue<T>(sent: Promise<Ack<T>>, refuse: (reason: string) => void): void {
-    this.outstanding.push(sent.then(
+    this.track(sent.then(
       (ack) => { if ("notControllable" in ack) refuse(ack.notControllable); },
       (error: unknown) => { refuse(`the command was not carried out: ${String(error)}`); },
     ));

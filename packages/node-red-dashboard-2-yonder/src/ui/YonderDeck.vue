@@ -92,7 +92,7 @@ const GROUP_LEGEND = {
   stream: 'Stream',
   preview: 'Preview',
   exposure: 'Exposure',
-  colour: 'Colour',
+  colour: 'Color',
   optics: 'Optics',
   rendering: 'Rendering',
   orientation: 'Orientation',
@@ -109,7 +109,7 @@ const GROUP_LEGEND = {
  * it is the tallest and most variable group.
  */
 const IMAGE_SLOTS = [['capture'], ['exposure'], ['optics', 'colour'], ['rendering', 'housekeeping']]
-const CONFIG_SLOTS = [['stream'], ['preview'], ['orientation']]
+const CONFIG_SLOTS = [['stream'], ['preview'], ['streamColor', 'orientation']]
 const OUTPUT_PATH = { rtp: 'outputRtp', rtsp: 'outputRtsp', srt: 'outputSrt' }
 const DRAFT_LABELS = {
   name:'Camera name', width:'Output width', height:'Output height', framerate:'Output frame rate', codec:'Output codec',
@@ -117,6 +117,7 @@ const DRAFT_LABELS = {
   previewMode:'Preview bitrate mode', previewSize:'Preview size', previewLadderBottom:'Smallest preview size', previewLadderTop:'Largest preview size',
   previewFloor:'Preview minimum bitrate', previewCeiling:'Preview maximum bitrate', previewBitrate:'Preview bitrate', previewRate:'Preview frame rate',
   rotation:'Rotation', horizontalFlip:'Mirror', verticalFlip:'Flip', outputRtp:'RTP output', outputRtsp:'RTSP output', outputSrt:'SRT output',
+  imageBrightness:'Stream brightness', imageContrast:'Stream contrast', imageSaturation:'Stream saturation', imageHue:'Stream hue',
 }
 
 
@@ -198,6 +199,9 @@ function stepPrecision (step) {
  */
 export function appliedForDraft (payload) {
   const flat = {}
+  flat.outputRtsp = false
+  const image = payload?.policy?.image || { brightness: 0, contrast: 100, saturation: 100, hue: 0 }
+  for (const [key, path] of Object.entries({ brightness:'imageBrightness', contrast:'imageContrast', saturation:'imageSaturation', hue:'imageHue' })) flat[path] = image[key]
   const values = (payload && payload.values) || {}
   for (const key of Object.keys(values)) {
     const v = values[key]
@@ -395,6 +399,13 @@ export default {
     },
   },
   methods: {
+    field (component, props) {
+      const paths = props.key === 'captureSize' ? ['width', 'height'] : props.key === 'captureRate' ? ['framerate'] : [props.key]
+      const pending = paths.some(path => this.pendingEdits.some(edit => edit.path === path))
+      return h(component, { ...props, class: [props.class, { 'y-field--pending': pending }], 'data-pending': pending ? 'true' : undefined,
+        ...(pending && component !== YonderSetBar && component !== YonderTextField ? { reason: 'Unsaved change' } : {}),
+        ...(pending && component === YonderTextField ? { hint: 'Unsaved change' } : {}) })
+    },
     nativeControl (command) { this.post({ nativeControl: command }) },
     hasDraft (path) {
       return Object.prototype.hasOwnProperty.call(this.draft, path)
@@ -614,7 +625,7 @@ export default {
         const step = descriptor ? descriptor.step : 1
         const actual = typeof rawValue === 'number' ? rawValue : (descriptor ? descriptor.current : 0)
         const cmd = commanded[key]
-        return h(YonderSetBar, {
+        return this.field(YonderSetBar, {
           key,
           label,
           unit,
@@ -636,7 +647,7 @@ export default {
         const menu = (cap.value && cap.value.menu) || []
         const options = menu.map((m) => ({ value: String(m.id), label: m.label }))
         const current = typeof rawValue === 'number' ? rawValue : (cap.value ? cap.value.current : '')
-        return h(YonderPicker, {
+        return this.field(YonderPicker, {
           key,
           label,
           value: String(current),
@@ -648,7 +659,7 @@ export default {
       }
       if (layout.kind === 'seg') {
         const on = rawValue === true || rawValue === 1
-        return h(YonderSegmented, {
+        return this.field(YonderSegmented, {
           key,
           label,
           value: on ? 'On' : 'Off',
@@ -718,7 +729,16 @@ export default {
     nativeControls (group) {
       return (this.report.accessory?.controls || []).filter(d => d.group === group && d.key !== 'mode').map(d => {
         if (d.state === 'not-offered') return this.fact(d.key, d.label, d.reason)
-        return h(YonderPicker, { key: d.key, label: d.label, value: d.value, currentLabel: d.currentLabel, options: d.options,
+        if (d.key === 'ev') {
+          const choices = d.options.map(option => ({ ...option, display: Number(option.label) }))
+          const current = choices.find(option => String(option.value) === String(d.value))
+          return this.field(YonderSetBar, { key: 'nativeBrightness', label: 'Brightness (EV)', unit: 'EV', min: -2, max: 2, step: 1 / 3, precision: 2,
+            actual: current?.display ?? null, state: d.state, reason: d.reason || '', onSet: value => {
+              const selected = choices.reduce((a, b) => Math.abs(b.display - value) < Math.abs(a.display - value) ? b : a)
+              if (d.state === 'present') this.nativeControl(selected.command)
+            } })
+        }
+        return this.field(YonderPicker, { key: d.key, label: d.label, value: d.value, currentLabel: d.currentLabel, options: d.options,
           state: d.state, reason: d.reason || '', onChange: value => {
             const selected = d.options.find(option => String(option.value) === String(value))
             if (selected && d.state === 'present') this.nativeControl(selected.command)
@@ -736,11 +756,12 @@ export default {
       const sizes = ['1280x720', '854x480', '640x360'].filter(size => { const [w,h] = size.split('x').map(Number); return w <= native.width && h <= native.height })
       const rates = [30,25,24,20,15,10,5,1].filter(rate => rate <= Math.ceil(native.fps))
       return [this.fact('native', 'Native input', `${native.width}×${native.height} · ${native.fps.toFixed(2)} fps · fixed USB feed`),
-        h(YonderPicker, { key: 'captureSize', label: 'Output resolution', value: `${this.draftValue('width', capture.width)}x${this.draftValue('height', capture.height)}`,
+        this.field(YonderPicker, { key: 'captureSize', label: 'Output resolution', value: `${this.draftValue('width', capture.width)}x${this.draftValue('height', capture.height)}`,
           options: sizes.map(value => ({ value, label: value.replace('x', '×') })), onChange: value => { const [w,h] = value.split('x').map(Number); this.stage('width', w); this.stage('height', h) } }),
-        h(YonderPicker, { key: 'captureRate', label: 'Output frame rate', value: this.draftValue('framerate', capture.framerate), options: rates.map(value => ({ value: String(value), label: `${value} fps` })), onChange: value => this.stage('framerate', Number(value)) })]
+        this.field(YonderPicker, { key: 'captureRate', label: 'Output frame rate', value: this.draftValue('framerate', capture.framerate), options: rates.map(value => ({ value: String(value), label: `${value} fps` })), onChange: value => this.stage('framerate', Number(value)) })]
     },
     buildGroup (groupId) {
+      if (groupId === 'streamColor') return this.buildStreamColor()
       if (this.report?.accessory) return this.buildNativeGroup(groupId)
       const r = this.report
       const keys = GROUP_KEYS[groupId] || []
@@ -790,7 +811,7 @@ export default {
       const children = o.turns.map((turn) => {
         const label = this.label(turn.key)
         if (turn.key === 'rotation') {
-          return h(YonderPicker, {
+          return this.field(YonderPicker, {
             key: turn.key,
             label,
             // `null` is the schema's own "leave the camera alone", which is a
@@ -802,7 +823,7 @@ export default {
             onChange: (v) => this.turn(turn, Number(v)),
           })
         }
-        return h(YonderSegmented, {
+        return this.field(YonderSegmented, {
           key: turn.key,
           label,
           value: turn.value === 1 ? 'On' : 'Off',
@@ -843,7 +864,7 @@ export default {
        * options are one is a control that cannot be used (R-UI-20).
        */
       if (has(recording) && has(stills)) {
-        children.push(h(YonderSegmented, {
+        children.push(this.field(YonderSegmented, {
           key: 'workMode',
           // Tighter than the same control is elsewhere, and only here. Spec §5
           // puts the shutter key above the fold at 1440x900, and adding Mode at
@@ -915,7 +936,7 @@ export default {
       const adaptive = uiMode === 'Adaptive'
       const children = []
       {
-        children.push(h(YonderTextField, {
+        children.push(this.field(YonderTextField, {
           key: 'name',
           label: 'Name',
           value: this.draftValue('name', (r.camera && r.camera.name) || ''),
@@ -925,7 +946,7 @@ export default {
           'onUpdate:value': (v) => this.stage('name', v),
         }))
       }
-      children.push(h(YonderSegmented, {
+      children.push(this.field(YonderSegmented, {
         key: 'streamMode',
         reason: this.stagedReason('streamMode'),
         label: 'Bitrate',
@@ -934,7 +955,7 @@ export default {
         onChange: (v) => this.stage('streamMode', v),
       }))
       if (adaptive) {
-        children.push(h(YonderSetBar, {
+        children.push(this.field(YonderSetBar, {
           key: 'streamFloor',
           label: 'Floor',
           unit: 'kb/s',
@@ -946,7 +967,7 @@ export default {
           requested: this.stagedValue('streamFloor'),
           onSet: (v) => this.stage('streamFloor', v),
         }))
-        children.push(h(YonderSetBar, {
+        children.push(this.field(YonderSetBar, {
           key: 'streamCeiling',
           label: 'Ceiling',
           unit: 'kb/s',
@@ -959,7 +980,7 @@ export default {
           onSet: (v) => this.stage('streamCeiling', v),
         }))
       }
-      children.push(h(YonderSetBar, {
+      children.push(this.field(YonderSetBar, {
         key: 'streamBitrate',
         label: adaptive ? 'Going out' : 'Bitrate',
         unit: 'kb/s',
@@ -967,7 +988,7 @@ export default {
         max: 20000,
         step: 100,
         precision: 0,
-        actual: (applied && typeof applied.bitrate_kbps === 'number') ? applied.bitrate_kbps : (policy.bitrate_kbps ?? 0),
+        actual: adaptive ? (this.report.runtime?.streamKbps ?? null) : ((applied && typeof applied.bitrate_kbps === 'number') ? applied.bitrate_kbps : (policy.bitrate_kbps ?? 0)),
         readonly: adaptive,
         requested: adaptive ? null : this.stagedValue('streamBitrate'),
         onSet: adaptive ? undefined : (v) => this.stage('streamBitrate', v),
@@ -1048,7 +1069,7 @@ export default {
       // makes when it names the path a problem is about.
       const sizeWrong = held === undefined
       return [
-        h(YonderPicker, {
+        this.field(YonderPicker, {
           key: 'captureSize',
           label: 'Resolution',
           value: size,
@@ -1067,7 +1088,7 @@ export default {
             this.stage('height', hgt)
           },
         }),
-        h(YonderPicker, {
+        this.field(YonderPicker, {
           key: 'captureRate',
           label: 'Frame rate',
           value: String(framerate),
@@ -1092,7 +1113,7 @@ export default {
       const size = this.draftValue('previewSize', policy.size || 'auto')
       const auto = size === 'auto'
       const children = []
-      children.push(h(YonderSegmented, {
+      children.push(this.field(YonderSegmented, {
         key: 'previewMode',
         reason: this.stagedReason('previewMode'),
         label: 'Bitrate',
@@ -1100,7 +1121,7 @@ export default {
         value: uiMode,
         onChange: (v) => this.stage('previewMode', v),
       }))
-      children.push(h(YonderPicker, {
+      children.push(this.field(YonderPicker, {
         key: 'previewSize',
         reason: this.stagedReason('previewSize'),
         label: 'Size',
@@ -1109,14 +1130,14 @@ export default {
         onChange: (v) => this.stage('previewSize', v),
       }))
       if (auto) {
-        children.push(h(YonderPicker, {
+        children.push(this.field(YonderPicker, {
           key: 'previewLadderBottom',
           label: 'Smallest automatic size',
           value: this.draftValue('previewLadderBottom', policy.ladder_bottom || '640x360'),
           options: PREVIEW_RUNG_OPTIONS,
           onChange: (v) => this.stage('previewLadderBottom', v),
         }))
-        children.push(h(YonderPicker, {
+        children.push(this.field(YonderPicker, {
           key: 'previewLadderTop',
           label: 'Largest automatic size',
           value: this.draftValue('previewLadderTop', policy.ladder_top || '1280x720'),
@@ -1124,7 +1145,7 @@ export default {
           onChange: (v) => this.stage('previewLadderTop', v),
         }))
       }
-      children.push(h(YonderPicker, {
+      children.push(this.field(YonderPicker, {
         key: 'previewRate',
         reason: this.stagedReason('previewRate'),
         label: 'Rate',
@@ -1133,7 +1154,7 @@ export default {
         onChange: (v) => this.stage('previewRate', Number(v)),
       }))
       if (adaptive) {
-        children.push(h(YonderSetBar, {
+        children.push(this.field(YonderSetBar, {
           key: 'previewFloor',
           label: 'Floor',
           unit: 'kb/s',
@@ -1145,7 +1166,7 @@ export default {
           requested: this.stagedValue('previewFloor'),
           onSet: (v) => this.stage('previewFloor', v),
         }))
-        children.push(h(YonderSetBar, {
+        children.push(this.field(YonderSetBar, {
           key: 'previewCeiling',
           label: 'Ceiling',
           unit: 'kb/s',
@@ -1158,7 +1179,7 @@ export default {
           onSet: (v) => this.stage('previewCeiling', v),
         }))
       }
-      children.push(h(YonderSetBar, {
+      children.push(this.field(YonderSetBar, {
         key: 'previewBitrate',
         label: adaptive ? 'Going out' : 'Bitrate',
         unit: 'kb/s',
@@ -1166,19 +1187,36 @@ export default {
         max: 4000,
         step: 50,
         precision: 0,
-        actual: (applied && typeof applied.bitrate_kbps === 'number') ? applied.bitrate_kbps : (policy.bitrate_kbps ?? 0),
+        actual: adaptive ? (this.report.runtime?.previewKbps ?? null) : ((applied && typeof applied.bitrate_kbps === 'number') ? applied.bitrate_kbps : (policy.bitrate_kbps ?? 0)),
         readonly: adaptive,
         requested: adaptive ? null : this.stagedValue('previewBitrate'),
         onSet: adaptive ? undefined : (v) => this.stage('previewBitrate', v),
       }))
+      if (adaptive) children.push(h('p', { class: 'y-deck__note' }, this.report.runtime?.decision?.reason || 'Waiting for receiver feedback.'))
       return h(YonderColumn, { legend: GROUP_LEGEND.preview, qualifier: 'to this browser', key: 'preview' }, () => children)
     },
+    buildStreamColor () {
+      const image = this.report.policy?.image || { brightness: 0, contrast: 100, saturation: 100, hue: 0 }
+      const fields = [
+        ['imageBrightness', 'Brightness', 'brightness', -100, 100, '%'],
+        ['imageContrast', 'Contrast', 'contrast', 0, 200, '%'],
+        ['imageSaturation', 'Saturation', 'saturation', 0, 200, '%'],
+        ['imageHue', 'Hue', 'hue', -180, 180, '°'],
+      ]
+      return h(YonderColumn, { legend: 'Stream color', key: 'streamColor' }, () => [
+        h('p', { class: 'y-deck__color-note' }, "Adjusts Yonder's streams and thumbnails. Neutral values bypass processing; adjustments add a few milliseconds per frame. Camera-card files use native settings."),
+        ...fields.map(([key, label, property, min, max, unit]) => this.field(YonderSetBar, { key, label, unit, min, max, step: 1,
+          actual: image[property], requested: this.stagedValue(key), onSet: value => this.stage(key, value) })),
+      ])
+    },
     buildOutputs () {
-      const outputs = this.report.outputs
-      if (!Array.isArray(outputs) || outputs.length === 0) return null
+      const outputs = [...(this.report.outputs || [])]
+      if (!outputs.some(output => output.kind === 'rtsp')) outputs.push({ kind: 'rtsp', label: 'RTSP', enabled: false, costKbps: null,
+        reach: { note: 'Enable for an authenticated player on your LAN or mesh.' } })
       const rows = outputs.map((o) => h('div', { class: 'y-deck__out', key: o.kind }, [
         h('span', { class: 'y-deck__out-l' }, o.label || o.kind),
-        h(YonderSegmented, {
+        this.field(YonderSegmented, {
+          key: OUTPUT_PATH[o.kind], label: o.kind === 'rtsp' ? 'Enable RTSP' : '',
           options: ['Off', 'On'],
           value: this.draftValue(OUTPUT_PATH[o.kind], o.enabled) ? 'On' : 'Off',
           reason: this.stagedReason(OUTPUT_PATH[o.kind]),
@@ -1349,6 +1387,13 @@ export default {
 .y-deck__hint { padding: 0 16px; }
 .y-deck__tools { display: flex; flex-wrap: wrap; gap: 8px; padding: 0 16px; }
 .y-deck__key:disabled { opacity: .5; cursor: not-allowed; }
+.y-deck :deep(.y-field--pending) {
+    background: color-mix(in srgb, var(--yonder-select, #2ad4f0) 9%, transparent);
+    outline: 1px solid color-mix(in srgb, var(--yonder-select, #2ad4f0) 50%, transparent);
+    box-shadow: 0 0 9px color-mix(in srgb, var(--yonder-select, #2ad4f0) 12%, transparent);
+    border-radius: 3px;
+}
+.y-deck__color-note { font-size: 11px; line-height: 1.4; color: var(--yonder-label, #7f8a95); }
 
 .y-deck {
     display: flex;

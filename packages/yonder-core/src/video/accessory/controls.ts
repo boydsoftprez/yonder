@@ -88,7 +88,7 @@ const DESCRIPTORS: readonly CameraControlDescriptor[] = Object.freeze([
             Object.freeze({ x: 0.25, y: 0.25 }), Object.freeze({ x: 0.5, y: 0.5 })
         ]) }),
     ...[
-        ['colour', 'Colour', 'Command 0x3e returned e0 with no observable effect.'],
+        ['colour', 'Camera color profile', 'Camera color profiles are unavailable over this connection. Use Stream color for the relayed picture.'],
         ['filter', 'Filter', 'Command 0x42 had no observable effect.'],
         ['zoom', 'Digital zoom', 'No change to the live USB feed was observed.'],
         ['live-format', 'Live format', 'Native USB video is fixed at 1280×720, approximately 29.97 fps; recording format does not configure it.'],

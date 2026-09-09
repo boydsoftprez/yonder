@@ -27,6 +27,7 @@ import type { Camera } from "../schema/config.js";
  * say what is wrong with what has actually been typed.
  */
 export interface CameraDraft {
+  image?: Partial<Camera['image']>;
   outputs?: Partial<Record<Camera['outputs'][number]['kind'], boolean>>;
   width?: number;
   height?: number;
@@ -74,6 +75,8 @@ export interface CameraDraft {
  * decide to write it rather than getting it by omission.
  */
 export const DRAFT_PATHS: Record<string, string> = {
+  imageBrightness: 'image.brightness', imageContrast: 'image.contrast',
+  imageSaturation: 'image.saturation', imageHue: 'image.hue',
   outputRtp: 'outputs.rtp',
   outputRtsp: 'outputs.rtsp',
   outputSrt: 'outputs.srt',
@@ -169,11 +172,16 @@ export function deckDraft(staged: Record<string, unknown>): DeckDraft {
   // device write, so they travel on the draft and land under `controls`.
   const controls: Record<string, unknown> = {};
   const outputs: Record<string, unknown> = {};
+  const image: Record<string, unknown> = {};
   let name: string | undefined;
   const unknown: string[] = [];
 
   for (const [path, value] of Object.entries(staged)) {
     switch (path) {
+      case 'imageBrightness': image.brightness = value; break;
+      case 'imageContrast': image.contrast = value; break;
+      case 'imageSaturation': image.saturation = value; break;
+      case 'imageHue': image.hue = value; break;
       case 'outputRtp': outputs.rtp = value; break;
       case 'outputRtsp': outputs.rtsp = value; break;
       case 'outputSrt': outputs.srt = value; break;
@@ -212,6 +220,7 @@ export function deckDraft(staged: Record<string, unknown>): DeckDraft {
     }
   }
   if (Object.keys(controls).length > 0) draft.controls = controls as CameraDraft["controls"];
+  if (Object.keys(image).length > 0) draft.image = image as CameraDraft['image'];
   if (Object.keys(outputs).length > 0) draft.outputs = outputs as CameraDraft['outputs'];
   if (Object.keys(stream).length > 0) draft.stream = stream as CameraDraft["stream"];
   if (Object.keys(preview).length > 0) draft.preview = preview as CameraDraft["preview"];
@@ -265,7 +274,8 @@ export function interruption(draft: CameraDraft, applied: CameraDraft): string[]
   // teaches an operator to stop reading them.
   const turnChanged = (["rotation", "horizontalFlip", "verticalFlip"] as const)
     .some((k) => draft.controls?.[k] !== undefined && draft.controls[k] !== applied.controls?.[k]);
-  if (sourceChanged || turnChanged) out.push("restarts the picture");
+  const imageChanged = Object.entries(draft.image ?? {}).some(([key, value]) => value !== applied.image?.[key as keyof Camera['image']]);
+  if (sourceChanged || turnChanged || imageChanged) out.push("restarts the picture");
   if (Object.entries(draft.outputs ?? {}).some(([kind, enabled]) => enabled !== applied.outputs?.[kind as keyof NonNullable<CameraDraft['outputs']>]) && !out.includes('restarts the picture')) out.push('restarts the picture');
 
   const previewBranchChanged =

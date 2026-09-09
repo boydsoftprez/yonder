@@ -221,6 +221,13 @@ describe("unixTransport, against a real socket", () => {
     expect(seen).toBe('POST /admin/verify {"password":"a password"}');
   });
 
+  it("allows a bounded operation-specific wait without lengthening ordinary requests", async () => {
+    await listen((_req,res) => { setTimeout(() => { res.writeHead(200);res.end('{}'); },80); });
+    const client=new DaemonClient({socketPath,timeoutMs:20});
+    expect((await client.request({method:'POST',path:'/cameras/cam0/apply',body:{},timeoutMs:300})).ok).toBe(true);
+    expect((await client.request({method:'GET',path:'/status'})).ok).toBe(false);
+  });
+
   it("fails closed against a socket path with nothing behind it", async () => {
     await listen(() => {});
     const client = new DaemonClient({ socketPath: join(dir, "not-a-socket") });

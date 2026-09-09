@@ -25,6 +25,7 @@ export function accessoryControls(state: CameraState) {
     const value = values[d.key];
     return { ...common, unit: d.unit, state: reason ? 'gated' : 'present', reason,
       ...(d.key === 'iso' && e?.isoCode === 0 ? { currentLabel: `Auto · ISO ${e.actualIso ?? 'unknown'}` } : {}),
+      ...(d.key === 'shutter' && e?.actualShutter ? { currentLabel: `${e.actualShutter.reciprocal ? '1/' : ''}${e.actualShutter.integer + e.actualShutter.decimal / 10} s` } : {}),
       value: value == null ? null : typeof value === 'object' ? JSON.stringify(value) : String(value), options,
       readback: d.key === 'iso' ? e?.actualIso ?? null : d.key === 'ev' ? e?.ev ?? null : null };
   });

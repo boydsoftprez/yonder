@@ -62,6 +62,7 @@ const reportCalls: { path: string; body: unknown }[] = [];
  * the way a dropped connection would — silently, from `sendReport`'s own
  * point of view, and never as a `reason` on screen. */
 let reportOutcome: "ok" | "fails" = "ok";
+let reportState: unknown = {};
 
 const fetchMock = vi.fn(async (url: string, init: unknown) => {
   // A viewer's own report, and the handshake, are two different exchanges
@@ -73,7 +74,7 @@ const fetchMock = vi.fn(async (url: string, init: unknown) => {
     const body: unknown = JSON.parse(String((init as { body?: string } | undefined)?.body ?? "{}"));
     reportCalls.push({ path: report[1]!, body });
     if (reportOutcome === "fails") throw new TypeError("Failed to fetch");
-    return { ok: true, status: 200, text: async () => "{}", headers: { get: () => null } };
+    return { ok: true, status: 200, text: async () => "{}", json: async () => reportState, headers: { get: () => null } };
   }
   if (reply === "throws") throw new TypeError("Failed to fetch");
   // A gated request answers when a test says so — or rejects with
@@ -317,6 +318,7 @@ beforeEach(() => {
   reply = { status: 201, sdp: ANSWER, viewerHeader: "viewer-1" };
   reportCalls.length = 0;
   reportOutcome = "ok";
+  reportState = {};
   vi.stubGlobal("RTCPeerConnection", FakePeerConnection);
   vi.stubGlobal("fetch", fetchMock);
 });
@@ -1104,7 +1106,7 @@ describe("reporting what this browser is measuring", () => {
     expect(fifth.loss).toBe(0);
   });
 
-  it("omits the whole stats object, not a partial one, when the browser has no capacity estimate", async () => {
+  it("retains delivery feedback when the browser has no capacity estimate", async () => {
     mountPicture();
     await settle();
 
@@ -1121,7 +1123,7 @@ describe("reporting what this browser is measuring", () => {
     // alive is swept for idleness and the controller loses the viewer
     // altogether. A browser with no bandwidth estimate is still a browser
     // watching the picture.
-    expect(reportCalls[0]!.body).toEqual({ want: "video" });
+    expect(reportCalls[0]!.body).toMatchObject({ want: "video", stats: { capacity: null, rtt: 50, egress: 620, loss: 0 } });
   });
 
   it("includes frameAge once a frame has painted, and carries none before one ever has", async () => {
@@ -2168,4 +2170,23 @@ it('binds Picture Start to its displayed camera rather than a newer flow selecti
   await settle();
   (wrapper.vm as any).pressStart();
   expect(emit).toHaveBeenLastCalledWith('widget-action', expect.any(String), { camera: 'cam0', payload: 'start' });
+});
+
+it('uses report-response encoder readback and measures receiver buffering on a monotonic interval', async () => {
+  const { wrapper } = mountPicture(); await settle();
+  reportState = { camera:'cam0', viewer:'viewer-1', overlay:{head:'adaptive',size:'1280×720',bitrate:'950 kb/s'}, mine:{receiverBufferMs:120,decodeMs:2.5} };
+  pc().statsReport=fakeStats({inbound:{jitterBufferDelay:10,jitterBufferEmittedCount:100,totalDecodeTime:1,framesDecoded:100},pair:{availableIncomingBitrate:undefined}});
+  await advance(1000);
+  pc().statsReport=fakeStats({inbound:{jitterBufferDelay:13.6,jitterBufferEmittedCount:130,totalDecodeTime:1.075,framesDecoded:130,bytesReceived:200000},pair:{availableIncomingBitrate:undefined}});
+  await advance(1000);
+  const body=reportCalls.at(-1)!.body as any;
+  expect(body.stats.receiverBufferMs).toBeCloseTo(120);
+  expect(body.stats.decodeMs).toBeCloseTo(2.5);
+  expect(body.stats.capacity).toBeNull();
+  expect(wrapper.find('.y-pic__toolbar').text()).toContain('950 kb/s');
+  expect(wrapper.find('.y-pic__toolbar').text()).toContain('Buffer 120 ms');
+  expect(wrapper.find('.y-pic__frame .y-pic__state').exists()).toBe(false);
+  reportState={camera:'another',viewer:'viewer-1',overlay:{head:'wrong'}};
+  await advance(1000);
+  expect(wrapper.find('.y-pic__toolbar').text()).not.toContain('wrong');
 });

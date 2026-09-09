@@ -41,10 +41,16 @@
             </div>
 
             <div class="y-aimpanel__reported">Reported position</div>
-            <YonderPositionGauge label="Pan" unit="°" :value="pan" :min="panBounds.lo" :max="panBounds.hi" :bounds-known="hasBounds" :dead="aimState !== 'present' || pan === null" :reason="gaugeReason" />
-            <YonderPositionGauge label="Tilt" unit="°" :value="tilt" :min="tiltBounds.lo" :max="tiltBounds.hi" :bounds-known="hasBounds" :dead="aimState !== 'present' || tilt === null" :reason="gaugeReason" />
+            <dl v-if="!hasBounds" class="y-aimpanel__position">
+                <div><dt>Pan</dt><dd>{{ pan === null ? '—' : pan.toFixed(1) + '°' }}</dd></div>
+                <div><dt>Tilt</dt><dd>{{ tilt === null ? '—' : tilt.toFixed(1) + '°' }}</dd></div>
+            </dl>
+            <template v-else>
+                <YonderPositionGauge label="Pan" unit="°" :value="pan" :min="panBounds.lo" :max="panBounds.hi" :bounds-known="hasBounds" :dead="aimState !== 'present' || pan === null" :reason="gaugeReason" />
+                <YonderPositionGauge label="Tilt" unit="°" :value="tilt" :min="tiltBounds.lo" :max="tiltBounds.hi" :bounds-known="hasBounds" :dead="aimState !== 'present' || tilt === null" :reason="gaugeReason" />
+            </template>
 
-            <div v-if="mode" class="y-aimpanel__modeline">{{ modeSentence }}</div>
+            <div v-if="modeControlState === 'not-offered'" class="y-aimpanel__mode">{{ modeSentence }}</div>
             <YonderSegmented
                 label="Gimbal mode"
                 :value="mode"
@@ -54,7 +60,7 @@
                 @change="onModeChange"
             />
 
-            <button type="button" class="y-aimpanel__recentre" :disabled="recentreDisabled" :title="report.recentreInhibited || ''" @click="pressRecentre">Recentre gimbal</button>
+            <button type="button" class="y-aimpanel__recentre" :disabled="recentreDisabled" :title="report.recentreInhibited || ''" @click="pressRecentre">Recenter gimbal</button>
             <div v-if="report.recentreInhibited" class="y-aimpanel__reason">{{ report.recentreInhibited }}</div>
         </YonderColumn>
     </div>
@@ -397,7 +403,7 @@ export default {
          * feed (page torn down, camera unplugged) simply keeps the guard
          * up, which is the safe direction to fail in. */
         report (now, before) {
-            if (now?.generation !== before?.generation || now?.url !== before?.url) this.$refs.aimPad?.onEnd()
+            if (now?.generation !== before?.generation || now?.url !== before?.url || now?.imageDirection !== before?.imageDirection) this.$refs.aimPad?.onEnd()
             this.recentrePending = false
             this.aimTransport?.refresh()
         }
@@ -453,6 +459,10 @@ export default {
 </script>
 
 <style scoped>
+.y-aimpanel__position { display: grid; grid-template-columns: 1fr 1fr; gap: 12px; margin: 0 0 10px; }
+.y-aimpanel__position div { display: flex; justify-content: space-between; gap: 8px; }
+.y-aimpanel__position dt { color: var(--yonder-label, #7f8a95); font-size: 11px; }
+.y-aimpanel__position dd { margin: 0; font-variant-numeric: tabular-nums; font-size: 13px; color: var(--yonder-value, #fff); }
 .y-aimpanel {
     font-family: var(--yonder-font, system-ui, sans-serif);
 }

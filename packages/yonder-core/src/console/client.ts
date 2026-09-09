@@ -19,6 +19,8 @@ import { request } from "node:http";
  */
 
 export interface DaemonRequest {
+  /** A bounded wait for a known long-running operation; not sent over HTTP. */
+  timeoutMs?: number;
   method: string;
   path: string;
   body?: unknown;
@@ -90,8 +92,9 @@ export function unixTransport(socketPath: string, timeoutMs = REQUEST_TIMEOUT_MS
     // A daemon that accepts the connection and then never answers is the
     // failure mode a plain socket error does not cover, and the one that
     // would otherwise leave a browser waiting for ever.
-    outgoing.setTimeout(timeoutMs, () => {
-      outgoing.destroy(new Error(`the configuration service did not answer within ${timeoutMs} ms`));
+    const waitMs = req.timeoutMs !== undefined && Number.isFinite(req.timeoutMs) && req.timeoutMs > 0 ? Math.min(req.timeoutMs, 120000) : timeoutMs;
+    outgoing.setTimeout(waitMs, () => {
+      outgoing.destroy(new Error(`the configuration service did not answer within ${waitMs} ms`));
     });
     outgoing.on("error", reject);
     if (payload !== undefined) outgoing.write(payload);

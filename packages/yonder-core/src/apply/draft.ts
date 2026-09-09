@@ -1,5 +1,5 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
-import { PREVIEW_RUNGS, type Config } from "../schema/config.js";
+import { PREVIEW_RUNGS, CameraImage, type Config } from "../schema/config.js";
 import type { CameraDraft } from "./draft-shape.js";
 
 /**
@@ -55,6 +55,10 @@ function rungIndex(size: string): number {
  */
 export function validateDraft(draft: CameraDraft, supportedRungs: readonly string[]): DraftProblem[] {
   const problems: DraftProblem[] = [];
+  if (draft.image !== undefined) {
+    const parsed = CameraImage.partial().safeParse(draft.image);
+    if (!parsed.success) for (const issue of parsed.error.issues) problems.push({ path: `image.${issue.path.join('.')}`, message: issue.message });
+  }
   if (draft.outputs !== undefined) {
     if (!draft.outputs || typeof draft.outputs !== 'object' || Array.isArray(draft.outputs)) problems.push({ path: 'outputs', message: 'Output edits must name configured output kinds' });
     else for (const [kind, enabled] of Object.entries(draft.outputs)) {
@@ -128,12 +132,17 @@ export function applyCameraDraft(
   const index = current.cameras.findIndex((c) => c.id === id);
   if (index === -1) return { ok: false, error: `no camera is configured with the id "${id}"` };
 
+  if (draft.image !== undefined && !CameraImage.partial().safeParse(draft.image).success) return { ok: false, error: "Stream color values are outside their supported ranges" };
   const config = structuredClone(current);
   const camera = config.cameras[index];
   if (camera === undefined) return { ok: false, error: `no camera is configured with the id "${id}"` };
   if (draft.outputs !== undefined) {
     for (const [kind, enabled] of Object.entries(draft.outputs)) {
-      if (typeof enabled !== 'boolean' || !camera.outputs.some(output => output.kind === kind)) return { ok: false, error: `This camera has no configured ${kind} output to change` };
+      if (typeof enabled !== 'boolean') return { ok: false, error: 'Output enablement must be true or false' };
+      if (!camera.outputs.some(output => output.kind === kind)) {
+        if (kind === 'rtsp') camera.outputs.push({ kind: 'rtsp', enabled, password: { secret: 'rtsp_password' } });
+        else return { ok: false, error: `This camera has no configured ${kind} output to change` };
+      }
       for (const output of camera.outputs) if (output.kind === kind) output.enabled = enabled;
     }
   }
@@ -157,6 +166,7 @@ export function applyCameraDraft(
   // own comment says the draft mechanism exists to remove — one layer below
   // where it says it.
   if (draft.controls !== undefined) camera.controls = { ...camera.controls, ...draft.controls };
+  if (draft.image !== undefined) camera.image = { ...camera.image, ...draft.image };
 
   return { ok: true, config };
 }

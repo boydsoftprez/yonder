@@ -607,7 +607,7 @@ describe("a refusal that is not about the draft on screen", () => {
  * nothing said it was staged: an operator on Live saw a changed number and had
  * to leave for Setup to learn which controls were holding an edit. The
  * blueprint carries the sentence on every staged control
- * (`gallery/deck.js`: `reason: pending ? "Staged change"`).
+ * (`gallery/deck.js`: `reason: pending ? "Unsaved change"`).
  *
  * The pair matters. Staging must add the sentence and the applied report must
  * take it away again, or the first half alone would pass while the console
@@ -619,7 +619,7 @@ it("says which controls are holding an edit, and stops saying it once applied", 
   // never re-render and the second half of this test could not fail honestly.
   const store = reactive(makeStore(makeReport({})));
   const { wrapper } = deck(store as ReturnType<typeof makeStore>, "live");
-  expect(wrapper.text()).not.toContain("Staged change");
+  expect(wrapper.text()).not.toContain("Unsaved change");
 
   // Staged through the deck's own `stage()` rather than by finding a widget
   // and guessing which path its label maps to: this is a test about the
@@ -628,7 +628,7 @@ it("says which controls are holding an edit, and stops saying it once applied", 
     .stage("streamBitrate", 4200);
   await wrapper.vm.$nextTick();
 
-  expect(wrapper.text(), "a staged control must say so").toContain("Staged change");
+  expect(wrapper.text(), "a staged control must say so").toContain("Unsaved change");
 
   // The device comes back reporting the value the draft asked for. The edit is
   // no longer pending, so the sentence must go — `pending` filters at read
@@ -640,7 +640,7 @@ it("says which controls are holding an edit, and stops saying it once applied", 
   // chain of computeds, and one tick flushes the values but not yet the tree.
   await wrapper.vm.$nextTick();
   await wrapper.vm.$nextTick();
-  expect(wrapper.text(), "an applied edit is not pending").not.toContain("Staged change");
+  expect(wrapper.text(), "an applied edit is not pending").not.toContain("Unsaved change");
 });
 
 it("groups flow into columns and no group is stranded on a row of its own", () => {
@@ -1200,7 +1200,7 @@ describe("the size and rate the camera captures", () => {
     await pickerByLabel(wrapper, "Frame rate").find("select").setValue("15");
     expect(pickerByLabel(wrapper, "Frame rate").find(".y-pick__value").text()).toBe("15 fps");
     expect(pickerByLabel(wrapper, "Frame rate").find(".y-pick__why").text())
-      .toContain("Staged change");
+      .toContain("Unsaved change");
 
     // 1920×1080 and not 640×480: the latter makes 30 alone, so it would put a
     // refusal on the rate picker and this test would stop being about the two
@@ -1208,7 +1208,7 @@ describe("the size and rate the camera captures", () => {
     await pickerByLabel(wrapper, "Resolution").find("select").setValue("1920x1080");
     expect(pickerByLabel(wrapper, "Resolution").find(".y-pick__value").text()).toBe("1920×1080");
     expect(pickerByLabel(wrapper, "Resolution").find(".y-pick__why").text())
-      .toContain("Staged change");
+      .toContain("Unsaved change");
     expect(pickerByLabel(wrapper, "Frame rate").find(".y-pick__value").text()).toBe("15 fps");
   });
 

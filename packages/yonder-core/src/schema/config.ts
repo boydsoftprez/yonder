@@ -538,6 +538,14 @@ const Stream = z.object({
 const ctl = (lo: number, hi: number) =>
   z.number().int().min(lo).max(hi).nullable().default(null);
 
+/** Stream-only color adjustments. Neutral values omit the processing element. */
+export const CameraImage = z.object({
+  brightness: z.number().int().min(-100).max(100).default(0),
+  contrast: z.number().int().min(0).max(200).default(100),
+  saturation: z.number().int().min(0).max(200).default(100),
+  hue: z.number().int().min(-180).max(180).default(0),
+}).strict();
+
 export const CameraControls = z.object({
   brightness: z.number().int().min(-100).max(100).nullable().default(null),
   contrast: z.number().int().min(-100).max(100).nullable().default(null),
@@ -647,6 +655,7 @@ export const CameraShape = z.object({
   bitrate_kbps: z.number().int().min(100).max(20000).default(2000),
   preview: Preview.default({}),
   controls: CameraControls.default({}),
+  image: CameraImage.default({}),
   outputs: z.array(CameraOutput).max(8).default([]),
   stream: Stream.default({}),
 }).strict();

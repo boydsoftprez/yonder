@@ -1,12 +1,13 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
-export interface AimTarget { url?: string; generation?: number; inhibited?: string | null; maxRate?: number }
+import { screenToCamera } from './aim-response.js';
+export interface AimTarget { url?: string; generation?: number; inhibited?: string | null; maxRate?: number; imageDirection?: string }
 function withinRate(target: AimTarget, rate: { pan: number; tilt: number }): boolean {
   const limit = target.maxRate === undefined ? 10 : target.maxRate;
   return Number.isFinite(limit) && limit > 0 && [rate.pan, rate.tilt].every(Number.isFinite)
     && Math.hypot(rate.pan, rate.tilt) <= Math.min(limit, 120);
 }
 type Grant = { gesture: string; credential: string; deadline: number };
-type Held = { client: string; pan: number; tilt: number; target: string; generation?: number; grant?: Grant; seq: number };
+type Held = { client: string; pan: number; tilt: number; target: string; generation?: number; imageDirection: string; grant?: Grant; seq: number };
 /** Current held gesture only. No retry, backlog, wall-clock deadline, or reconnect resume. */
 export class AimTransport {
   private held?: Held;
@@ -26,19 +27,21 @@ export class AimTransport {
   update(rate: { gesture: string; pan: number; tilt: number }): void {
     if (this.disposed || this.blocked === rate.gesture) return;
     const target = this.target();
-    if (!target?.url || target.inhibited || !withinRate(target, rate)
+    const mapped = screenToCamera(rate, target?.imageDirection);
+    if (!target?.url || target.inhibited || !mapped || !withinRate(target, mapped)
       || (!rate.pan && !rate.tilt)) { this.stop(); this.blocked = rate.gesture; return; }
     if (this.held?.client !== rate.gesture) {
       this.stop();
-      this.held = { client: rate.gesture, pan: rate.pan, tilt: rate.tilt, target: target.url, generation: target.generation, seq: 0 };
-    } else { this.held.pan = rate.pan; this.held.tilt = rate.tilt; }
+      this.held = { client: rate.gesture, pan: mapped.pan, tilt: mapped.tilt, target: target.url, generation: target.generation, imageDirection: target.imageDirection ?? 'identity', seq: 0 };
+    } else { this.held.pan = mapped.pan; this.held.tilt = mapped.tilt; }
     if (!this.pending && !this.timer) void this.tick();
   }
   refresh(): void { if (this.held && !this.current(this.held)) this.stop(); }
   private current(held: Held): boolean {
     const target = this.target();
     return !this.disposed && this.held === held && !!target && !target.inhibited && target.url === held.target
-      && target.generation === held.generation && withinRate(target, held) && !(typeof document !== 'undefined' && document.hidden);
+      && target.generation === held.generation && (target.imageDirection ?? 'identity') === held.imageDirection
+      && withinRate(target, held) && !(typeof document !== 'undefined' && document.hidden);
   }
   private async request(url: string, body: object): Promise<any> {
     const controller = new AbortController(); const timeout = setTimeout(() => controller.abort(), 450);

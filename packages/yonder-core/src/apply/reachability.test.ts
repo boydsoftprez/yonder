@@ -185,13 +185,13 @@ describe("camera leaves", () => {
   it("forces a decision when the camera schema grows a field", () => {
     expect([...CAMERA_LEAVES].sort()).toEqual([
       "accessory_mount", "autostart", "bitrate_kbps", "codec", "controls", "device", "enabled",
-      "framerate", "height", "id", "name", "outputs", "preview", "source", "stream", "width",
+      "framerate", "height", "id", "image", "name", "outputs", "preview", "source", "stream", "width",
     ]);
     // Mount geometry is optional, absent for existing USB configurations, and
     // load-bearing: changing a physical safety certificate must never be exempted.
     expect(Object.keys(withCamera().cameras[0]).sort()).toEqual([...CAMERA_LEAVES].filter(key => key !== 'accessory_mount').sort());
     expect([...CAMERA_EXEMPT_LEAVES].sort()).toEqual([
-      "codec", "controls", "framerate", "height", "width",
+      "codec", "controls", "framerate", "height", "image", "width",
     ]);
   });
 

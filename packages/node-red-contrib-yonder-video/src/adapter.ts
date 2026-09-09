@@ -32,6 +32,7 @@ export type Ask =
     method: "GET" | "POST" | "DELETE";
     path: string;
     body?: unknown;
+    timeoutMs?: number;
     /**
      * Which camera this request is about, when it is about one.
      *
@@ -111,6 +112,7 @@ export function registerAdapter(
         const reply = await node.client.request({
           method: wanted.method,
           path: wanted.path,
+          ...(wanted.timeoutMs === undefined ? {} : { timeoutMs: wanted.timeoutMs }),
           ...(wanted.body === undefined ? {} : { body: wanted.body }),
         });
         const result = fetched(reply);

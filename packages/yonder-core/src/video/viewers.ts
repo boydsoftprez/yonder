@@ -109,7 +109,9 @@ export interface ViewerStats {
   /** What is arriving on this path, kb/s at IP. */
   readonly egress: number;
   /** What this path is measured to carry, kb/s at IP. */
-  readonly capacity: number;
+  readonly capacity: number | null;
+  readonly receiverBufferMs?: number;
+  readonly decodeMs?: number;
   /** Milliseconds since this browser last painted a frame. */
   readonly frameAge?: number;
   /** What it is rendering — `"1280x720"`, or whatever it actually got. */
@@ -144,6 +146,8 @@ export interface SharedState {
 
 /** One browser's own delivery of one camera. */
 export interface MineState {
+  readonly receiverBufferMs?: number | null;
+  readonly decodeMs?: number | null;
   readonly delivery: Want;
   /** The media path this browser is being served from, or null when off. */
   readonly source: string | null;
@@ -406,6 +410,7 @@ export class Viewers {
         loss: stats.loss,
         egress: stats.egress,
         capacity: stats.capacity,
+        encode: sub.fullRateUntil !== null && sub.fullRateUntil > at ? "stream" : "preview",
         at,
       });
     }
@@ -491,6 +496,12 @@ export class Viewers {
    * answers a browser's own post answers with the state the post produced,
    * which has already been published.
    */
+  runtime(camera: string) {
+    const run = this.running(camera);
+    return { streamKbps: run?.stream ?? null, previewKbps: run?.preview ?? null,
+      shape: run?.shape ?? null, decision: this.steps.get(camera) ?? null };
+  }
+
   state(camera: string, viewer: string): PreviewState {
     return this.compose(camera, viewer, this.clock.now());
   }
@@ -695,6 +706,8 @@ export class Viewers {
       fps: full ? configured.framerate : run?.shape?.fps ?? null,
       kbps: full ? run?.stream ?? null : run?.preview ?? null,
       frameAge: sub?.stats?.frameAge ?? null,
+      receiverBufferMs: sub?.stats?.receiverBufferMs ?? null,
+      decodeMs: sub?.stats?.decodeMs ?? null,
       interval: null, fullRate: full,
       statsAt: sub?.statsAt ?? null,
     };

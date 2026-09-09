@@ -58,6 +58,7 @@ interface Spawn {
   readonly pid: number;
   readonly argv: readonly string[];
   killed: boolean;
+  exit(): void;
 }
 
 /**
@@ -73,7 +74,7 @@ function fakeSpawner() {
   const spawner: ProcessSpawner = (argv) => {
     if (refusing) throw new Error("no pipeline runner on this board");
     const handlers: ((a: unknown) => void)[] = [];
-    const record: Spawn = { pid: ++pid, argv: [...argv], killed: false };
+    const record: Spawn = { pid: ++pid, argv: [...argv], killed: false, exit: () => handlers.forEach(fn => fn(1)) };
     spawns.push(record);
     const proc: SpawnedProcess = {
       kill: () => { record.killed = true; },
@@ -351,4 +352,19 @@ describe("a camera whose apply is reverted", () => {
     expect(new Set(runs.map((r) => r.pid)).size).toBe(3);
     expect(runs[2]!.argv).toEqual(lineFor(before));
   });
+});
+
+
+it('updates the pending retry recipe when rollback removes an RTSP path during crash backoff', async () => {
+  const {supervisor,renderer,forCamera}=harness();
+  const before=camera('cam0');supervisor.start('cam0',lineFor(before));
+  forCamera('cam0')[0].exit();
+  expect(supervisor.argv('cam0')).toBeNull();
+  expect(supervisor.recipe('cam0')).not.toBeNull();
+  await renderer.render(configWith(camera('cam0',{outputs:[]})));
+  expect(forCamera('cam0')).toHaveLength(2);
+  const line=forCamera('cam0')[1].argv;
+  expect(line).not.toContain(`location=${RTSP_BASE}/cam0`);
+  expect(line).toContain(`location=${RTSP_BASE}/cam0-preview`);
+  supervisor.stop('cam0');expect(supervisor.recipe('cam0')).toBeNull();
 });

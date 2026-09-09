@@ -124,3 +124,19 @@ it('keeps the 450ms request abort and requires a fresh gesture after failure', a
   expect(calls.slice(-2).map(c => c.op)).toEqual(['issue', 'slew']);
   transport.close(); await vi.advanceTimersByTimeAsync(500);
 });
+
+it('maps flipped input once and stops the held gesture when the applied transform changes', async () => {
+  vi.useFakeTimers({ toFake: ['setTimeout', 'clearTimeout', 'Date', 'performance'] });
+  const target = { url: '/video/cam1/aim', generation: 1, imageDirection: 'vert', maxRate: 120 };
+  const calls: any[] = [];
+  const fetcher = vi.fn(async (_url, opts: any) => {
+    const body = JSON.parse(opts.body); calls.push(body);
+    return { ok: true, json: async () => ({ accepted: true, grant: { gesture: 'g', credential: 'c', deadline: 500 }, next: { gesture:'g', credential:'next', deadline:600 } }) };
+  });
+  const t = new AimTransport(() => target, () => {}, fetcher as any);
+  t.update({ gesture:'held', pan:10, tilt:20 }); await vi.advanceTimersByTimeAsync(0);
+  expect(calls[1]).toMatchObject({ op:'slew', pan:10, tilt:-20 });
+  target.imageDirection='identity'; t.refresh(); await vi.advanceTimersByTimeAsync(1000);
+  expect(calls.map(c => c.op)).toEqual(['issue','slew','stop']);
+  t.close();
+});

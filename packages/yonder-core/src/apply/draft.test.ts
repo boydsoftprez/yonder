@@ -338,6 +338,24 @@ describe('staged output enablement', () => {
     expect(result.ok).toBe(true);
     if (result.ok) expect(result.config.cameras[0].outputs).toEqual([{ ...config.cameras[0].outputs[0], enabled: false }]);
     expect(config.cameras[0].outputs[0].enabled).toBe(true);
-    expect(applyCameraDraft(config, 'cam0', { outputs: { rtsp: true } })).toMatchObject({ ok: false });
+    const rtsp = applyCameraDraft(config, 'cam0', { outputs: { rtsp: true } });
+    expect(rtsp.ok).toBe(true);
+    if (rtsp.ok) expect(rtsp.config.cameras[0].outputs).toContainEqual({ kind: 'rtsp', enabled: true, password: { secret: 'rtsp_password' } });
+    expect(config.cameras[0].outputs).toHaveLength(1);
   });
+});
+
+it('stages stream color separately, preserves native controls, and rejects invalid values', () => {
+  const config = configWithCamera();
+  const { draft } = deckDraft({ imageBrightness: 12, imageContrast: 115, imageHue: -30 });
+  expect(draft.image).toEqual({ brightness: 12, contrast: 115, hue: -30 });
+  const result = applyCameraDraft(config, 'front', draft);
+  expect(result.ok).toBe(true);
+  if (result.ok) {
+    expect(result.config.cameras[0].image).toEqual({ brightness: 12, contrast: 115, saturation: 100, hue: -30 });
+    expect(result.config.cameras[0].controls).toEqual(config.cameras[0].controls);
+  }
+  expect(config.cameras[0].image.brightness).toBe(0);
+  expect(applyCameraDraft(config, 'front', { image: { brightness: 101 } }).ok).toBe(false);
+  expect(applyCameraDraft(config, 'front', { image: { hue: NaN } }).ok).toBe(false);
 });

@@ -171,11 +171,11 @@ describe("Adaptation, the caller the rate controller did not have", () => {
     b.adaptation.tick();
     await b.adaptation.settled();
 
-    const stream = retunes(b.sent, ENCODE_ELEMENT.stream);
+    const stream = retunes(b.sent, ENCODE_ELEMENT.preview);
     expect(stream).toHaveLength(1);
     // Its own applied ceiling, not the link's 40 Mb/s.
-    expect(stream[0].sets[0].value).toBe("controls,video_bitrate=4000000");
-    expect(b.channel.inForce("cam0")).toMatchObject({ stream: 4000 });
+    expect(stream[0].sets[0].value).toContain("video_bitrate=2000000");
+    expect(b.channel.inForce("cam0")).toMatchObject({ stream: 2000, preview: 2000 });
     // The pipeline was never respawned: one process, one launch line, and the
     // picture on screen never went black.
     expect(b.spawns).toHaveLength(spawnedOnce);
@@ -238,7 +238,7 @@ describe("Adaptation, the caller the rate controller did not have", () => {
     b.viewers.report("v1", { camera: "cam1", rtt: 40, loss: 0, egress: 900, capacity: 40_000 });
     b.adaptation.tick();
     await b.adaptation.settled();
-    expect(retunes(b.sent, ENCODE_ELEMENT.stream).length).toBeGreaterThan(0);
+    expect(retunes(b.sent, ENCODE_ELEMENT.preview).length).toBeGreaterThan(0);
 
     // The operator removed the tail camera and applied it.
     b.applied.cameras = [CAMERA];
@@ -255,7 +255,7 @@ describe("Adaptation, the caller the rate controller did not have", () => {
     b.adaptation.start();
     b.advance(1_000);
     await b.adaptation.settled();
-    const moved = retunes(b.sent, ENCODE_ELEMENT.stream).length;
+    const moved = retunes(b.sent, ENCODE_ELEMENT.preview).length;
     expect(moved).toBe(1);
 
     // A fresh statistic, narrow enough that a tick would certainly act on it,
@@ -264,7 +264,7 @@ describe("Adaptation, the caller the rate controller did not have", () => {
     b.viewers.report("v1", { camera: "cam0", rtt: 40, loss: 0, egress: 900, capacity: 1_000 });
     b.advance(1_000);
     await b.adaptation.settled();
-    expect(retunes(b.sent, ENCODE_ELEMENT.stream)).toHaveLength(moved);
+    expect(retunes(b.sent, ENCODE_ELEMENT.preview)).toHaveLength(moved);
 
     // And a start after a stop does not bring the loop back — with the
     // evidence just as fresh, so what is being asserted is the latch and not
@@ -273,7 +273,7 @@ describe("Adaptation, the caller the rate controller did not have", () => {
     b.viewers.report("v1", { camera: "cam0", rtt: 40, loss: 0, egress: 900, capacity: 1_000 });
     b.advance(1_000);
     await b.adaptation.settled();
-    expect(retunes(b.sent, ENCODE_ELEMENT.stream)).toHaveLength(moved);
+    expect(retunes(b.sent, ENCODE_ELEMENT.preview)).toHaveLength(moved);
   });
 
   it("lets go of a full-rate hold before it works out what the link affords", () => {
@@ -368,9 +368,9 @@ describe("a browser statistic, in at the route", () => {
 
       r.adaptation.tick();
       await r.adaptation.settled();
-      const stream = retunes(r.sent, ENCODE_ELEMENT.stream);
+      const stream = retunes(r.sent, ENCODE_ELEMENT.preview);
       expect(stream).toHaveLength(1);
-      expect(stream[0].sets[0].value).toBe("controls,video_bitrate=4000000");
+      expect(stream[0].sets[0].value).toContain("video_bitrate=2000000");
       expect(r.spawns).toHaveLength(1);
     } finally {
       r.done();
@@ -467,7 +467,7 @@ describe("a browser statistic, in at the route", () => {
       for (const stats of [
         { rtt: 42, loss: 4, egress: 900, capacity: 40_000 },
         { rtt: -1, loss: 0, egress: 900, capacity: 40_000 },
-        { rtt: 42, loss: 0, egress: 900 },
+        { rtt: 42, loss: 0, egress: 900, capacity: "unknown" },
         "a statistic",
       ]) {
         const answer = await r.route("POST", "/cameras/cam0/viewers/abc123", { stats });

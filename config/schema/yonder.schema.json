@@ -1081,6 +1081,37 @@
             "additionalProperties": false,
             "default": {}
           },
+          "image": {
+            "type": "object",
+            "properties": {
+              "brightness": {
+                "type": "integer",
+                "minimum": -100,
+                "maximum": 100,
+                "default": 0
+              },
+              "contrast": {
+                "type": "integer",
+                "minimum": 0,
+                "maximum": 200,
+                "default": 100
+              },
+              "saturation": {
+                "type": "integer",
+                "minimum": 0,
+                "maximum": 200,
+                "default": 100
+              },
+              "hue": {
+                "type": "integer",
+                "minimum": -180,
+                "maximum": 180,
+                "default": 0
+              }
+            },
+            "additionalProperties": false,
+            "default": {}
+          },
           "outputs": {
             "type": "array",
             "items": {

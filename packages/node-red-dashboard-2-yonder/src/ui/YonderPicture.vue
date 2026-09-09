@@ -1,6 +1,34 @@
 <!-- SPDX-License-Identifier: GPL-3.0-or-later -->
 <template>
     <div class="y-pic">
+        <header class="y-pic__toolbar" aria-label="Video status">
+            <div class="y-pic__hud">
+                <span class="y-pic__badge" :class="'tone-' + tone">{{ caption }}</span>
+                <span v-if="staleFor > 0" class="y-pic__age">{{ ageText }}</span>
+                <span v-if="cost && !previewState" class="y-pic__cost">{{ cost }}</span>
+            </div>
+
+            <!-- R-VID-18: what the shared preview encode is doing, composed
+                 verbatim from Task 19's own part — see this file's own doc
+                 comment on why this is a second, orthogonal fact from the
+                 badge above rather than a replacement for it. -->
+            <YonderStateOverlay v-if="previewState" class="y-pic__state" :head="previewState.head" :size="previewState.size" :rate="previewState.rate" :bitrate="previewState.bitrate" :step="previewState.step" />
+
+            <div v-if="recording" class="y-pic__rec"><i class="y-pic__rec-dot"></i>REC {{ recording.elapsed }}</div>
+
+            <div v-if="footItems.length" class="y-pic__foot">
+                <span v-for="item in footItems" :key="item.key" class="y-pic__foot-item">
+                    <span class="y-pic__foot-k">{{ item.label }}</span>{{ item.text }}
+                </span>
+            </div>
+
+            <div v-if="stats" class="y-pic__osd">
+                <span class="y-pic__foot-k">LINK</span>{{ stats.linkMbps.toFixed(2) }} Mb/s<br />
+                <span class="y-pic__foot-k">DROP</span>{{ stats.dropPct.toFixed(1) }} %
+            </div>
+
+            <span v-if="deliveryState?.mine?.receiverBufferMs != null" class="y-pic__receiver" title="Browser jitter buffer and decode time; these do not measure total camera-to-screen latency.">Buffer {{ Math.round(deliveryState.mine.receiverBufferMs) }} ms<span v-if="deliveryState.mine.decodeMs != null"> · decode {{ deliveryState.mine.decodeMs.toFixed(1) }} ms</span></span>
+        </header>
       <div class="y-pic__fit">
         <div
             ref="frame"
@@ -26,35 +54,10 @@
             <img v-if="mode === 'stills' && stillSrc" class="y-pic__video" :src="stillSrc" alt="" />
             <div v-if="staleFor > 0" class="y-pic__hatch"></div>
 
-            <div class="y-pic__hud">
-                <span class="y-pic__badge" :class="'tone-' + tone">{{ caption }}</span>
-                <span v-if="staleFor > 0" class="y-pic__age">{{ ageText }}</span>
-                <span v-if="cost" class="y-pic__cost">{{ cost }}</span>
-            </div>
-
-            <!-- R-VID-18: what the shared preview encode is doing, composed
-                 verbatim from Task 19's own part — see this file's own doc
-                 comment on why this is a second, orthogonal fact from the
-                 badge above rather than a replacement for it. -->
-            <YonderStateOverlay v-if="previewState" class="y-pic__state" v-bind="previewState" />
-
-            <div v-if="recording" class="y-pic__rec"><i class="y-pic__rec-dot"></i>REC {{ recording.elapsed }}</div>
-
             <!-- L-18: a still landed. The flash is the confirmation that
                  something happened at the moment the key was pressed
                  (R-UI-05); the banner says where it went. -->
             <div v-if="flashing" class="y-pic__flash" aria-hidden="true"></div>
-
-            <div v-if="footItems.length" class="y-pic__foot">
-                <span v-for="item in footItems" :key="item.key" class="y-pic__foot-item">
-                    <span class="y-pic__foot-k">{{ item.label }}</span>{{ item.text }}
-                </span>
-            </div>
-
-            <div v-if="stats" class="y-pic__osd">
-                <span class="y-pic__foot-k">LINK</span>{{ stats.linkMbps.toFixed(2) }} Mb/s<br />
-                <span class="y-pic__foot-k">DROP</span>{{ stats.dropPct.toFixed(1) }} %
-            </div>
 
             <div v-if="dragGesture" class="y-pic__orb" :style="{ left: orbX + 'px', top: orbY + 'px' }"></div>
 
@@ -465,7 +468,9 @@ const REPORT_INTERVAL_MS = 1000
 function sampleReport (report) {
     let inbound = null
     let pair = null
-    report.forEach((entry) => {
+    const entries = new Map()
+    report.forEach((entry, id) => {
+        entries.set(entry.id || id, entry)
         if (!inbound && entry.type === 'inbound-rtp' && (entry.kind === 'video' || entry.mediaType === 'video')) {
             inbound = entry
         }
@@ -473,23 +478,29 @@ function sampleReport (report) {
             pair = entry
         }
     })
+    const selected = entries.get(inbound?.transportId)?.selectedCandidatePairId
+    if (selected) pair = entries.get(selected) || null
     if (!inbound || !pair) return null
     if (typeof inbound.packetsLost !== 'number' || typeof inbound.packetsReceived !== 'number'
         || typeof inbound.bytesReceived !== 'number' || typeof pair.currentRoundTripTime !== 'number') {
         return null
     }
     return {
-        at: Date.now(),
+        at: performance.now(),
         packetsLost: inbound.packetsLost,
         packetsReceived: inbound.packetsReceived,
         bytesReceived: inbound.bytesReceived,
         currentRoundTripTime: pair.currentRoundTripTime,
-        availableIncomingBitrate: typeof pair.availableIncomingBitrate === 'number'
+        availableIncomingBitrate: typeof pair.availableIncomingBitrate === 'number' && Number.isFinite(pair.availableIncomingBitrate) && pair.availableIncomingBitrate > 0
             ? pair.availableIncomingBitrate
             : null,
         frameWidth: typeof inbound.frameWidth === 'number' ? inbound.frameWidth : null,
         frameHeight: typeof inbound.frameHeight === 'number' ? inbound.frameHeight : null,
-        framesPerSecond: typeof inbound.framesPerSecond === 'number' ? inbound.framesPerSecond : null
+        framesPerSecond: typeof inbound.framesPerSecond === 'number' ? inbound.framesPerSecond : null,
+        jitterBufferDelay: inbound.jitterBufferDelay,
+        jitterBufferEmittedCount: inbound.jitterBufferEmittedCount,
+        totalDecodeTime: inbound.totalDecodeTime,
+        framesDecoded: inbound.framesDecoded
     }
 }
 
@@ -516,13 +527,10 @@ function reportBody (camera, prev, sample, lastFrameAt) {
     // through the identical `atIp()` the rate controller already reasons in,
     // rather than a second, unmeasured overhead figure invented here.
     const egress = atIp((byteDelta * 8) / 1000 / dtSeconds)
-    if (sample.availableIncomingBitrate === null) {
-        // ViewerStats.capacity is required, and a guessed one is worse than
-        // none: the rate controller would be acting on a number nobody
-        // measured. Reporting nothing this tick is the honest answer, not a
-        // reason to invent a figure this browser does not have.
-        return {}
-    }
+    const averageMs = (time, priorTime, count, priorCount) => [time, priorTime, count, priorCount].every(Number.isFinite)
+        && count > priorCount && time >= priorTime ? (time - priorTime) * 1000 / (count - priorCount) : null
+    const receiverBufferMs = averageMs(sample.jitterBufferDelay, prev.jitterBufferDelay, sample.jitterBufferEmittedCount, prev.jitterBufferEmittedCount)
+    const decodeMs = averageMs(sample.totalDecodeTime, prev.totalDecodeTime, sample.framesDecoded, prev.framesDecoded)
     return {
         stats: {
             camera,
@@ -534,7 +542,9 @@ function reportBody (camera, prev, sample, lastFrameAt) {
             // is not run through `atIp()`, which is calibrated for a
             // configured *encoder* rate and would double-count an overhead
             // this figure does not carry in the first place.
-            capacity: sample.availableIncomingBitrate / 1000,
+            capacity: sample.availableIncomingBitrate === null ? null : sample.availableIncomingBitrate / 1000,
+            ...(receiverBufferMs !== null ? { receiverBufferMs } : {}),
+            ...(decodeMs !== null ? { decodeMs } : {}),
             ...(lastFrameAt !== null ? { frameAge: Math.max(0, sample.at - lastFrameAt) } : {}),
             ...(sample.frameWidth && sample.frameHeight ? { size: `${sample.frameWidth}x${sample.frameHeight}` } : {}),
             ...(sample.framesPerSecond ? { fps: sample.framesPerSecond } : {})
@@ -556,6 +566,7 @@ export default {
             mode: 'live',
             wantsLive: true,
             fallbackRetryTimer: null,
+            deliveryState: null,
             pc: null,
             /** Aborts the handshake in flight, when nobody wants it any more. */
             abort: null,
@@ -782,6 +793,7 @@ export default {
          * simply running the *existing* suite first and reading the warning.
          */
         previewState () {
+            if (this.deliveryState?.camera === cameraFor(this.streamPath)) return this.deliveryState.overlay
             const v = this.fromPayload('state')
             return v && typeof v === 'object' ? v : null
         },
@@ -871,7 +883,7 @@ export default {
         cameras () { this.refreshThumbnails() },
         mode () { this.refreshThumbnails() },
         aim (now, before) {
-            if (now?.generation !== before?.generation || now?.url !== before?.url) this.onDragEnd()
+            if (now?.generation !== before?.generation || now?.url !== before?.url || now?.imageDirection !== before?.imageDirection) this.onDragEnd()
             this.aimTransport?.refresh()
         },
         /**
@@ -1127,6 +1139,7 @@ export default {
          * replaces it.
          */
         teardown () {
+            this.deliveryState = null
             if (this.frameCallback !== null) this.$refs.video?.cancelVideoFrameCallback?.(this.frameCallback)
             this.frameCallback = null
             this.playbackBlocked = false
@@ -1222,11 +1235,15 @@ export default {
             body.want = this.mode === 'live' ? 'video' : this.mode === 'stills' ? 'stills' : 'off'
             if (this.cameras.length) body.stills = !document.hidden
             try {
-                await fetch(`/video/${this.negotiated}/report`, {
+                const response = await fetch(`/video/${this.negotiated}/report`, {
                     method: 'POST',
                     headers: { 'content-type': 'application/json' },
                     body: JSON.stringify(body)
                 })
+                if (session !== this.session || !response.ok) return
+                const state = await response.json()
+                if (session === this.session && state?.camera === cameraFor(this.negotiated)
+                    && state.viewer === this.viewerId && state.overlay && typeof state.overlay === 'object') this.deliveryState = state
             } catch {
                 // Silent, and no retry-storm: the next tick is one second
                 // away regardless of whether this one reached the network.
@@ -1579,6 +1596,23 @@ export default {
 </script>
 
 <style scoped>
+.y-pic__toolbar {
+    display: flex; flex-wrap: wrap; align-items: center; gap: 6px 14px;
+    padding: 7px 12px; overflow: auto;
+    background: var(--yonder-pane, #0a0e13); color: var(--yonder-value, #fff);
+    border-bottom: 1px solid var(--yonder-divider, #2b333c);
+}
+.y-pic__toolbar .y-pic__hud, .y-pic__toolbar .y-pic__state,
+.y-pic__toolbar .y-pic__rec, .y-pic__toolbar .y-pic__foot, .y-pic__toolbar .y-pic__osd {
+    position: static; inset: auto; max-width: 100%; margin: 0; background: transparent;
+}
+.y-pic__toolbar .y-pic__state { flex: 1 1 260px; }
+.y-pic__toolbar .y-pic__rec { margin-left: auto; }
+.y-pic__toolbar .y-pic__cost { color: var(--yonder-value, #fff); }
+@media (min-width: 1300px) {
+    :global(#nrdb-page-page-camera #nrdb-ui-group-group-cam-picture) { grid-column-end: span min(9, var(--layout-columns)) !important; }
+    :global(#nrdb-page-page-camera #nrdb-ui-group-group-cam-aim) { grid-column-end: span min(3, var(--layout-columns)) !important; }
+}
 /* **The widget's whole slot**, and a grid so the picture and the strip
    under it divide it explicitly: one flexible row for the picture, one
    `auto` row for the strip. `minmax(0, 1fr)` in both axes rather than `1fr`,
@@ -1590,7 +1624,7 @@ export default {
     min-height: 0;
     display: grid;
     /* Status/thumbnail arrivals must not resize the image while aiming. */
-    grid-template-rows: minmax(0, 1fr) 34px 80px;
+    grid-template-rows: 56px minmax(0, 1fr) 34px 80px;
     grid-template-columns: minmax(0, 1fr);
 }
 /* **Takes the shape of the video it is showing, and never more room than it
@@ -1655,7 +1689,7 @@ export default {
 }
 #nrdb-page-page-camera .y-pic {
     height: auto;
-    grid-template-rows: auto 34px 80px;
+    grid-template-rows: 56px auto 34px 80px;
 }
 #nrdb-page-page-camera .y-pic__fit {
     container-type: normal;

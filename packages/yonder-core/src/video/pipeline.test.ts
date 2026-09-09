@@ -663,3 +663,15 @@ describe("the runtime channel's half of the launch line", () => {
     expect(text()).toContain("caps=video/x-raw,framerate=15/1");
   });
 });
+
+describe('stream color processing', () => {
+  it('bypasses neutral settings and changes both encodes before the shared raw tee without another queue or codec', () => {
+    const neutral = { brightness: 0, contrast: 100, saturation: 100, hue: 0 };
+    const base = compose({ ...opts, camera: { ...CAMERA, image: neutral } });
+    expect(base).not.toContain('videobalance');
+    const adjusted = compose({ ...opts, camera: { ...CAMERA, image: { brightness: 10, contrast: 110, saturation: 115, hue: 9 } } });
+    expect(adjusted.join(' ')).toContain('videobalance name=image-balance brightness=0.1 contrast=1.1 saturation=1.15 hue=0.05 !');
+    expect(adjusted.indexOf('videobalance')).toBeLessThan(adjusted.indexOf('name=raw'));
+    for (const token of ['queue', 'jpegdec', 'v4l2h264enc']) expect(adjusted.filter(t => t === token)).toHaveLength(base.filter(t => t === token).length);
+  });
+});

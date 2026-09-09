@@ -14,6 +14,7 @@ import type { RecordingState, CameraMedium } from '../recorder.js';
 import { validAimRequest } from './requests.js';
 import { accessoryControls } from './present.js';
 import { AccessoryWriter } from './writer.js';
+import { imageDirection } from '../orientation.js';
 
 export interface AccessoryInput {
   endpoint: string;
@@ -54,10 +55,22 @@ export class AccessorySources {
   private closed = false;
   private discoveryReason: string | null = null;
   private readonly clock: IntentClock;
+  private readonly imageDirections = new Map<string, string>();
   constructor(private readonly options: AccessorySourceOptions) { this.clock = options.clock ?? clock; }
   /** Config/render callers schedule listening; never await the USB handshake or reconnect. */
   resume(cameras: readonly Camera[] = this.options.cameras()): void {
-    for (const camera of cameras) if (camera.source === 'accessory') void this.ensure(camera.device).catch(() => undefined);
+    const active = new Set(cameras.filter(camera => camera.source === 'accessory').map(camera => camera.id));
+    for (const id of this.imageDirections.keys()) if (!active.has(id)) this.imageDirections.delete(id);
+    for (const camera of cameras) if (camera.source === 'accessory') {
+      const direction = imageDirection(camera.controls);
+      const prior = this.imageDirections.get(camera.id);
+      if (prior !== undefined && prior !== direction) {
+        const source = this.owned.get(camera.device);
+        if (source) { source.gimbal.reset(); source.admitted = undefined; }
+      }
+      this.imageDirections.set(camera.id, direction);
+      void this.ensure(camera.device).catch(() => undefined);
+    }
     for (const source of this.owned.values()) source.gimbal.refresh();
   }
   async discover(): Promise<DetectResult> {

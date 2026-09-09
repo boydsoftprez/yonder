@@ -182,7 +182,7 @@ describe("three marks, and only one of them a control", () => {
   it("draws a requested mark and the pending line when a draft exists", () => {
     const w = bar({ actual: 3000, requested: 5000 });
     expect(w.findAll(".y-sb__req")).toHaveLength(1);
-    expect(w.text()).toContain("Staged change");
+    expect(w.text()).toContain("Unsaved change");
   });
 
   /**
@@ -195,7 +195,7 @@ describe("three marks, and only one of them a control", () => {
   it("does not show the pending line when there is no draft", () => {
     const w = bar({ actual: 3000 });
     expect(w.find(".y-sb__note").exists()).toBe(false);
-    expect(w.text()).not.toContain("Staged change");
+    expect(w.text()).not.toContain("Unsaved change");
   });
 
   /**
@@ -436,7 +436,7 @@ it("still says a draft is pending when the control cannot be pressed", () => {
                          { readonly: true }]) {
         const w = bar({ actual: 1800, requested: 2000, ...props });
         expect(w.findAll("[data-grab]"), "a bar that cannot be pressed offers no handle").toHaveLength(0);
-        expect(w.text(), "but the draft is still declared").toContain("Staged change");
+        expect(w.text(), "but the draft is still declared").toContain("Unsaved change");
     }
 });
 });

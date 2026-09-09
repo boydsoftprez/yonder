@@ -429,6 +429,12 @@ export class Supervisor {
     return entry?.proc ? entry.argv : null;
   }
 
+  /** Intended running recipe, including crash backoff, but never an operator Stop. */
+  recipe(id: string): readonly string[] | null {
+    const entry = this.entries.get(id);
+    return entry && !entry.stopping && (entry.proc !== null || entry.retry !== null) ? entry.argv : null;
+  }
+
   /** Identity of a spawn, independent of clock granularity or settle time. */
   generation(id: string): number { return this.generations.get(id) ?? 0; }
 

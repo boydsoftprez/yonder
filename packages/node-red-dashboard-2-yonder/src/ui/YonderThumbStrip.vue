@@ -10,7 +10,8 @@
             :title="[cam.name, cam.caption].filter(Boolean).join(' · ')"
             @click="$emit('go', cam.id)"
         >
-            <span class="y-strip__img" :style="cam.thumbSrc ? { backgroundImage: 'url(' + cam.thumbSrc + ')' } : {}" aria-hidden="true" />
+            <img v-if="cam.thumbSrc" class="y-strip__img" :src="cam.thumbSrc" alt="" draggable="false" />
+            <span v-else class="y-strip__img" aria-hidden="true" />
             <span class="y-strip__cap">{{ cam.caption || (cam.active ? 'Live' : ('Still · ' + (cam.ageSeconds ?? 0) + ' s')) }}</span>
             <span v-if="cam.thumbSrc && Number.isFinite(cam.ageSeconds) && cam.ageSeconds >= 0" class="y-strip__age">{{ cam.ageSeconds }} s ago</span>
             <span v-if="cam.name" class="y-strip__name">{{ cam.name }}</span>
@@ -103,8 +104,9 @@ export default {
     flex-shrink: 0;
     border-radius: 2px;
     background-color: var(--yonder-display, #04060a);
-    background-size: cover;
-    background-position: center;
+    display: block;
+    object-fit: cover;
+    object-position: center;
 }
 .y-strip__cap {
     grid-column: 2;

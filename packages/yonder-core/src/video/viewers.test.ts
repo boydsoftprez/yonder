@@ -499,7 +499,7 @@ describe("Viewers and the evidence it passes on", () => {
     const arrived = clock.at();
     viewers.report("v1", stats({ capacity: 1_200 }));
     expect(reports).toEqual([
-      { camera: "cam0", viewer: "v1", rtt: 40, loss: 0, egress: 900, capacity: 1_200, at: arrived },
+      { camera: "cam0", viewer: "v1", encode: "preview", rtt: 40, loss: 0, egress: 900, capacity: 1_200, at: arrived },
     ]);
 
     // Ten seconds of ticking, publishing and asking for state. A stale
@@ -696,4 +696,15 @@ describe("Viewers and the words the picture wears", () => {
     expect(state.overlay.size).toBe("");
     expect(state.overlay.detail).toBe("");
   });
+});
+
+it('retains unknown capacity and receiver timings, and labels feedback by the actual subscription', () => {
+  const { viewers, reports } = viewersOn();
+  viewers.subscribe('v1','cam0','video');
+  viewers.report('v1',stats({capacity:null,receiverBufferMs:120,decodeMs:2.5}));
+  expect(reports.at(-1)).toMatchObject({capacity:null,encode:'preview'});
+  expect(viewers.state('cam0','v1').mine).toMatchObject({receiverBufferMs:120,decodeMs:2.5});
+  viewers.fullRate('v1','cam0',true);
+  viewers.report('v1',stats({capacity:null}));
+  expect(reports.at(-1)).toMatchObject({capacity:null,encode:'stream'});
 });

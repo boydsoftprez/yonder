@@ -1626,7 +1626,7 @@ describe("the daemon runs the rate controller", () => {
   }
 
   const retunes = (): Sent[] =>
-    sent.filter((s) => s.op === "retune" && s.sets[0]?.element === "enc-stream");
+    sent.filter((s) => s.op === "retune" && s.sets[0]?.element === "enc-preview");
 
   it("moves a running encoder from a statistic that arrived on this socket", async () => {
     const server = await serve();
@@ -1658,7 +1658,7 @@ describe("the daemon runs the rate controller", () => {
       const moved = retunes();
       expect(moved).toHaveLength(1);
       // Its own applied ceiling, not the link's 40 Mb/s.
-      expect(moved[0].sets[0].value).toBe("controls,video_bitrate=4000000");
+      expect(moved[0].sets[0].value).toContain("video_bitrate=2000000");
       // And the picture never restarted: one process, one launch line, one pid.
       expect(spawns).toHaveLength(1);
       expect(new Set(pids).size).toBe(1);

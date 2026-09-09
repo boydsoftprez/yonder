@@ -26,7 +26,7 @@
         </svg>
 
         <label class="y-aim__expo">
-            <span class="y-aim__expo-label">Maximum speed <output>{{ selectedSpeed }}°/s</output></span>
+            <span class="y-aim__expo-label">Max speed <output>{{ selectedSpeed }}°/s</output></span>
             <input type="range" aria-label="Maximum gimbal speed" min="1" :max="rateLimit" step="1"
                    :value="selectedSpeed" :disabled="rateLimit < 1"
                    :aria-valuetext="`${selectedSpeed} degrees per second`" @input="changeSpeed" />
@@ -35,7 +35,7 @@
             <span class="y-aim__expo-label">Stick expo <output>{{ expo }}%</output></span>
             <input type="range" aria-label="Stick expo" min="0" max="100" step="5"
                    :value="expo" :aria-valuetext="`${expo}% expo`" @input="changeExpo" />
-            <span class="y-aim__expo-help">More expo softens the centre. Full throw keeps the maximum rate.</span>
+            <span class="y-aim__expo-help">Soft center; full speed at the edge.</span>
         </label>
 
         <div v-if="limited" class="y-aim__limit"><i class="y-aim__limit-dot" />At the limit</div>
@@ -362,13 +362,17 @@ export default {
 
 <style scoped>
 .y-aim {
-    display: inline-flex;
-    flex-direction: column;
-    align-items: flex-start;
+    display: grid;
+    grid-template-columns: 118px minmax(0, 1fr);
+    align-items: start;
+    width: 100%;
     gap: 8px;
     font-family: var(--yonder-font, system-ui, sans-serif);
 }
 .y-aim__dial {
+    grid-row: 1 / span 2;
+    width: 118px; height: 118px;
+    user-select: none; -webkit-user-select: none;
     cursor: grab;
     touch-action: none;
 }
@@ -378,7 +382,8 @@ export default {
     display: flex;
     flex-direction: column;
     gap: 5px;
-    width: 200px;
+    grid-column: 2;
+    width: 100%;
     max-width: 100%;
     color: var(--yonder-label, #7f8a95);
 }
@@ -415,6 +420,7 @@ export default {
 }
 
 .y-aim__limit {
+    grid-column: 1 / -1;
     display: inline-flex;
     align-items: center;
     gap: 6px;
@@ -439,6 +445,7 @@ export default {
    YonderPositionGauge's own dead-axis reason and every gated control in
    this library already use for "not available right now, not broken". */
 .y-aim__reason {
+    grid-column: 1 / -1;
     font-size: 11px;
     line-height: 1.4;
     max-width: 200px;

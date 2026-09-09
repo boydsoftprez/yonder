@@ -207,8 +207,8 @@ describe("the live report wins over the configured fallback", () => {
             makeReport({ mode: "FPV" }),
             makeReport({ mode: "Tilt lock" }),
         );
-        expect(wrapper.text()).toContain("Gimbal mode: FPV.");
-        expect(wrapper.text()).not.toContain("Gimbal mode: Tilt lock.");
+        expect(wrapper.findComponent({ name: "YonderSegmented" }).props("value")).toBe("FPV");
+        expect(wrapper.findComponent({ name: "YonderSegmented" }).props("value")).not.toBe("Tilt lock");
     });
 
     it("falls back to the configured report when the store has no message yet", () => {
@@ -220,7 +220,7 @@ describe("the live report wins over the configured fallback", () => {
                 mixins: [{ computed: { $store: () => store } }],
             },
         });
-        expect(wrapper.text()).toContain("Gimbal mode: Tilt lock.");
+        expect(wrapper.findComponent({ name: "YonderSegmented" }).props("value")).toBe("Tilt lock");
     });
 });
 
@@ -246,12 +246,8 @@ describe("position against bounds", () => {
         const { wrapper } = mountAim(makeReport({
             bounds: null, inhibited: "position has not been established yet",
         }));
-        const pan = gaugeByLabel(wrapper, "Pan");
-        const tilt = gaugeByLabel(wrapper, "Tilt");
-        expect(pan.find(".y-pg__val").text()).toBe("12.4 °");
-        expect(tilt.find(".y-pg__val").text()).toBe("-6.0 °");
-        expect(pan.find(".y-pg__ptr").exists()).toBe(false);
-        expect(pan.find(".y-pg__bounds").text()).toBe("——");
+        expect(wrapper.findAll('.y-aimpanel__position dd').map(item => item.text())).toEqual(['12.4°', '-6.0°']);
+        expect(wrapper.find('.y-pg').exists()).toBe(false);
         expect(wrapper.text()).toContain("position has not been established yet");
     });
 
@@ -261,7 +257,7 @@ describe("position against bounds", () => {
         // lets the operator slew and Recentre; only the two readings go dead.
         const { wrapper } = mountAim(makeReport({ bounds: null, inhibited: null }));
         expect(recentreBtn(wrapper).attributes("disabled")).toBeUndefined();
-        expect(gaugeByLabel(wrapper, "Pan").find(".y-pg__ptr").exists()).toBe(false);
+        expect(wrapper.find(".y-pg__ptr").exists()).toBe(false);
     });
 });
 
@@ -312,7 +308,7 @@ describe("the RATE CONTROL / NOT ANSWERING badge", () => {
 describe("the mode sentence", () => {
     it("states the current mode as a full sentence", () => {
         const { wrapper } = mountAim(makeReport({ mode: "Tilt lock" }));
-        expect(wrapper.text()).toContain("Gimbal mode: Tilt lock.");
+        expect(wrapper.findComponent({ name: "YonderSegmented" }).props("value")).toBe("Tilt lock");
     });
 
     it("draws nothing where the sentence would be when no mode is reported", () => {
@@ -469,8 +465,8 @@ describe("the dead state, with its reason", () => {
         expect(reasonLine(wrapper).text()).toBe(REASON);
         expect(badge(wrapper).text()).toBe("NOT ANSWERING");
         expect(wrapper.find(".y-aim__dial").exists()).toBe(true);
-        expect(gaugeByLabel(wrapper, "Pan").find(".y-pg__ptr").exists()).toBe(false);
-        expect(gaugeByLabel(wrapper, "Tilt").classes()).toContain("is-dead");
+        expect(wrapper.find(".y-pg__ptr").exists()).toBe(false);
+        expect(wrapper.find(".y-aimpanel__position").exists()).toBe(true);
         expect(recentreBtn(wrapper).attributes("disabled")).toBeDefined();
     });
 

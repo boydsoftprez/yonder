@@ -82,7 +82,7 @@ export = function register(RED: RED): void {
         if (draft === null || typeof draft !== "object" || Array.isArray(draft)) {
           return { refuse: "an apply needs a draft naming what to change" };
         }
-        return { method: "POST", path: `/cameras/${id}/apply`, body: draft, camera: id };
+        return { method: "POST", path: `/cameras/${id}/apply`, body: draft, camera: id, timeoutMs: 60000 };
       }
       /**
        * What this browser is watching, and what it measured (spec §8.2).

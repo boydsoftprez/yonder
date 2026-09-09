@@ -443,6 +443,14 @@ function turn(opts: ComposeOptions): string[] {
   return board.flip === null ? [] : ["videoflip", `video-direction=${board.flip}`, LINK];
 }
 
+/** No buffer, decoder or encoder is added, and neutral settings bypass entirely. */
+function color(opts: ComposeOptions): string[] {
+  const image = opts.camera.image;
+  if (!image || (image.brightness === 0 && image.contrast === 100 && image.saturation === 100 && image.hue === 0)) return [];
+  return ['videobalance', 'name=image-balance', `brightness=${image.brightness / 100}`,
+    `contrast=${image.contrast / 100}`, `saturation=${image.saturation / 100}`, `hue=${image.hue / 180}`, LINK];
+}
+
 export function compose(opts: ComposeOptions): string[] {
   const { camera, encoder, rtspBase } = opts;
   const main = encoderFor(encoder, camera.codec);
@@ -462,7 +470,7 @@ export function compose(opts: ComposeOptions): string[] {
       'caps=video/x-h264,stream-format=byte-stream,alignment=au', LINK, 'h264parse', LINK, 'avdec_h264', LINK,
       'videoscale', LINK, 'videorate', LINK,
       `video/x-raw,width=${camera.width},height=${camera.height},framerate=${camera.framerate}/1`, LINK,
-      ...turn(opts), 'tee', 'name=raw');
+      ...color(opts), ...turn(opts), 'tee', 'name=raw');
   } else push(
     "v4l2src", `device=/dev/v4l/by-path/${camera.device}`, "io-mode=4", LINK,
     `image/jpeg,width=${camera.width},height=${camera.height},framerate=${camera.framerate}/1`, LINK,
@@ -470,7 +478,7 @@ export function compose(opts: ComposeOptions): string[] {
     // never leave the SoC between capture and encode. Measured at +3 points
     // against software's +8 for one branch, +4 against +14 for two.
     encoder.decoder ?? "jpegdec", LINK,
-    ...turn(opts),
+    ...color(opts), ...turn(opts),
     "tee", "name=raw",
   );
 

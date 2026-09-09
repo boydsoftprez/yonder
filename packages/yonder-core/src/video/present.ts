@@ -7,7 +7,7 @@ import {
   type RecordingCapability, type StillsCapability,
 } from "./capability.js";
 import { describe, type DescriptorView } from "./descriptors.js";
-import { FLIP_KEYS, TURNED_BY_SAYS, turnedBy, turningSays, type FlipKey } from "./orientation.js";
+import { FLIP_KEYS, TURNED_BY_SAYS, turnedBy, turningSays, imageDirection, type FlipKey, type VideoDirection } from "./orientation.js";
 import { stillUrl } from "./media-path.js";
 import { outputReach, type OutputKind, type OutputReach, type ReachPaths } from "./outputs.js";
 import type { RecordingState } from "./recorder.js";
@@ -893,6 +893,7 @@ export interface DeckCapture {
 
 /** `ui-yonder-deck`'s whole payload — `YonderDeck.vue`'s own documented shape. */
 export interface CameraDeck {
+  readonly runtime?: ReturnType<import("./viewers.js").Viewers["runtime"]>;
   readonly accessory?: ReturnType<import('./accessory/source.js').AccessorySources['snapshot']>;
   readonly aim?: AimPanel;
   readonly camera: { readonly id: string; readonly name: string; readonly spec: string };
@@ -901,11 +902,13 @@ export interface CameraDeck {
   readonly values: Record<string, number | null>;
   readonly commanded: Record<string, number | null>;
   readonly policy: {
+    readonly image: Camera['image'];
     readonly capture: DeckCapture;
     readonly stream: Camera["stream"] & { bitrate_kbps: number };
     readonly preview: Camera["preview"];
   };
   readonly applied: {
+    readonly image: Camera['image'];
     readonly capture: DeckCapture;
     readonly stream: Camera["stream"] & { bitrate_kbps: number };
     readonly preview: Camera["preview"];
@@ -1092,6 +1095,7 @@ const OUTPUT_LABEL: Record<OutputKind, string> = {
  * was actually sent — one calculation, two callers, neither of them this one.
  */
 export function cameraDeck(view: {
+  readonly runtime?: CameraDeck["runtime"];
   readonly accessory?: ReturnType<import('./accessory/source.js').AccessorySources['snapshot']>;
   readonly camera: Camera;
   readonly capabilities: CameraCapabilities | null;
@@ -1140,6 +1144,7 @@ export function cameraDeck(view: {
     },
     stream: { ...camera.stream, bitrate_kbps: camera.bitrate_kbps },
     preview: camera.preview,
+    image: camera.image ?? { brightness: 0, contrast: 100, saturation: 100, hue: 0 },
   };
   return {
     camera: {
@@ -1149,7 +1154,7 @@ export function cameraDeck(view: {
         + `${camera.width}×${camera.height}p${camera.framerate} · ${view.encoder.element}`,
     },
     accessory: view.accessory,
-    aim: aimPanel(caps, view.accessory, camera.id),
+    aim: aimPanel(caps, view.accessory, camera.id, 'control', camera.controls),
     // The two the board carries for a camera that has neither of its own.
     // See `deckCapture()` for why this is composed rather than read.
     capabilities: { ...caps, ...deckCapture(caps, view.recorder ?? null) },
@@ -1158,6 +1163,7 @@ export function cameraDeck(view: {
     commanded,
     policy,
     applied: policy,
+    runtime: view.runtime,
     outputs: camera.outputs.map((output) => ({
       kind: output.kind,
       label: OUTPUT_LABEL[output.kind],
@@ -1319,6 +1325,7 @@ export function thumbStrip(view: {
 
 /** `ui-yonder-aim`'s whole payload — `YonderAim.vue`'s own documented shape. */
 export interface AimPanel {
+  readonly imageDirection?: VideoDirection;
   readonly maxRate?: number;
   readonly admitted?: { pan: number; tilt: number };
   readonly modeInhibited?: string | null;
@@ -1356,13 +1363,13 @@ export interface AimPanel {
  * defect as an unmeasured rate one field over.
  */
 export function aimPanel(caps: CameraCapabilities | null, source?: ReturnType<import('./accessory/source.js').AccessorySources['snapshot']>, camera?: string,
-  scope: 'control' | 'picture' = 'control'): AimPanel {
+  scope: 'control' | 'picture' = 'control', imageControls: Partial<Camera['controls']> = {}): AimPanel {
   if (source) {
     const names = ['Free', 'FPV', 'Follow'];
     // Standalone Aim depends on USB/DUML continuity. A drag on the Picture
     // additionally depends on that picture's media epoch and retires with it.
     const generation = scope === 'picture' ? source.input?.generation ?? source.generation : source.controlGeneration;
-    return { camera, url: camera ? `/video/${camera}/aim` : undefined, generation, maxRate: HG211_MAX_RATE_DEG_S, admitted: source.admitted,
+    return { camera, url: camera ? `/video/${camera}/aim` : undefined, generation, imageDirection: imageDirection(imageControls), maxRate: HG211_MAX_RATE_DEG_S, admitted: source.admitted,
       state: 'present', reason: null, pan: source.attitude?.yaw ?? null, tilt: source.attitude?.pitch ?? null,
       modeInhibited: source.modes.some(mode => mode.allowed) ? null : source.modes.find(mode => !mode.allowed)?.reason ?? 'trajectory-unverified',
       recentreInhibited: source.recentre.allowed ? null : source.recentre.reason,

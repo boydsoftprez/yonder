@@ -711,12 +711,14 @@ const REFUSAL_STATUS: Record<Refusal["because"], number> = {
  */
 function viewerStats(camera: string, raw: unknown): ViewerStats | null {
   if (typeof raw !== "object" || raw === null || Array.isArray(raw)) return null;
-  const { rtt, loss, egress, capacity, frameAge, size, fps } = raw as Record<string, unknown>;
+  const { rtt, loss, egress, capacity, frameAge, size, fps, receiverBufferMs, decodeMs } = raw as Record<string, unknown>;
   const finite = (v: unknown): v is number => typeof v === "number" && Number.isFinite(v);
-  if (!finite(rtt) || !finite(loss) || !finite(egress) || !finite(capacity)) return null;
-  if (loss < 0 || loss > 1 || rtt < 0 || egress < 0 || capacity < 0) return null;
+  if (!finite(rtt) || !finite(loss) || !finite(egress) || (capacity != null && !finite(capacity))) return null;
+  if (loss < 0 || loss > 1 || rtt < 0 || egress < 0 || (finite(capacity) && capacity < 0)) return null;
   return {
-    camera, rtt, loss, egress, capacity,
+    camera, rtt, loss, egress, capacity: capacity == null ? null : capacity as number,
+    ...(finite(receiverBufferMs) && receiverBufferMs >= 0 ? { receiverBufferMs } : {}),
+    ...(finite(decodeMs) && decodeMs >= 0 ? { decodeMs } : {}),
     ...(finite(frameAge) && frameAge >= 0 ? { frameAge } : {}),
     ...(typeof size === "string" ? { size } : {}),
     ...(finite(fps) && fps > 0 ? { fps } : {}),
@@ -926,7 +928,7 @@ export function createRouter(deps: RouterDeps): Router {
       return {
         status: 400,
         body: {
-          error: "a statistic carries rtt, loss, egress and capacity as finite numbers, "
+          error: "a statistic carries finite rtt, loss and egress, plus a finite or unknown capacity, "
             + "with loss between 0 and 1",
         },
       };
@@ -1283,7 +1285,7 @@ export function createRouter(deps: RouterDeps): Router {
         encoder,
         display,
         picture: { path: id, cost: display.pictureCost, running: run.state === 'running', recording: recorderState,
-          aim: aimPanel(capabilities, accessorySnapshot, id, 'picture'),
+          aim: aimPanel(capabilities, accessorySnapshot, id, 'picture', camera.controls),
           cameras: thumbnails.cameras.map((row) => {
             const configured = config.cameras.find((c) => c.id === row.id)!;
             return {
@@ -1301,6 +1303,7 @@ export function createRouter(deps: RouterDeps): Router {
         // above — never a second sweep, so the deck and the readout strip
         // can never disagree about the same camera.
         deck: cameraDeck({
+          runtime: deps.viewers?.runtime(id),
           accessory: accessorySnapshot,
           camera, capabilities, encoder, paths: await reachPaths(),
           // The same two facts the `recorder` field below carries, on the
@@ -1312,7 +1315,7 @@ export function createRouter(deps: RouterDeps): Router {
           recorder: recorderState,
           captures: heldCaptures.length,
         }),
-        aim: aimPanel(capabilities, accessorySnapshot, id),
+        aim: aimPanel(capabilities, accessorySnapshot, id, 'control', camera.controls),
         // From the recorder that holds the recording, never from a count of
         // files on the disk: a file is there whether or not anything is still
         // writing to it, and a page drawing a REC pill off the second would

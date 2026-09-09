@@ -292,3 +292,13 @@ it('retires an expired rate waiting behind camera I/O without replay or disablin
     h.now.value = 1700; await vi.advanceTimersByTimeAsync(100); expect(h.wire).toHaveLength(2);
   } finally { h.release(); await h.source.close(); await camera; vi.useRealTimers(); }
 });
+
+it('revokes outstanding native grants when the applied image direction changes without replacing the USB owner', async () => {
+  const h = harness(); h.source.resume(); await h.source.discover(); h.live();
+  const issued = await h.source.aim(h.camera.device, 'owner', {op:'issue',clientGesture:'before-flip'}) as any;
+  h.camera.controls.verticalFlip=true; h.source.resume();
+  expect(await h.source.aim(h.camera.device,'owner',{op:'slew',...issued.grant,seq:0,pan:1,tilt:1})).toMatchObject({accepted:false,reason:'inactive'});
+  expect(h.factory).toHaveBeenCalledTimes(1);
+  expect(h.device.close).not.toHaveBeenCalled();
+  await h.source.close();
+});

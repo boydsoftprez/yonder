@@ -108,6 +108,8 @@ it('shows real thumbnail age alongside the source caption, never inventing an ag
     {id:'two', name:'Other', active:false, caption:'USB · stopped', thumbSrc:null, ageSeconds:null},
   ] } });
   const rows = w.findAll('.y-strip__thumb');
+  expect(rows[0].get('img').attributes('src')).toBe('/video/one/still?v=1');
+  expect(rows[1].find('img').exists()).toBe(false);
   expect(rows[0].text()).toContain('ACCESSORY · running'); expect(rows[0].text()).toContain('3 s ago');
   expect(rows[1].get('.y-strip__img').attributes('style') ?? '').not.toContain('url(');
   expect(rows[1].find('.y-strip__age').exists()).toBe(false);
