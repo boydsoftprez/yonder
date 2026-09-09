@@ -1434,7 +1434,7 @@ it('prevents duplicate Apply and retires confirmed edits while preserving a newe
 it('opens all receiver settings beside their verdicts and clears them on camera change', async () => {
   const report=makeReport();report.camera.identity='stable socket identity';
   const store=reactive(makeStore(report));const {wrapper}=deck(store,'live');
-  const renderings=['url','gstreamer','dialog','appsink'].map(kind=>({kind,title:kind,body:`${kind} receiver setting`,note:`${kind} reachability verdict`,usable:false}));
+  const renderings=['url','gstreamer','dialog','appsink'].map(kind=>({kind,title:kind,body:kind==='url'?'rtsp://example.test/camera':`${kind} receiver setting`,note:`${kind} reachability verdict`,usable:false}));
   const held=globalThis.fetch;globalThis.fetch=vi.fn(async()=>({ok:true,status:200,json:async()=>({renderings})})) as any;
   try {
     expect(wrapper.find('.y-deck__connection').exists()).toBe(false);
