@@ -27,6 +27,7 @@ import type { Camera } from "../schema/config.js";
  * say what is wrong with what has actually been typed.
  */
 export interface CameraDraft {
+  outputs?: Partial<Record<Camera['outputs'][number]['kind'], boolean>>;
   width?: number;
   height?: number;
   framerate?: number;
@@ -73,6 +74,9 @@ export interface CameraDraft {
  * decide to write it rather than getting it by omission.
  */
 export const DRAFT_PATHS: Record<string, string> = {
+  outputRtp: 'outputs.rtp',
+  outputRtsp: 'outputs.rtsp',
+  outputSrt: 'outputs.srt',
   width: "width",
   height: "height",
   framerate: "framerate",
@@ -164,11 +168,15 @@ export function deckDraft(staged: Record<string, unknown>): DeckDraft {
   // The three turns the *board* performs. They are a pipeline change, not a
   // device write, so they travel on the draft and land under `controls`.
   const controls: Record<string, unknown> = {};
+  const outputs: Record<string, unknown> = {};
   let name: string | undefined;
   const unknown: string[] = [];
 
   for (const [path, value] of Object.entries(staged)) {
     switch (path) {
+      case 'outputRtp': outputs.rtp = value; break;
+      case 'outputRtsp': outputs.rtsp = value; break;
+      case 'outputSrt': outputs.srt = value; break;
       // The four the two conventions already share a name for — the capture
       // itself, which `CameraDraft` has carried since it was written and
       // `interruption()` compares. `YonderDeck` has no Resolution picker yet
@@ -204,6 +212,7 @@ export function deckDraft(staged: Record<string, unknown>): DeckDraft {
     }
   }
   if (Object.keys(controls).length > 0) draft.controls = controls as CameraDraft["controls"];
+  if (Object.keys(outputs).length > 0) draft.outputs = outputs as CameraDraft['outputs'];
   if (Object.keys(stream).length > 0) draft.stream = stream as CameraDraft["stream"];
   if (Object.keys(preview).length > 0) draft.preview = preview as CameraDraft["preview"];
   return { draft, ...(name === undefined ? {} : { name }), unknown };
@@ -257,6 +266,7 @@ export function interruption(draft: CameraDraft, applied: CameraDraft): string[]
   const turnChanged = (["rotation", "horizontalFlip", "verticalFlip"] as const)
     .some((k) => draft.controls?.[k] !== undefined && draft.controls[k] !== applied.controls?.[k]);
   if (sourceChanged || turnChanged) out.push("restarts the picture");
+  if (Object.entries(draft.outputs ?? {}).some(([kind, enabled]) => enabled !== applied.outputs?.[kind as keyof NonNullable<CameraDraft['outputs']>]) && !out.includes('restarts the picture')) out.push('restarts the picture');
 
   const previewBranchChanged =
     (draft.preview?.size !== undefined && draft.preview.size !== applied.preview?.size)

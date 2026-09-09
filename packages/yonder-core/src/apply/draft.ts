@@ -55,6 +55,13 @@ function rungIndex(size: string): number {
  */
 export function validateDraft(draft: CameraDraft, supportedRungs: readonly string[]): DraftProblem[] {
   const problems: DraftProblem[] = [];
+  if (draft.outputs !== undefined) {
+    if (!draft.outputs || typeof draft.outputs !== 'object' || Array.isArray(draft.outputs)) problems.push({ path: 'outputs', message: 'Output edits must name configured output kinds' });
+    else for (const [kind, enabled] of Object.entries(draft.outputs)) {
+      if (!['rtp', 'rtsp', 'srt'].includes(kind)) problems.push({ path: `outputs.${kind}`, message: 'Unknown output kind' });
+      else if (typeof enabled !== 'boolean') problems.push({ path: `outputs.${kind}`, message: 'Output enablement must be true or false' });
+    }
+  }
 
   const checkFloorCeiling = (scope: "stream" | "preview", floor?: number, ceiling?: number): void => {
     if (floor === undefined || ceiling === undefined) return;
@@ -124,6 +131,12 @@ export function applyCameraDraft(
   const config = structuredClone(current);
   const camera = config.cameras[index];
   if (camera === undefined) return { ok: false, error: `no camera is configured with the id "${id}"` };
+  if (draft.outputs !== undefined) {
+    for (const [kind, enabled] of Object.entries(draft.outputs)) {
+      if (typeof enabled !== 'boolean' || !camera.outputs.some(output => output.kind === kind)) return { ok: false, error: `This camera has no configured ${kind} output to change` };
+      for (const output of camera.outputs) if (output.kind === kind) output.enabled = enabled;
+    }
+  }
 
   if (draft.width !== undefined) camera.width = draft.width;
   if (draft.height !== undefined) camera.height = draft.height;
@@ -147,4 +160,3 @@ export function applyCameraDraft(
 
   return { ok: true, config };
 }
-

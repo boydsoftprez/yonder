@@ -2,7 +2,7 @@
 import { describe, expect, it } from "vitest";
 import { applyCameraDraft, deckDraft, draftPathFor, interruption, validateDraft } from "./draft.js";
 import { DRAFT_PATHS } from "./draft-shape.js";
-import { ConfigSchema, DEFAULT_CONFIG, PREVIEW_RUNGS, type Config } from "../schema/config.js";
+import { Camera, ConfigSchema, DEFAULT_CONFIG, PREVIEW_RUNGS, type Config } from "../schema/config.js";
 
 const RUNGS = [...PREVIEW_RUNGS];
 
@@ -321,5 +321,23 @@ describe("DRAFT_PATHS — one table, read in both directions", () => {
     expect(draftPathFor("preview.floor_kbps")).toBe("previewFloor");
     expect(draftPathFor("bitrate_kbps")).toBe("streamBitrate");
     expect(draftPathFor("somewhere.else")).toBeNull();
+  });
+});
+
+describe('staged output enablement', () => {
+  it('translates output controls and rejects non-boolean values before apply', () => {
+    const translated = deckDraft({ outputRtp: false, outputRtsp: true });
+    expect(translated.unknown).toEqual([]);
+    expect(translated.draft.outputs).toEqual({ rtp: false, rtsp: true });
+    expect(validateDraft({ outputs: { rtsp: 'yes' } } as any, [])).toEqual([{ path: 'outputs.rtsp', message: 'Output enablement must be true or false' }]);
+  });
+  it('merges output switches without changing destinations and refuses unconfigured kinds', () => {
+    const config = structuredClone(DEFAULT_CONFIG);
+    config.cameras = [Camera.parse({ id: 'cam0', name: 'Camera', source: 'usb', device: 'test-camera', outputs: [{ kind: 'rtp', host: '192.0.2.1', port: 5600, enabled: true }] })];
+    const result = applyCameraDraft(config, 'cam0', { outputs: { rtp: false } });
+    expect(result.ok).toBe(true);
+    if (result.ok) expect(result.config.cameras[0].outputs).toEqual([{ ...config.cameras[0].outputs[0], enabled: false }]);
+    expect(config.cameras[0].outputs[0].enabled).toBe(true);
+    expect(applyCameraDraft(config, 'cam0', { outputs: { rtsp: true } })).toMatchObject({ ok: false });
   });
 });
