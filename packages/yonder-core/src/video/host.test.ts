@@ -661,7 +661,7 @@ describe("EncoderChannel over the real host", () => {
     expect(await channel.retune(CAMERA, "preview", 800))
       .toMatchObject({ requested: 800, observed: 800 });
     const set = traced(trace).filter((e) => e.event === "set_arg").pop();
-    expect(set?.value).toBe("controls,video_bitrate_mode=1,video_bitrate=800000,h264_i_frame_period=15");
+    expect(set?.value).toBe("controls,video_bitrate=800000,h264_i_frame_period=15");
     stop();
   }, 20_000);
 
