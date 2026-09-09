@@ -110,7 +110,7 @@ export class AccessorySources {
     const writer = new AccessoryWriter(this.clock, (command, options) => device.sendCommand(command, options));
     source = { device, media, attitude: null, generation: null, error: null, streamGeneration: 0,
       camera: new CameraController({ clock: this.clock, write: (cmd, options) => writer.write(cmd, options) }),
-      gimbal: new GimbalController({ clock: this.clock, context: () => this.context(identity, source), write: (cmd, options) => writer.write(cmd, options),
+      gimbal: new GimbalController({ clock: this.clock, context: () => this.context(source), write: (cmd, options) => writer.write(cmd, options),
         onMotionNotice: notice => { if (notice) source.admitted = undefined; } }),
     };
     source.camera.disconnect(); source.gimbal.disconnect(); this.owned.set(identity, source);
@@ -124,12 +124,14 @@ export class AccessorySources {
       source.generation = null; source.admitted = undefined; source.attitude = null; source.camera.disconnect(); source.gimbal.disconnect(); source.media.reset();
     }
   }
-  private context(identity: string, source: Owned): GuardContext {
-    const profile = this.options.cameras().find(c => c.source === 'accessory' && c.device === identity)?.accessory_mount;
+  private context(source: Owned): GuardContext {
     const status = source.device.snapshot();
+    // This runs on every attitude push and dispatch admission. Native motion
+    // uses only live device state; reading the obsolete world profile here
+    // would synchronously reload/parse configuration inside the intent budget.
     return { now: this.clock.now(), attitudeMaxAgeMs: 500, attitude: source.attitude,
-      mount: profile?.mount ?? null, envelopes: profile?.envelopes ?? [], signs: profile?.signs ?? { pan: null, tilt: null },
-      limitDirections: profile?.limitDirections ?? {}, actions: profile?.actions ?? [], intentAllowanceMs: 500, deviceStopAllowanceMs: 800,
+      mount: null, envelopes: [], signs: { pan: null, tilt: null },
+      limitDirections: {}, actions: [], intentAllowanceMs: 500, deviceStopAllowanceMs: 800,
       discreteApplicable: false,
       nativeActions: status.state === 'live' && status.manufacturer === 'DJI' && status.model === 'HG211' ? HG211_NATIVE_ACTIONS : [] };
   }
@@ -142,7 +144,7 @@ export class AccessorySources {
   }
   snapshot(identity: string) {
     const source = this.owned.get(identity); if (!source) return null;
-    const context = this.context(identity, source), status = source.device.snapshot();
+    const context = this.context(source), status = source.device.snapshot();
     const attitude = source.attitude && this.clock.now() - source.attitude.at < 500 ? source.attitude : null;
     // A directional stopping margin is not a global interlock. Zero tests
     // shared prerequisites; every actual rate is still guarded at dispatch.

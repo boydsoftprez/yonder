@@ -14,10 +14,11 @@ function harness() {
   const media = new AccessoryMedia('/unused/test.sock'); media.start = vi.fn(async () => {}); media.close = vi.fn(async () => {});
   const device = { start: vi.fn(async () => {}), close: vi.fn(async () => {}), snapshot: () => status, sendCommand: vi.fn(async () => {}) };
   const factory = vi.fn((options: Pocket2DeviceOptions) => { callbacks = options; return device; });
-  const source = new AccessorySources({ cameras: () => [camera], controllers: async () => ['test.udc'], deviceFactory: factory,
+  const readCameras = vi.fn(() => [camera]);
+  const source = new AccessorySources({ cameras: readCameras, controllers: async () => ['test.udc'], deviceFactory: factory,
     mediaFactory: () => media, clock: { now: () => now.value, setTimer: (ms, fn) => setTimeout(fn, ms), clearTimer: token => clearTimeout(token as NodeJS.Timeout) } });
   const live = () => { status = { ...status, state: 'live', manufacturer: 'DJI', model: 'HG211', lastCommandAt: now.value, lastVideoAt: now.value }; callbacks.onStatus!(status); };
-  return { source, camera, factory, device, media, now, live, callbacks: () => callbacks,
+  return { source, camera, factory, device, media, now, live, readCameras, callbacks: () => callbacks,
     stale: () => { status = { ...status, state: 'stale', generation: status.generation + 1 }; callbacks.onStatus!(status); } };
 }
 
@@ -47,6 +48,42 @@ describe('shared accessory source', () => {
     expect(ConfigSchema.safeParse({ ...DEFAULT_CONFIG, cameras: [h.camera, { ...h.camera, id: 'cam2' }] }).success).toBe(false);
     expect(Camera.safeParse({ ...h.camera, accessory_mount: { mount: 'bench', envelopes: [{ mount: 'bench', mode: 2, yaw: [10, -10] }], signs: { pan: 1, tilt: -1 }, limitDirections: {}, actions: [] } }).success).toBe(false);
   });
+});
+
+it('uses only native live state during sustained attitude refresh and rate admission, while public camera lookups stay fresh', async () => {
+  vi.useFakeTimers();
+  const h = harness();
+  h.camera.accessory_mount = { mount: 'obsolete-world-profile', envelopes: [{ mount: 'obsolete-world-profile', mode: 2, yaw: [0, 0], pitch: [0, 0] }],
+    signs: { pan: null, tilt: null }, limitDirections: {}, actions: [] };
+  const savedProfile = structuredClone(h.camera.accessory_mount);
+  try {
+    await h.source.discover(); h.live(); h.readCameras.mockClear();
+    (h.device.sendCommand as any).mockImplementation(async (_command: any, options: any) => {
+      if (!options.admission()) throw new Error('not admitted at the endpoint');
+    });
+    let grant = (await h.source.aim(h.camera.device, 'owner', { op: 'issue', clientGesture: 'sustained' }) as any).grant;
+    for (let sample = 0; sample < 40; sample++) {
+      h.now.value = 1000 + sample * 50;
+      const payload = Buffer.alloc(40); payload.writeInt16LE(897, 0); payload[6] = 0x80; payload[10] = 0xa0;
+      const halfAngle = sample * 0.25 * Math.PI / 360;
+      payload.writeFloatLE(Math.cos(halfAngle), 24); payload.writeFloatLE(Math.sin(halfAngle), 36);
+      h.callbacks().onCommand!(decodeDuml(encodeDuml({ sender: 4, receiver: 2, commandSet: 4, commandId: 5, payload }))!);
+      await vi.advanceTimersByTimeAsync(sample ? 50 : 0);
+      if (sample % 2 === 0) {
+        const reply = await h.source.aim(h.camera.device, 'owner', { op: 'slew', ...grant, seq: sample / 2, pan: 5, tilt: 0 }) as any;
+        expect(reply.accepted).toBe(true); grant = reply.next;
+      }
+      expect(h.source.snapshot(h.camera.device)?.inhibition).toBeNull();
+    }
+    expect(h.device.sendCommand.mock.calls.length).toBeGreaterThan(15);
+    expect(h.readCameras.mock.calls.length).toBe(0);
+    expect(h.source.snapshot(h.camera.device)).toMatchObject({ mount: null, envelope: null, recentre: { allowed: true } });
+    expect(h.camera.accessory_mount).toEqual(savedProfile);
+    expect(h.source.medium.holds('cam1')).toBe(true);
+    h.readCameras.mockReturnValue([]);
+    expect(h.source.medium.holds('cam1')).toBe(false);
+    expect(h.readCameras).toHaveBeenCalledTimes(2);
+  } finally { await h.source.close(); vi.useRealTimers(); }
 });
 
 it('keeps accessory detection when the independent USB probe throws', async () => {
