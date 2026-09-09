@@ -143,3 +143,24 @@ On the selected Pi the console port is 3000. After normal sign-in, use
 workspace and `/dashboard/cockpit` for standalone picture/aim. Public geographic
 sources remain ground-side by default. None of this bench validation establishes
 an armed flight or camera-to-world calibration.
+
+
+## Flight contrast and fullscreen follow-up
+
+The live console's Day palette was inherited by the cockpit and applied light
+button backgrounds behind white instrument labels. Follow-up `c9488af` defaults
+the cockpit to its own dark palette, persists an explicit Day/Night choice in
+the browser, and keeps instrument/data-field backgrounds dark in either mode.
+It also adds Full screen / Exit full screen using the browser's element API.
+Editors follow the fullscreen root rather than being hidden outside its subtree.
+
+The regression checks failed before implementation. All 69 covering layout,
+instrument and cockpit tests then passed, including retained PFD/map identity,
+fullscreen rejection, palette restoration, and moving an open editor back to the
+body after exit. The production Flight bundle built at 810.02 kB / 222.55 kB gzip.
+Only `ui-yonder-cockpit.umd.js` was hot-replaced; its SHA-256 is
+`19f5f5497146e39386e6a2362e86e20cdfe0a7a75476d03a31186719871a3dfb`.
+Core PID 105058 and console PID 105234 remained unchanged, with NRestarts zero.
+The live Chrome page was observed in element fullscreen with a dark cockpit,
+readable instruments, the Exit full screen control, and no visible Dashboard
+sidebar/header. No camera or telemetry service was restarted.
