@@ -232,3 +232,47 @@ controller remained RTL/disarmed. No mission upload, arm, mode, target or start
 command was sent. Loading the Cove example as a local draft showed the new
 home-unavailable explanation and disabled upload until the controller provides
 the required home record. Physical flight and GPS recovery remain untested.
+
+## Home workflow activation and camera recovery
+
+Home implementation `d77406f` and clarification `068d63c` add local planning-home
+editing, map placement, MSL elevation in feet/metres, Undo, copying reported home,
+and a separate confirmed controller-home command with matching readback. The
+[behavior reference](../console/evidence/2026-09-09-home-workflow.md) records the
+Mission Planner PLAN/DATA distinction and pinned ArduPlane handling.
+The [disposable SITL results](../console/evidence/2026-09-09-home-sitl.json) verify
+manual home, first mission upload and a subsequent home update with GPS both off
+and on, without arming or flying. Core MAVLink/cockpit tests: 383 passed. Targeted
+Home/UI tests: 36 passed. The final Flight bundle is 836.85 kB / 229.77 kB gzip,
+SHA-256 `39f81ccecba38af17c2ff2896a1275bdcd9e970b314ef715391105112cea639a`.
+
+During local development the board rebooted externally. It returned with boot ID
+`8de40ee9-5ff0-422a-a9d1-c0f7e7c98d3d`, and the operator connected Ethernet during
+activation. The network task observed Ethernet address `10.0.252.246`, default
+route metric 100, and a direct LAN ZeroTier path to the Mac with roughly 8 ms
+latency. Subsequent video checks therefore describe wired acceptance, not proof
+that the previous LTE delivery problem was fixed.
+
+Combined activation `54f3528` included camera change `9644f06`. Five artifacts were
+installed after 45.04 seconds of continuous USB absence, preserving config and
+secrets. The initial camera running state did not persist: the full production
+graph repeatedly exited. A confirmed preview startup-rate adjustment to 500 kb/s
+did not resolve it. The camera task withdrew that encoder change in `ac04051`;
+the source rollback was merged as **`293fc31`**.
+
+Recovery restored only `dist/video/pipeline.js` to the prior verified hash
+`4db643799ffbd13606b0c209bbfde1df2205f2a0458e9a849f32b4280c2ea773`. All Home files
+remained installed. Another 45.04-second USB absence was preserved, then cam3
+returned to running with zero restarts and stayed at the same run identity for
+32 seconds before the recovery receipt. Core PID became 59552; console 779,
+MAVLink router 1038 and MediaMTX 775 stayed running. The current main Fixed
+2000 kb/s and preview Adaptive startup 500 kb/s configuration and secrets were
+unchanged during recovery. Camera-specific investigation and acceptance are
+recorded in [the video delivery report](qgroundcontrol-video-delivery-2026-09-09.md).
+
+The live Flight page opened **Mission controls → Home…**, showed empty planning
+fields and no reported controller home, and offered the new reviewed controller
+action. The controller was connected, MANUAL and disarmed; its operation count
+remained zero. No physical home, mission-upload, arm, mode or start command was
+sent during this activation. The final installed manifest is at source
+`293fc31`; the rejected CBR artifact must not be included in a subsequent build.
