@@ -72,5 +72,27 @@ Initial runs at a 650 kb/s link retained approximately 29.5–29.6 decoded fps
 under Adaptive. Fixed at 1,200 kb/s on the same constrained link delivered
 approximately 15–16 fps. Both TCP and UDP reduced the real encoder target and
 began increasing it when the link returned to 3 Mb/s. These are synthetic-network
-results, not claims about LTE or the live Pocket 2. Final integrated and device
-acceptance must be recorded before this feature is described as deployed.
+results, not claims about LTE or the live Pocket 2. The installed hardware check and its limits are recorded below.
+
+## Installed Pi verification
+
+The combined implementation was installed and its private session API returned
+successful responses while listening only on loopback. Existing secret values
+were preserved; the observer received its own generated credential. The prior
+camera pipeline and USB helpers were retained.
+
+With the actual Pocket 2 streaming from the Pi to one temporary external
+GStreamer receiver, main-stream Adaptive was applied and kept within the
+existing 400–4000 kb/s bounds. Encoder readback increased through 2600, 2800,
+3000, 3200, 3400, 3600, 3800 and 4000 kb/s as delivery remained healthy. The
+same camera run and USB generation continued, with zero pipeline restarts and
+no MediaMTX slow-reader discard warnings in the observation window. The
+receiver decoded approximately 30 fps throughout the changes and exited
+without decoder errors after 100 seconds. It recorded no media files.
+
+This was a wired, external-receiver hardware check. QGroundControl itself was
+closed, so it is not a QGC visual acceptance claim, and it does not establish
+real LTE performance. The isolated TCP and UDP bandwidth tests supply the
+congestion/recovery evidence. After the temporary receiver left, the live
+surface correctly returned to waiting for a receiver rather than inventing
+healthy feedback. Adaptive remains enabled with the operator's existing bounds.
