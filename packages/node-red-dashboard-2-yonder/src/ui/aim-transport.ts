@@ -9,6 +9,7 @@ export class AimTransport {
   private pending = false;
   private ending?: { url: string; gesture: string };
   private timer?: ReturnType<typeof setTimeout>;
+  private nextRequestAt = 0;
   private disposed = false;
   private readonly lost = () => { if (typeof document === 'undefined' || document.hidden) this.stop(); };
   private readonly blur = () => this.stop();
@@ -54,9 +55,12 @@ export class AimTransport {
         const reply = await this.request(held.target, { op: 'issue', clientGesture: held.client });
         if (!this.current(held)) { if (reply.grant?.gesture) this.endRemote(held.target, reply.grant.gesture); return; }
         held.grant = reply.grant;
-      } else {
+        if (!held.grant) throw new Error('Aim grant missing');
+      }
+      if (this.current(held)) {
         // Sample after the preceding response, never retain an old queued rate.
         const sent = { pan: held.pan, tilt: held.tilt };
+        this.nextRequestAt = performance.now() + 100;
         const reply = await this.request(held.target, { op: 'slew', ...held.grant, seq: ++held.seq, ...sent });
         if (!this.current(held)) return;
         held.grant = reply.next;
@@ -73,7 +77,7 @@ export class AimTransport {
     this.pending = false;
     const ending = this.ending; this.ending = undefined;
     if (ending) { this.endRemote(ending.url, ending.gesture); return; }
-    if (this.held && this.current(this.held)) this.timer = setTimeout(() => void this.tick(), 100);
+    if (this.held && this.current(this.held)) this.timer = setTimeout(() => void this.tick(), Math.max(0, this.nextRequestAt - performance.now()));
   }
   private endRemote(url: string, gesture: string): void {
     // A termination marker is the only deferred message. No rate or action is queued.

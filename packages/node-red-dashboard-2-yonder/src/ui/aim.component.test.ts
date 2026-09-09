@@ -106,7 +106,9 @@ function reasonLine(w: VueWrapper<any>) {
     return w.find(".y-aimpanel__reason");
 }
 function dial(w: VueWrapper<any>): Element {
-    return w.find(".y-aim__dial").element;
+    const element = w.find(".y-aim__dial").element;
+    element.getBoundingClientRect = () => ({ left: 0, top: 0, width: 132, height: 132 }) as DOMRect;
+    return element;
 }
 function recentreBtn(w: VueWrapper<any>) {
     return w.find(".y-aimpanel__recentre");

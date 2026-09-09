@@ -25,17 +25,8 @@ import YonderAimPad from "./YonderAimPad.vue";
  *    the call happens, while every other test in this file leaves it
  *    unstubbed and un-thrown — proof the guard is what keeps a missing
  *    implementation from taking the component down with it.
- * 2. **jsdom performs no layout.** `getBoundingClientRect()` on the dial
- *    returns a real `DOMRect` with every field, `width`/`height`/`left`/`top`
- *    included, reading zero. `YonderAimPad.vue` answers this exactly the way
- *    `YonderSetBar` and `YonderPositionGauge` already do: the pointer
- *    geometry is driven from `DIAL_SIZE`, a JS-owned constant the dial's own
- *    `:width`/`:height` bind to, never from a measurement of the rendered
- *    element. Only the dial's on-page *position* still comes from
- *    `getBoundingClientRect()` (`rect.left`/`rect.top`), which is a genuine
- *    layout fact no constant could stand in for — it reads zero here too,
- *    which is harmless, since nothing in this file wraps the dial in an
- *    offset container and `toClient()` below accounts for exactly that.
+ * 2. **jsdom performs no layout.** Each dial gets an explicit 132px layout
+ *    fixture; scaled/offset and invalid-layout tests replace those bounds.
  * 3. **`@vue/test-utils@2.5.0`'s own `trigger("pointerdown", { clientX })`
  *    throws in this project's jsdom** — `setbar.component.test.ts`'s own
  *    top comment explains the cause (jsdom's `PointerEvent` inherits
@@ -60,11 +51,8 @@ const DEAD = 15;
 const RIM = 44;
 
 /**
- * The inverse of the component's own `at()`: a point in SVG units to the
- * `clientX`/`clientY` that lands there. Exact because `rect.left`/`rect.top`
- * read zero under this project's jsdom (confirmed) and nothing here wraps
- * the dial in an offset container, so a press at SVG-space `(x, y)` really
- * does land at exactly this many CSS pixels from the dial's own origin.
+ * SVG points mapped into the explicit default 132px layout fixture.
+ * Scaled and offset cases below supply client coordinates independently.
  */
 function toClient(xSvg: number, ySvg: number) {
   return {
@@ -78,7 +66,9 @@ function pad(props: {
   atLimit?: { pitch?: boolean; yaw?: boolean };
   inhibited?: string | null;
 }) {
-  return mount(YonderAimPad, { props });
+  const wrapper = mount(YonderAimPad, { props });
+  wrapper.find('.y-aim__dial').element.getBoundingClientRect = () => ({ left: 0, top: 0, width: DIAL_SIZE, height: DIAL_SIZE }) as DOMRect;
+  return wrapper;
 }
 
 function dialOf(w: VueWrapper): Element {
@@ -174,7 +164,7 @@ describe("a rate, never a position", () => {
     expect(Math.abs(last.pan)).toBeLessThanOrEqual(30);
   });
 
-  it("pushing up yields a positive tilt rate, matching the TILT + label", () => {
+  it("pushing up yields a positive tilt rate, matching the Up label", () => {
     // Screen y grows downward; "up" is negative SVG y. A dropped sign here
     // would point the reading the wrong way against the pad's own label.
     const w = pad({});
@@ -612,4 +602,41 @@ it("a press refused while inhibited cannot start slewing when the inhibition lif
     move(dial, 40, 0);
     expect(w.emitted("slew")).toHaveLength(1);
 });
+});
+
+it('keeps captured motion outside the pad until real release and stops only once', () => {
+  const w = pad({}); const el = dialOf(w) as SVGElement;
+  let captured: number | null = null;
+  el.setPointerCapture = vi.fn(id => { captured = id; });
+  el.hasPointerCapture = vi.fn(id => captured === id);
+  el.releasePointerCapture = vi.fn(() => { captured = null; });
+  down(el, RIM, 0, 7);
+  const gesture = slews(w).at(-1)?.gesture;
+  fire(el, 'pointerleave');
+  expect(stops(w)).toHaveLength(0);
+  move(el, 400, 0, 7);
+  expect(slews(w).at(-1)).toMatchObject({ gesture, pan: 30 });
+  fire(el, 'pointerup'); fire(el, 'lostpointercapture');
+  expect(stops(w)).toEqual([{ gesture }]);
+});
+
+it.each([{ left: 40, top: 80, width: 264, height: 264 }, { left: 20, top: 30, width: 198, height: 99 }])('maps direction and centre from actual rendered bounds %j', rect => {
+  const w = pad({}); const el = dialOf(w);
+  el.getBoundingClientRect = () => rect as DOMRect;
+  const dispatch = (x: number, y: number, type = 'pointermove') => el.dispatchEvent(new PointerEvent(type, { pointerId: 1, clientX: rect.left + x * rect.width, clientY: rect.top + y * rect.height }));
+  dispatch(.5, .5, 'pointerdown'); expect(slews(w)).toHaveLength(0);
+  dispatch(1, .5); expect(slews(w).at(-1)).toMatchObject({ pan: 30, tilt: -0 });
+  dispatch(.5, 0); expect(slews(w).at(-1)?.tilt).toBeCloseTo(30);
+  dispatch(.5, 1); expect(slews(w).at(-1)?.tilt).toBeCloseTo(-30);
+  dispatch(0, .5); expect(slews(w).at(-1)?.pan).toBeCloseTo(-30);
+});
+
+it.each([0, -1, NaN, Infinity])('ends the hold on invalid rendered width %s without resuming on layout recovery', width => {
+  const w = pad({}); const el = dialOf(w);
+  down(el, RIM, 0);
+  el.getBoundingClientRect = () => ({ left: 0, top: 0, width, height: 132 }) as DOMRect;
+  move(el, RIM, 0); expect(stops(w)).toHaveLength(1);
+  const before = slews(w).length;
+  el.getBoundingClientRect = () => ({ left: 0, top: 0, width: 132, height: 132 }) as DOMRect;
+  move(el, RIM, 0); expect(slews(w)).toHaveLength(before);
 });

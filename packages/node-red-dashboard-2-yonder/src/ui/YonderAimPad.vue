@@ -4,15 +4,15 @@
         <svg ref="dial" class="y-aim__dial" :class="{ 'is-pushing': pushing, 'is-inhibited': !!inhibited }"
              :width="DIAL_SIZE" :height="DIAL_SIZE" viewBox="0 0 118 118"
              @pointerdown="down" @pointermove="move"
-             @pointerup="onEnd" @pointercancel="onEnd" @pointerleave="onEnd" @lostpointercapture="onEnd">
+             @pointerup="onEnd" @pointercancel="onEnd" @pointerleave="onLeave" @lostpointercapture="onEnd">
             <circle class="y-aim__ring" cx="59" cy="59" r="54" />
             <!-- crosshair, stopping short of the puck -->
             <g class="y-aim__cross">
                 <path d="M59 8v37 M59 73v38 M8 59h37 M73 59h38" />
             </g>
             <g class="y-aim__labels" font-size="7.5" font-family="ui-sans-serif,system-ui" letter-spacing=".8" text-anchor="middle">
-                <text x="59" y="24">TILT +</text><text x="59" y="89">PAN</text>
-                <text x="22" y="62">&#8722;</text><text x="96" y="62">+</text>
+                <text x="59" y="24">UP</text><text x="59" y="89">DOWN</text>
+                <text x="22" y="62">LEFT</text><text x="96" y="62">RIGHT</text>
             </g>
             <!-- an axis that will not answer stays on the pad, struck and labelled -->
             <g v-if="rollStruck" class="y-aim__struck">
@@ -87,8 +87,8 @@
  *
  * **Exactly one stop, for all eight endings, including the four that are
  * not pointer events at all** (coordinator resolution 5). `pointerup`,
- * `pointercancel`, `pointerleave` and `lostpointercapture` all reach the
- * same `onEnd()`, as do window `blur`, `visibilitychange` to hidden and
+ * `pointercancel`, uncaptured `pointerleave` and `lostpointercapture` reach
+ * the same `onEnd()`, as do window `blur`, `visibilitychange` to hidden and
  * `pagehide` (attached in `mounted()`/removed in `beforeUnmount()`, the
  * same lifecycle `YonderHoldKey` already uses for its own `visibilitychange`
  * listener). `onEnd()` itself is trivial — reset `pointerId` and call
@@ -127,43 +127,15 @@
  * struck, the same "not known is not assumed safe" rule R-CMD-04 states
  * for a command applied here to a reading.
  *
- * **`jsdom` has no pointer capture and measures nothing** (coordinator
- * resolution 8) — see `DIAL_SIZE`'s own comment below, and
- * `aimpad.component.test.ts`'s top-of-file comment for the third trap,
- * `@vue/test-utils`' own `trigger()` refusing a coordinate.
+ * Layout is measured at each input event. Tests provide explicit element
+ * bounds; a missing or degenerate layout ends the hold instead of inventing
+ * a direction. Pointer capture keeps a held gesture usable outside the rim.
  */
 
-/** The SVG viewBox's own centre — `viewBox="0 0 118 118"`. */
+/** The SVG viewBox's own centre and width/height. */
 const CENTER = 59
-/** The viewBox's own width/height, in SVG user units. */
 const VIEWBOX = 118
-/**
- * The dial's rendered size, in CSS pixels — bound into the template's own
- * `:width`/`:height` and used by `at()` below, never a measurement of the
- * rendered element.
- *
- * `jsdom` performs no layout at all: `getBoundingClientRect()` on the dial
- * returns a real `DOMRect`, not `undefined`, with `width` and `height` (and
- * `left`/`top`) reading zero — confirmed directly against this project's
- * own installed jsdom before writing a single test against it, the same
- * check `YonderSetBar`'s own `TRACK_WIDTH` comment describes for its track.
- * Converting a press with `(e.clientX - rect.left) / rect.width` is
- * therefore `x / 0` under every test in this file, which collapses every
- * press to whichever the clamp resolves an out-of-domain number to — the
- * exact "passes only because everything measures zero" failure the brief
- * warns against.
- *
- * The fix is the one this whole library already uses: the width the
- * geometry math assumes is this constant, the same number the dial's own
- * `:width`/`:height` render from, so the two can never drift apart and the
- * conversion is exact under `jsdom` and in a real browser alike. Only the
- * dial's own on-page *position* (`rect.left`/`rect.top`) still comes from
- * `getBoundingClientRect()` — a genuine layout fact no constant could stand
- * in for — and it reads zero here too, which is harmless: nothing in
- * `aimpad.component.test.ts` wraps the dial in an offset container, so a
- * press computed for SVG-space `(x, y)` lands at exactly that many CSS
- * pixels from the dial's own left/top edge either way.
- */
+/** Default visual size only; input uses the actual rendered bounds. */
 const DIAL_SIZE = 132
 /** The dashed centre: no command inside it (the dead zone). */
 const DEAD = 15
@@ -250,14 +222,15 @@ export default {
     },
     methods: {
         /** A pointer event's client coordinates, converted to this pad's
-         * own geometry. `null` inside the dead zone. See `DIAL_SIZE`'s own
-         * comment for why the size used here is that constant and never a
-         * measurement of the dial. */
+         * own geometry: null in the dead zone, false for unusable layout. */
         at (e) {
             const rect = this.$refs.dial.getBoundingClientRect()
-            const x = ((e.clientX - rect.left) / DIAL_SIZE) * VIEWBOX - CENTER
-            const y = ((e.clientY - rect.top) / DIAL_SIZE) * VIEWBOX - CENTER
+            if (![rect.left, rect.top, rect.width, rect.height, e.clientX, e.clientY].every(Number.isFinite)
+                || rect.width <= 0 || rect.height <= 0) return false
+            const x = ((e.clientX - rect.left) / rect.width) * VIEWBOX - CENTER
+            const y = ((e.clientY - rect.top) / rect.height) * VIEWBOX - CENTER
             const d = Math.hypot(x, y)
+            if (!Number.isFinite(d)) return false
             if (d <= DEAD) return null
             const k = Math.min(1, (d - DEAD) / (RIM - DEAD))
             const ux = x / d
@@ -279,7 +252,7 @@ export default {
             // pointer's own eventual release.
             if (this.pointerId !== null) return
             this.pointerId = e.pointerId
-            this.$refs.dial.setPointerCapture?.(e.pointerId)
+            try { this.$refs.dial.setPointerCapture?.(e.pointerId) } catch { /* Leave stops if capture was refused. */ }
             this.updateFromEvent(e)
         },
         move (e) {
@@ -294,6 +267,7 @@ export default {
         updateFromEvent (e) {
             if (this.inhibited) { this.endGesture(); return }
             const a = this.at(e)
+            if (a === false) { this.onEnd(); return }
             if (!a) { this.endGesture(); return }
             if (this.gesture === null) this.gesture = newGestureId()
             this.px = a.x
@@ -327,9 +301,17 @@ export default {
          * load-bearing. Resetting `pointerId` unconditionally is still
          * real work, not a guard: it is what lets a later, genuinely new
          * press through `down()`'s own re-entrancy guard. */
+        onLeave () {
+            try { if (this.pointerId !== null && this.$refs.dial.hasPointerCapture?.(this.pointerId)) return } catch { /* No known capture: stop. */ }
+            this.onEnd()
+        },
         onEnd () {
+            const pointerId = this.pointerId
             this.pointerId = null
             this.endGesture()
+            try {
+                if (pointerId !== null && this.$refs.dial?.hasPointerCapture?.(pointerId)) this.$refs.dial.releasePointerCapture?.(pointerId)
+            } catch { /* Already released by the browser. */ }
         }
     }
 }
