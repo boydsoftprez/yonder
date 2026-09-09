@@ -161,10 +161,46 @@ and the current voltage alarm was zero. The intermittent write deadline fault
 is still unresolved; neither this short check nor the healthy syscall trace
 establishes that it has been fixed.
 
-## Implementation follow-up
+## Completion-timing correction
 
-For the implementation, preserve the disconnect interval across process
-restarts and retain the initiating transport-failure reason in the journal.
-Longer term, keeping the USB/keepalive owner independent of routine core/UI
-restarts follows the separate camera-daemon boundary proposed in the original
-research. Neither of these changes is implemented by this inspection note.
+Another `Pocket 2 write deadline expired` occurred during subsequent operator
+use. Inspection found that the core used the physical-write expiry as the
+deadline for receiving the helper's completion notification too. A regression
+test reproduced retirement of an otherwise-live session when that notification
+arrived after expiry. This establishes a software failure path; the earlier
+healthy syscall trace did not capture the initiating failing write on hardware.
+
+The correction gives the notification a separate, bounded one-second grace.
+The original physical deadline is still sent unchanged to FunctionFS, which
+enforces it at actual I/O and every partial-write continuation. A helper-reported
+endpoint failure retires immediately. Missing confirmation still retires after
+the bounded grace, and admission, intent expiry, single-write serialization and
+USB generation invalidation remain in force. Failure records now retain the
+command set/ID, original deadline, elapsed wait and last-traffic ages in the
+journal without logging payloads or media.
+
+Validation passed 451 accessory tests, 18 Python helper tests and 112 daemon
+tests, plus the core build. The update was deployed with an announced core-only
+restart and 45.000 seconds of USB absence. The camera reconnected and the
+preview decoded 30 frames. A brief −20°/s request and release were accepted
+without a USB-generation change or fault; its 0.153° final rotation was too
+small to establish useful physical movement, and is not counted as a second
+higher-speed motion proof.
+
+The following 45-second observation included operator-admitted commands with a
+combined magnitude near 60°/s. USB generation stayed at one, native video stayed
+fresh and no transport failure was logged. The media pipeline briefly changed
+state without losing the USB session. The browser had fallen back to stills
+during the restart and was refreshed; it then showed advancing 640×360 live
+video, speed 60°/s and the operator's retained 70% expo. This is bounded
+post-fix evidence, not a claim that every intermittent cause has been eliminated.
+
+## Remaining follow-up
+
+Preserve the disconnect interval automatically across ordinary process
+restarts, rather than only in this deployment procedure. Keeping the
+USB/keepalive owner independent of routine core/UI restarts follows the separate
+camera-daemon boundary proposed in the original research. Those ownership
+changes remain unimplemented. Automatic live-view recovery after the stills
+fallback also remains to be completed; the operator should not need a page
+refresh. Root owns these items and the remaining camera acceptance checks.
