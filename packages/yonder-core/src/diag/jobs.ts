@@ -4,8 +4,9 @@ import { randomUUID } from "node:crypto";
 import { lookup } from "node:dns/promises";
 import { isIP } from "node:net";
 import { isProbeHost } from "./probe.js";
+import { internetSpeedTest, SPEED_TEST_HOST, type InternetSpeedResult } from "./internet-speed.js";
 
-export type DiagnosticTool = "ping" | "traceroute" | "route" | "bandwidth";
+export type DiagnosticTool = "ping" | "traceroute" | "route" | "bandwidth" | "internet-speed";
 export interface DiagnosticRequest {
   tool: DiagnosticTool; host: string; device?: string; family?: 4 | 6;
   count?: number; seconds?: number; port?: number; mbps?: number; direction?: "upload" | "download";
@@ -15,6 +16,7 @@ export interface DiagnosticJob {
   status: "running" | "succeeded" | "failed" | "cancelled" | "timed-out";
   startedAt: number; finishedAt: number | null; command: string;
   output: string; truncated: boolean; exitCode: number | null;
+  internetSpeed?: InternetSpeedResult;
 }
 export class DiagnosticError extends Error {
   constructor(message: string, readonly status = 400) { super(message); }
@@ -23,7 +25,7 @@ export interface DiagnosticProcess {
   done: Promise<{ code: number | null }>;
   stop(): void;
 }
-export type DiagnosticRunner = (argv: string[], output: (text: string) => void) => DiagnosticProcess;
+export type DiagnosticRunner = (argv: string[], output: (text: string) => void, input?: Uint8Array) => DiagnosticProcess;
 const MAX_OUTPUT = 64 * 1024;
 const MAX_JOBS = 16;
 const TTL_MS = 10 * 60_000;
@@ -36,16 +38,17 @@ function integer(value: unknown, fallback: number, min: number, max: number): nu
 export function diagnosticRequest(value: unknown): DiagnosticRequest {
   if (!value || typeof value !== "object" || Array.isArray(value)) throw new DiagnosticError("Choose a diagnostic tool and target.");
   const b = value as Record<string, unknown>;
-  if (!["ping", "traceroute", "route", "bandwidth"].includes(String(b.tool))) throw new DiagnosticError("Unknown diagnostic tool.");
-  if (typeof b.host !== "string" || !isProbeHost(b.host)) throw new DiagnosticError("Enter a hostname, IPv4 address, or IPv6 address.");
+  if (!["ping", "traceroute", "route", "bandwidth", "internet-speed"].includes(String(b.tool))) throw new DiagnosticError("Unknown diagnostic tool.");
+  const host = b.tool === "internet-speed" ? SPEED_TEST_HOST : b.host;
+  if (typeof host !== "string" || !isProbeHost(host)) throw new DiagnosticError("Enter a hostname, IPv4 address, or IPv6 address.");
   if (b.device !== undefined && (typeof b.device !== "string" || !/^[a-zA-Z0-9][a-zA-Z0-9_.:-]{0,14}$/.test(b.device)))
     throw new DiagnosticError("Choose an interface currently on this device.");
   if (b.family !== undefined && b.family !== 4 && b.family !== 6) throw new DiagnosticError("Choose IPv4 or IPv6.");
-  if (b.family && isIP(b.host) && b.family !== isIP(b.host)) throw new DiagnosticError("The address does not match the selected IP family.");
+  if (b.family && isIP(host) && b.family !== isIP(host)) throw new DiagnosticError("The address does not match the selected IP family.");
   if (b.direction !== undefined && !["upload", "download"].includes(String(b.direction))) throw new DiagnosticError("Choose upload or download.");
   return {
-    tool: b.tool as DiagnosticTool, host: b.host,
-    ...(b.device ? { device: String(b.device) } : {}), family: (b.family ?? (isIP(b.host) || 4)) as 4 | 6,
+    tool: b.tool as DiagnosticTool, host,
+    ...(b.device ? { device: String(b.device) } : {}), family: (b.family ?? (isIP(host) || 4)) as 4 | 6,
     count: integer(b.count, 4, 1, 10), seconds: integer(b.seconds, 5, 2, 10),
     port: integer(b.port, 5201, 1, 65535), mbps: integer(b.mbps, 10, 1, 100),
     direction: b.direction === "download" ? "download" : "upload",
@@ -55,6 +58,7 @@ export function diagnosticCommand(r: DiagnosticRequest, resolved?: string): stri
   const family = String(r.family ?? (isIP(r.host) || 4));
   const bound = (flag: string) => r.device ? [flag, r.device] : [];
   switch (r.tool) {
+    case "internet-speed": throw new DiagnosticError("Internet speed tests use a bounded sequence of HTTPS measurements.");
     case "ping": return ["ping", `-${family}`, "-n", "-c", String(r.count ?? 4), "-W", "2", "-w", "15", ...bound("-I"), r.host];
     case "traceroute": return ["stdbuf", "-oL", "-eL", "traceroute", `-${family}`, "-n", "-q", "1", "-w", "1", "-m", "20", ...bound("-i"), r.host];
     case "route": return ["ip", `-${family}`, "route", "get", resolved ?? r.host, ...bound("oif")];
@@ -64,17 +68,22 @@ export function diagnosticCommand(r: DiagnosticRequest, resolved?: string): stri
   }
 }
 /** A fixed command, no shell, no inherited secrets, with real process cancellation. */
-export const systemDiagnosticRunner: DiagnosticRunner = (argv, output) => {
+export const systemDiagnosticRunner: DiagnosticRunner = (argv, output, input) => {
   let child: ChildProcess;
   let killer: ReturnType<typeof setTimeout> | undefined;
   let closed = false;
   const done = new Promise<{ code: number | null }>(resolve => {
     child = spawn(argv[0]!, argv.slice(1), {
-      shell: false, stdio: ["ignore", "pipe", "pipe"],
+      shell: false, stdio: [input === undefined ? "ignore" : "pipe", "pipe", "pipe"],
       env: { PATH: "/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin", LC_ALL: "C" },
     });
     child.stdout?.setEncoding("utf8"); child.stderr?.setEncoding("utf8");
     child.stdout?.on("data", output); child.stderr?.on("data", output);
+    if (input !== undefined) {
+      // Early HTTP refusal can close stdin before the payload is drained.
+      child.stdin?.on("error", () => {});
+      child.stdin?.end(input);
+    }
     child.once("error", (error: NodeJS.ErrnoException) => {
       output(error.code === "ENOENT" ? "Diagnostic tool is not installed on this board. Update the Yonder diagnostics packages.\n" : "Could not start this diagnostic.\n");
     });
@@ -118,7 +127,7 @@ export class DiagnosticJobs {
       job.output += clean.slice(0, remaining);
       if (clean.length > remaining) job.truncated = true;
     };
-    entry.timer = setTimeout(() => this.finish(entry, "timed-out"), this.options.timeoutMs ?? 30_000);
+    entry.timer = setTimeout(() => this.finish(entry, "timed-out"), this.options.timeoutMs ?? (request.tool === "internet-speed" ? 75_000 : 30_000));
     entry.timer.unref();
     void (async () => {
       try {
@@ -131,9 +140,18 @@ export class DiagnosticJobs {
           append(`${request.host} resolved to ${resolved}\n`);
         }
         if (job.status !== "running") return;
-        const argv = diagnosticCommand(request, resolved);
-        job.command = argv.join(" ");
-        entry.run = this.options.runner(argv, append);
+        if (request.tool === "internet-speed") {
+          job.command = `Internet speed test to ${SPEED_TEST_HOST} · ${request.device ?? "automatic route"} · IPv${request.family}`;
+          entry.run = internetSpeedTest({
+            runner: this.options.runner, family: request.family ?? 4,
+            ...(request.device ? { device: request.device } : {}), output: append,
+            progress: value => { if (job.status === "running") job.internetSpeed = value; },
+          });
+        } else {
+          const argv = diagnosticCommand(request, resolved);
+          job.command = argv.join(" ");
+          entry.run = this.options.runner(argv, append);
+        }
         const result = await entry.run.done;
         delete entry.run;
         if (job.status !== "running") return;

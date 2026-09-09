@@ -27,6 +27,7 @@ it("displays terminal output as text, runs the selected interface and can cancel
   const fetcher = vi.fn((url: string) => response(url.endsWith("/interfaces") ? snapshot : url.endsWith("/cancel") ? { ...job, status: "cancelled" } : job));
   vi.stubGlobal("fetch", fetcher);
   const wrapper = mount(YonderDiagnostics); wrappers.push(wrapper); await flushPromises();
+  await wrapper.findAll("select")[0]!.setValue("ping");
   await wrapper.get('input[placeholder]').setValue("example.com");
   await wrapper.findAll("select")[1]!.setValue("eth0");
   await wrapper.get("form").trigger("submit"); await flushPromises();
@@ -47,4 +48,18 @@ it("masks passwords, rejects mismatch without a request and clears secrets after
   await inputs[2]!.setValue("new password"); await wrapper.get("form").trigger("submit"); await flushPromises();
   expect(wrapper.text()).toContain("Password changed"); expect(wrapper.find('input[type="password"]').exists()).toBe(false);
   expect(wrapper.vm.currentPassword).toBe(""); expect(wrapper.vm.newPassword).toBe("");
+});
+it("offers a one-click internet speed test without a hostname and shows the measured results", async () => {
+  const job = { id: "00000000-0000-0000-0000-000000000001", tool: "internet-speed", status: "succeeded", startedAt: 0, finishedAt: 5000,
+    command: "Internet speed test", output: "Download: 45.20 Mb/s", exitCode: 0,
+    internetSpeed: { provider: "Cloudflare", phase: "complete", downloadMbps: 45.2, uploadMbps: 8.1, latencyMs: 22.3, transferredBytes: 5_000_000, localIp: "192.0.2.2" } };
+  const fetcher = vi.fn((url: string) => response(url.endsWith("/interfaces") ? snapshot : job));
+  vi.stubGlobal("fetch", fetcher);
+  const wrapper = mount(YonderDiagnostics); wrappers.push(wrapper); await flushPromises();
+  expect(wrapper.find('input[placeholder]').exists()).toBe(false);
+  expect(wrapper.text()).toContain("No server setup");
+  await wrapper.get("form").trigger("submit"); await flushPromises();
+  const results = wrapper.get('[aria-label="Internet speed results"]');
+  expect(results.text()).toContain("45.2"); expect(results.text()).toContain("8.1");
+  expect(results.text()).toContain("22.3");
 });

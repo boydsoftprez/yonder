@@ -28,7 +28,25 @@ does not represent every ground-station peer's latency.
 
 ## Diagnostics
 
-Choose Ping, Traceroute, Route lookup, or Bandwidth. Supply a hostname or IP address,
+Choose Internet speed test, Ping, Traceroute, Route lookup, or Advanced bandwidth.
+The default Internet speed test uses Cloudflare's public HTTPS download/upload
+endpoints from the board. No target host or server setup is required. Pick the
+interface or leave Automatic route selected, then Start internet speed test.
+It reports download/upload estimates and median TCP connection latency, shows
+progress, and supports Cancel and Save output. It sends synthetic data only.
+The test payload is capped at about 27 MB, excluding protocol overhead, and the
+whole job is limited to 75 seconds. Completed payload bytes are displayed;
+an interrupted partial request can consume additional data within that cap.
+
+This is a short, single-connection HTTP measurement: it is not the Ookla engine
+or a guarantee of an ISP's advertised line rate. The two payloads per direction
+adapt to the first sample and target a few seconds within the cap. Download timing
+excludes response setup; upload timing includes transmission and acknowledgement,
+not merely the small response body. Failed or incomplete transfers are not
+reported as zero-speed measurements. Cloudflare's endpoints are documented in its
+[official speed-test project](https://github.com/cloudflare/speedtest).
+
+For Ping, Traceroute, Route lookup, or Advanced bandwidth, supply a hostname or IP address,
 an IPv4/IPv6 family, and optionally a currently present interface. Automatic route
 lets the kernel choose. Selecting an interface binds the test to it; a removed
 interface is refused rather than silently testing another link.
@@ -38,13 +56,14 @@ command, running/completion state, elapsed time and exit code. Cancel stops the
 process; Save output downloads the text. Revisiting Diagnostics in the same browser
 tab recovers its last job. Only the initiating authenticated session can read or
 cancel it. Tests run one at a time, expire after ten minutes, stop within 30 seconds,
-and retain at most 64 Ki characters of output. No arbitrary shell is exposed.
+and retain at most 64 Ki characters of output. The public internet speed test has
+the separate 75-second bound above. No arbitrary shell is exposed.
 
 Traceroute sends one probe per hop, up to 20 hops. An asterisk means that hop did
 not answer. Filtering or a hop's ICMP policy can produce asterisks on a working
 path, so they are not a conclusive failure indication.
 
-Bandwidth uses an operator-selected **iperf3 server**. Run `iperf3 -s` on the
+Advanced bandwidth uses an operator-selected **iperf3 server**. Run `iperf3 -s` on the
 target, then choose upload or download, port, duration (2–10 seconds) and rate
 ceiling (1–100 Mb/s). Defaults are five seconds and 10 Mb/s, approximately 6.25 MB
 of payload plus protocol overhead. The result is capped by that ceiling and shares
