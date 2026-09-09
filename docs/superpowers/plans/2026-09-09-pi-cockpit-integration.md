@@ -31,17 +31,17 @@ the earlier proposed integration base in the live-cockpit bench plan.
   retaining both camera and cockpit tests. Reconcile requirements and blueprint
   evidence without discarding either feature set.
 - [x] Build and test the integrated packages and authenticated console HTTP routes.
-- [ ] Complete native-browser inspection; the initial browser automation session detached.
+- [x] Complete native-browser inspection through the camera task's existing authenticated browser.
 - [x] Incorporate the camera task's committed driver fix and rerun affected checks.
 - [x] Incorporate its subsequent bounded camera-workflow correction before activation.
 - [x] Confirm Pi identity, architecture, installed build, active services, free
   space, camera endpoint ownership and the actual flight-controller connection.
 - [x] Stage matching artifacts in a separate release directory.
-- [ ] Keep a reversible
+- [x] Keep a reversible
   installed-build/configuration snapshot and coordinate the shared restart.
-- [ ] Deploy the combined release during the agreed window, verify camera/media
+- [x] Deploy the combined release during the agreed window, verify camera/media
   continuity and read real flight-controller telemetry in the authenticated cockpit.
-- [ ] Record the exact deployed revision and software/hardware evidence, plus any
+- [x] Record the exact deployed revision and software/hardware evidence, plus any
   remaining limitation. Keep simulated and physical-controller results distinct.
 
 The operator connected the flight controller during this task. The existing
@@ -56,3 +56,6 @@ Camera workflow commit `55be6d5` has been incorporated. The camera task explicit
 released the activation hold after validation; the combined build and all workspace
 tests passed. Its existing Camera browser owns the positive authenticated endpoint
 and preview/thumbnail UI checks after restart, avoiding an extra media viewer.
+
+Activated: final source `2577459` (core activation `46a6c55`), with live Flight
+and Camera verification recorded in the hardware integration evidence note.

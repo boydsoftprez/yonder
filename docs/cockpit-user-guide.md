@@ -16,6 +16,12 @@ board supplies its connected flight controller's data. These screenshots show th
 production cockpit with fixture data or the explicitly named simulator; they do
 not depict a physical flight.
 
+The combined Raspberry Pi installation serves **Flight** at
+`/dashboard/flight` after normal sign-in. The recorded bench uses console port
+3000. Its camera picture/aim page remains **Cockpit**, and **Camera** opens the
+camera workspace. See the [hardware integration record](hardware/2026-09-09-cockpit-camera-integration.md)
+for the verified runtime and bench limitations.
+
 ### 1. Find your way around
 
 ![Single PFD with top navigation fields, a graphical instrument bank, mission and map insets](images/cockpit/cockpit-main.png)

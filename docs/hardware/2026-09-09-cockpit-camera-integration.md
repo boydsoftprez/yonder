@@ -92,3 +92,54 @@ The staged manifest explicitly carries that hold. Once incorporated, activation
 must preserve at least 45 seconds of USB absence across the core restart and
 restore the previously running preview. This is a scheduling boundary between
 shared-service updates, not an incompatible hardware or software architecture.
+
+
+## Activated combined runtime
+
+Activation was released after validated camera workflow commit `55be6d5`. It was
+merged into `46a6c55`, built and tested as one application: 3,592 core tests, 890
+dashboard tests and 355 tests in the other workspaces passed. The native camera
+picture/aim page remains **Cockpit**; the PFD/MFD is **Flight**.
+
+The Pi was activated with rollback copies at
+`/opt/yonder/backups/cockpit-20260909T173507Z`. Core and console were stopped,
+the USB controller was confirmed not attached, and at least 45 seconds of USB
+absence were retained before starting core. Config and secrets stayed byte-for-byte
+unchanged. The previously running cam3 preview was restored through its normal
+run endpoint, without moving the gimbal.
+
+Observed after activation:
+
+- Core PID 105058 and console PID 105234, both active with zero service restarts.
+- MAVLink router PID 1032 and MediaMTX PID 771 stayed active throughout the update.
+- Boot identity `c038c4dc-76b1-4867-b19f-457c4de76e1a`; no device reboot was required.
+- cam3 reported running, no refusal, zero pipeline restarts and current camera
+  metadata. The existing Camera browser showed advancing 1280×720 video and a
+  fresh loaded thumbnail. No additional camera stream was opened for verification.
+- The Flight API returned 200, connected and ready, with real disarmed ArduPlane
+  telemetry, attitude/heading and battery readings. Aircraft operation count was
+  zero. GPS fix was zero, so position-dependent features were not established.
+- The existing authenticated browser opened Flight from navigation and rendered
+  the PFD horizon, tapes and heading with the real MAVLink source.
+- Unauthenticated `/session`, `/video/cam3/connection` and `/cockpit/api/flight`
+  returned JSON 401 with `Cache-Control: no-store`. An independent authenticated
+  cookie session returned 200/no-store for `/session` and the connection endpoint;
+  the latter returned four receiver renderings. Credentials were not logged.
+- Current power flags remained `0x0`.
+
+The live receiver strings revealed one final display-only issue. Camera follow-up
+`e7f1685` was merged into **`2577459`**, which is the final deployed source revision.
+Its 74 Deck tests and bundle build passed. Only `ui-yonder-deck.umd.js` was replaced
+atomically; core/console PIDs remained unchanged. The final installed manifest
+matched all 2,460 staged file hashes, including both asynchronous USB helper files.
+The core activation revision remains `46a6c55`; the final UI bundle belongs to
+`2577459`. The camera task completed the final one-reload visual check on its existing
+browser: all four connection values wrap without horizontal overflow, only the
+three configured receiver renderings have Copy buttons, 1280×720 video continues
+advancing and the thumbnail is fresh. The original Camera tab was left on preview.
+
+On the selected Pi the console port is 3000. After normal sign-in, use
+`/dashboard/flight` for the flight display, `/dashboard/camera` for the camera
+workspace and `/dashboard/cockpit` for standalone picture/aim. Public geographic
+sources remain ground-side by default. None of this bench validation establishes
+an armed flight or camera-to-world calibration.
