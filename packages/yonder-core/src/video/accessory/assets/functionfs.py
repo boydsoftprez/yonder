@@ -3,7 +3,8 @@
 """R-CAM-15. Private FunctionFS fd helper; AOA/DUML policy belongs to TypeScript.
 
 Bounded NDJSON on stdin/stdout, no capture files, no protocol-generated writes.
-Every endpoint is nonblocking. SIGTERM/parent EOF retires this entire generation.
+Bulk transfers use native AIO so reads cannot block command handling.
+SIGTERM/parent EOF retires this entire generation.
 """
 import base64
 import ctypes
@@ -22,6 +23,7 @@ import sys
 import tempfile
 import time
 import uuid
+from usb_aio import LinuxAio
 
 MAX_CHUNK = 16384
 MAX_LINE = 24000
@@ -135,19 +137,16 @@ class PendingWrite:
             raise ValueError('invalid write deadline')
         self.ident, self.data, self.deadline, self.offset = ident, data, deadline, 0
 
-    def step(self, fd):
-        # Check the original daemon expiry at the last userspace boundary before
-        # EVERY endpoint write, including continuations after partial writes.
-        if now() >= self.deadline:
-            raise TimeoutError('endpoint write deadline expired')
-        try:
-            count = endpoint_write(fd, self.data[self.offset:], self.deadline)
-        except BlockingIOError:
-            return False
-        if count <= 0:
-            raise OSError('endpoint write made no progress')
+    def complete(self, count):
+        if count <= 0 or count > len(self.data) - self.offset:
+            raise OSError('endpoint write made invalid progress')
         self.offset += count
         return self.offset == len(self.data)
+
+    def submit(self, bulk, fd):
+        if now() >= self.deadline:
+            raise TimeoutError('endpoint write deadline expired')
+        return bulk.submit(fd, data=self.data[self.offset:], deadline=self.deadline)
 
 
 def control_io(fd, setup, action, data, deadline=None):
@@ -284,9 +283,15 @@ class Gadget:
 
 
 class Helper:
-    def __init__(self):
+    def __init__(self, bulk_factory=LinuxAio):
         self.lines = Lines()
         self.output = bytearray()
+        self.output_partial = False
+        self.priority_end = 0
+        self.bulk_factory = bulk_factory
+        self.bulk = None
+        self.read_token = None
+        self.write_token = None
         self.stages = {}
         self.root = None
         self.lock = None
@@ -300,7 +305,65 @@ class Helper:
         line = json.dumps(message, separators=(',', ':')).encode() + b'\n'
         if len(line) > MAX_LINE or len(self.output) + len(line) > MAX_OUTPUT:
             raise ValueError('IPC output queue limit')
-        self.output.extend(line)
+        if message.get('type') == 'written':
+            boundary = self.priority_end or (self.output.index(b'\n') + 1 if self.output_partial else 0)
+            self.output[boundary:boundary] = line
+            self.priority_end = boundary + len(line)
+        else:
+            self.output.extend(line)
+
+    def consumed_output(self, count):
+        if not 0 <= count <= len(self.output):
+            raise ValueError('Invalid IPC write count')
+        if count:
+            self.output_partial = self.output[count - 1] != 10
+            self.priority_end = max(0, self.priority_end - count)
+            del self.output[:count]
+
+    def reap_bulk(self):
+        if self.bulk is None:
+            return
+        completed = self.bulk.poll()
+        # Commands get acknowledged before processing more video bytes.
+        completed.sort(key=lambda result: result[0] != self.write_token)
+        for token, count, data in completed:
+            if count < 0:
+                raise OSError(-count, 'asynchronous USB transfer failed')
+            if token == self.write_token:
+                self.write_token = None
+                if self.pending is None:
+                    raise ValueError('USB write completed without an owner')
+                if self.pending.complete(count):
+                    self.emit(type='written', id=self.pending.ident)
+                    self.pending = None
+            elif token == self.read_token:
+                self.read_token = None
+                # Zero-length USB packets are valid, not an endpoint EOF.
+                if data:
+                    self.emit(type='data', data=base64.b64encode(data).decode())
+            else:
+                raise ValueError('Unexpected asynchronous USB token')
+
+    def queue_bulk(self):
+        stage = self.stages.get('accessory')
+        if stage is None or stage.ep_out is None or stage.ep_in is None:
+            return
+        if self.bulk is None:
+            self.bulk = self.bulk_factory()
+        if self.pending is not None and self.write_token is None:
+            # Original command expiry is checked at actual kernel submission,
+            # including each continuation after a partial completion.
+            if now() >= self.pending.deadline:
+                raise TimeoutError('endpoint write deadline expired')
+            try:
+                self.write_token = self.pending.submit(self.bulk, stage.ep_in)
+            except BlockingIOError:
+                pass
+        if self.read_token is None and self.can_read_bulk():
+            try:
+                self.read_token = self.bulk.submit(stage.ep_out, length=MAX_CHUNK)
+            except BlockingIOError:
+                pass
 
     def can_read_bulk(self):
         # A maximum-sized data chunk fits within one bounded IPC line. Check
@@ -393,6 +456,8 @@ class Helper:
                         raise
                     self.binding = (stage, deadline, current + 100)
         if self.pending and current >= self.pending.deadline:
+            if self.bulk is not None and self.write_token is not None:
+                self.bulk.cancel(self.write_token)
             raise TimeoutError('endpoint write deadline expired')
         for stage in self.stages.values():
             control = stage.control
@@ -414,14 +479,14 @@ class Helper:
         os.set_blocking(0, False)
         os.set_blocking(1, False)
         while True:
+            self.reap_bulk()
             self.tick()
             reads = [0] + [s.ep0 for s in self.stages.values() if s.control is None]
-            if self.can_read_bulk():
-                reads += [s.ep_out for s in self.stages.values() if s.ep_out is not None]
+            if self.bulk is not None:
+                reads.append(self.bulk.eventfd)
             writes = [1] if self.output else []
-            if self.pending:
-                writes.append(self.stages['accessory'].ep_in)
-            readable, writable, _ = select.select(reads, writes, [], 0.02)
+            timeout = min(0.02, max(0, (self.pending.deadline - now()) / 1000)) if self.pending else 0.02
+            readable, writable, _ = select.select(reads, writes, [], timeout)
             # Parent EOF/control precedes all endpoint work, including an active write.
             if 0 in readable:
                 data = os.read(0, 8192)
@@ -432,7 +497,7 @@ class Helper:
             if 1 in writable:
                 try:
                     count = os.write(1, self.output[:65536])
-                    del self.output[:count]
+                    self.consumed_output(count)
                 except BlockingIOError:
                     pass
             for stage in self.stages.values():
@@ -455,24 +520,19 @@ class Helper:
                             if typ in (1, 3) and stage.stage == 'accessory':
                                 # Never permit bytes after a disable even before the parent sees it.
                                 self.pending = None
+                                if self.bulk is not None:
+                                    self.bulk.close()
+                                    self.bulk = None
+                                self.read_token = self.write_token = None
                                 for fd in (stage.ep_in, stage.ep_out):
                                     if fd is not None:
                                         os.close(fd)
                                         stage.fds.remove(fd)
                                 stage.ep_in = stage.ep_out = None
-                # EP0 messages or an earlier stage may have consumed headroom
-                # after select was built. Recheck immediately before bulk I/O.
-                if stage.ep_out is not None and stage.ep_out in readable and self.can_read_bulk():
-                    try:
-                        data = endpoint_read(stage.ep_out, MAX_CHUNK, now() + 20)
-                    except (BlockingIOError, TimeoutError):
-                        continue
-                    if data:
-                        self.emit(type='data', data=base64.b64encode(data).decode())
-            if self.pending and self.stages['accessory'].ep_in in writable:
-                if self.pending.step(self.stages['accessory'].ep_in):
-                    self.emit(type='written', id=self.pending.ident)
-                    self.pending = None
+            # USB completions wake eventfd; no synchronous bulk read/write can
+            # hold this loop away from stdin, lifecycle events or deadlines.
+            self.reap_bulk()
+            self.queue_bulk()
 
     def flush_error(self, error):
         # Fixed text only: no exception payload, media, or command bytes in logs.
@@ -492,6 +552,19 @@ class Helper:
 
     def close(self):
         failures = []
+        # Unbind before joining AIO: closing a userspace fd alone does not
+        # cancel kernel-owned transfers. Keep all buffers alive through join.
+        for stage in reversed(list(self.stages.values())):
+            try:
+                stage.unbind()
+            except OSError as error:
+                failures.append(error)
+        if self.bulk is not None:
+            try:
+                self.bulk.close()
+                self.bulk = None
+            except OSError as error:
+                failures.append(error)
         for stage in reversed(list(self.stages.values())):
             failures.extend(stage.close())
         if self.root:

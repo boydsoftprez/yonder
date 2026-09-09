@@ -32,7 +32,8 @@ the earlier proposed integration base in the live-cockpit bench plan.
   evidence without discarding either feature set.
 - [x] Build and test the integrated packages and authenticated console HTTP routes.
 - [ ] Complete native-browser inspection; the initial browser automation session detached.
-- [ ] Incorporate the camera task's committed driver fix and rerun affected checks.
+- [x] Incorporate the camera task's committed driver fix and rerun affected checks.
+- [ ] Incorporate its subsequent bounded camera-workflow correction before activation.
 - [x] Confirm Pi identity, architecture, installed build, active services, free
   space, camera endpoint ownership and the actual flight-controller connection.
 - [ ] Stage matching artifacts in a separate release directory. Keep a reversible

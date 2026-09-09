@@ -325,10 +325,11 @@ it("ships its executable Python helper through the existing core asset copier", 
     mkdirSync(join(scratch, "src/video/accessory/assets"), { recursive: true });
     copyFileSync("scripts/copy-assets.mjs", join(scratch, "scripts/copy-assets.mjs"));
     copyFileSync(FUNCTIONFS_HELPER_PATH, join(scratch, "src/video/accessory/assets/functionfs.py"));
+    copyFileSync(new URL('./assets/usb_aio.py', import.meta.url), join(scratch, "src/video/accessory/assets/usb_aio.py"));
     execFileSync("node", [join(scratch, "scripts/copy-assets.mjs")]);
     const installed = join(scratch, "dist/video/accessory/assets/functionfs.py");
     expect(readFileSync(installed)).toEqual(readFileSync(FUNCTIONFS_HELPER_PATH));
-    execFileSync("python3", ["-c", "import sys; compile(open(sys.argv[1]).read(), sys.argv[1], 'exec')", installed]);
+    execFileSync("python3", ["-B", "-c", "import sys,runpy,pathlib; sys.path.insert(0,str(pathlib.Path(sys.argv[1]).parent)); runpy.run_path(sys.argv[1],run_name='package_import_check')", installed]);
   } finally { rmSync(scratch, { recursive: true, force: true }); }
 });
 it("never promotes an enabled but silent or malformed stream to live", async () => {
@@ -410,4 +411,61 @@ it("accepts numeric clean exit after the helper handles termination and cleanup"
   await device.start(); await device.close();
   expect(device.snapshot().state).toBe("closed");
   expect(child.kill).toHaveBeenCalledWith("SIGTERM");
+});
+
+
+it('runs the USB scheduling, backpressure and native-AIO buffer-lifetime regressions', async () => {
+  const { execFileSync } = await import('node:child_process');
+  const { fileURLToPath } = await import('node:url');
+  for (const script of ['functionfs_test.py', 'usb_aio_test.py']) {
+    execFileSync('python3', ['-B', fileURLToPath(new URL(script, import.meta.url))], { timeout: 10000, stdio: 'pipe' });
+  }
+});
+
+it.each([false, true])('reproduces the false watchdog retirement under video backlog; priority completion=%s', async priority => {
+  const { execFileSync } = await import('node:child_process');
+  const { FUNCTIONFS_HELPER_PATH } = await import('./linux.js');
+  const f = fixture(); const h = await live(f);
+  const result = f.device.sendCommand({ commandSet: 0, commandId: 14, ack: 0 })
+    .then(() => ({ ok: true, reason: '' }), error => ({ ok: false, reason: error.message }));
+  await vi.advanceTimersByTimeAsync(0);
+  const write = h.messages.at(-1)!;
+  const send = h.send.bind(h);
+  h.send = message => { send(message); if (message.type === 'write' && message.id !== write.id) queueMicrotask(() => h.emit({ type: 'written', id: message.id })); };
+  // Fresh, valid camera traffic fills the helper's real output queue. The
+  // throttled consumer delivers one queued line every 100 ms. No camera or
+  // physical write has failed; only the old completion ordering is wrong.
+  const packet = Buffer.from(encodeAoaEnvelope(AOA_COMMAND_ROUTE,
+    encodeDuml({ commandSet: 0, commandId: 0, sequence: 9, response: true, ack: 0 })));
+  const data = Buffer.concat(Array.from({ length: 700 }, () => packet)).toString('base64');
+  const program = `import sys,json,runpy,pathlib
+sys.path.insert(0,str(pathlib.Path(sys.argv[1]).parent))
+module=runpy.run_path(sys.argv[1],run_name='queue_test')
+helper=module['Helper'](); request=json.load(sys.stdin)
+for _ in range(30): helper.emit(type='data',data=request['data'])
+helper.emit(type='written',id=request['id'])
+sys.stdout.buffer.write(helper.output)
+`;
+  const output = execFileSync('python3', ['-B', '-c', program, FUNCTIONFS_HELPER_PATH],
+    { input: JSON.stringify({ id: write.id, data }), encoding: 'utf8', maxBuffer: 2_000_000 });
+  let messages = output.trim().split('\n').map(line => JSON.parse(line));
+  // Negative control: the former FIFO put the same completed-write notice
+  // after all video. The positive case uses the shipped helper's ordering.
+  if (!priority) messages = [...messages.filter(m => m.type === 'data'), ...messages.filter(m => m.type === 'written')];
+  for (const message of messages) {
+    await vi.advanceTimersByTimeAsync(100);
+    if (!h.stopped) h.emit(message);
+  }
+  const outcome = await result;
+  expect(outcome.ok).toBe(priority);
+  if (priority) {
+    expect(h.stopped).toBe(false); expect(f.onFailure).not.toHaveBeenCalled();
+  } else {
+    expect(outcome.reason).toContain('write confirmation timed out');
+    expect(f.onFailure).toHaveBeenCalledWith(expect.objectContaining({
+      reason: 'Pocket 2 write confirmation timed out',
+      lastCommandAgeMs: 100,
+      pendingWrite: expect.objectContaining({ commandSet: 0, commandId: 14 }),
+    }));
+  }
 });
