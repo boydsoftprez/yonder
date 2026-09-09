@@ -98,7 +98,7 @@ Parameter writes are vehicle commands. R-CMD applies to every requirement here.
 | R-CAM-08 | Encode H.265 where the board's encoder supports it | 2 |
 | R-CAM-09 | Run one independent pipeline per camera, up to the board's capability | 1 |
 | R-CAM-10 | Refuse, with a clear message, a camera configuration the board cannot sustain | 2 |
-| R-CAM-11 | Control gimbal-equipped cameras: aim, mode, recentre, zoom, focus, exposure and white balance | 3 |
+| R-CAM-11 | Control gimbal-equipped cameras: aim, mode, recentre, zoom, focus, exposure and white balance. **Pan and tilt remain usable when the camera body changes heading or orientation.** Movement limits refer to the camera's native joints and feedback, never a fixed rectangle of world-attitude angles; reorienting a centred camera must not make it outside its permitted travel. Preserve fresh operator intent and device fault/limit safeguards | 3 |
 | R-CAM-12 | Detect attached cameras on demand from the console, and report what was found, what was rejected and why | 1 |
 | R-CAM-13 | Select an encoder appropriate to the board by probing the hardware, not from a table of board names, and report the encoder in use. An operator may name one explicitly to bypass the probe | 1 |
 | R-CAM-14 | Build a camera's offered formats, resolutions, rates and controls from what the device answers, never from a stored list. **A capability the device advertises but does not answer is absent**, and is reported as advertised-but-unavailable rather than hidden | 1 |
@@ -329,6 +329,7 @@ Parameter writes are vehicle commands. R-CMD applies to every requirement here.
 | R-UI-26 | **An action lives beside the thing it acts on where that thing is on the page** — Record with Capture, Recentre with Aim. The rail carries the page's own actions. Amends ADR-0009's exclusive rail rule; R-UI-10's size and primary-action limits remain | 1 |
 | R-UI-27 | **A camera's name is the operator's.** It defaults to `Cam N`, is edited on the camera's own page, and is shown everywhere the camera is named | 2 |
 | R-UI-28 | **The picture and the aim panel work without the deck.** They are shown on the Cockpit, and depend on nothing the camera page draws around them | 1 |
+| R-UI-29 | **The camera workspace has one picture, one aim panel, and one persistent place to apply and confirm changes.** Camera thumbnails carry real preview frames and their age. Pan/tilt readings sit with their controls outside the picture. Camera image controls, capture controls and stream configuration remain available on one surface; variable messages and controls fit their containers, and routine updates and operation results appear inline without covering other content | 2 |
 
 ---
 
