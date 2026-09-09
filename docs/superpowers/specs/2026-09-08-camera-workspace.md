@@ -42,7 +42,7 @@ keeps an owned pointer capture outside its rim, uses the painted SVG coordinate
 space, and labels Up, Down, Left and Right explicitly. Release, lost capture,
 inhibition, page loss and real control-generation changes still retire the gesture.
 The first rate follows its grant immediately; subsequent requests are paced from
-the preceding request start and remain single-flight. Rate limits are unchanged.
+the preceding request start and remain single-flight. Intent expiry is unchanged.
 
 The pad also provides browser-local stick expo from 0% (linear) to 100% (cubic),
 defaulting to 50%. Apply the curve to radial magnitude after the dead zone so

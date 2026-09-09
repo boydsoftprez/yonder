@@ -133,10 +133,33 @@ driver and browser transport both enforced the initial 10°/s bench cap, while
 change uses the published ceiling with a combined pan/tilt magnitude bound and
 an independent browser speed selector, defaulting to 60°/s. Both the pad and
 image drag share the selected speed and expo. The source and browser builds
-passed, with 386 focused speed/control/presentation tests passing. The prepared
-bundle and rollback copies are staged; deployment requiring a core restart is
-awaiting operator approval. Higher-rate physical motion and stopping are not
-yet verified.
+passed, with 386 focused speed/control/presentation tests passing.
+
+The operator approved installation. The first restart retained 45.000 seconds
+of USB absence and regained the camera. A final entry-point check then found a
+missed 10°/s limit in the request validator shared by the console and source.
+That omission was corrected using the same rated ceiling; console-forwarding
+and source-to-command tests now exercise 60°/s, 120°/s and diagonal requests,
+plus over-cap refusal. The 195 focused boundary/source/guard/dispatcher tests
+and core build passed. Completing the approved installation required an
+additional, announced core and console restart with another 45.000-second USB
+absence. Network services stayed active. The camera enumerated again.
+
+After the completed installation, the preview decoded 30 frames. One 20°/s pan
+request, held for 150 ms before release, was accepted through the production
+source API and produced 12.614° of observed quaternion rotation by the final
+sample. Release was accepted; admitted rates returned to zero, flags stayed
+clear, and the same USB generation remained live. This verifies a command above
+the former cap and its release, not a precise 20°/s physical-velocity measurement
+or a higher-rate stopping-time bound. Full-speed physical stopping remains
+unmeasured.
+
+The real browser displayed a maximum-speed range of 1–120°/s set to the new
+60°/s default, retained the operator's 100% expo preference, and showed advancing
+640×360 preview video with the real thumbnail. CPU maximum remained 1.8 GHz
+and the current voltage alarm was zero. The intermittent write deadline fault
+is still unresolved; neither this short check nor the healthy syscall trace
+establishes that it has been fixed.
 
 ## Implementation follow-up
 
