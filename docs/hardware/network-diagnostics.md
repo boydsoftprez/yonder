@@ -89,5 +89,6 @@ The previous boot's journal was not persistent, so it cannot establish its cause
 
 The camera task separately compared a temporary peer-route MTU of 1280 with the
 original 2800. The smaller value reduced delivered throughput and was restored.
-Its separate hardware encoder bitrate fix and the Flight Home changes must be
-preserved when installing this change.
+Its attempted hardware CBR change subsequently failed the full pipeline check and
+was rolled back. Preserve that rollback and the Flight Home changes when installing
+this change.

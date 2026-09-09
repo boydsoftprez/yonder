@@ -300,6 +300,21 @@ const argvOf = (calls: string[][], verb: string, name: string) =>
   calls.find((c) => c[1] === "connection" && c[2] === verb && c[3] === name);
 
 describe("NetworkRenderer", () => {
+  it("takes changed default-route metrics live without reapplying already-correct routes", async () => {
+    const config = structuredClone(DEFAULT_CONFIG); config.network.ap.enabled = false;
+    for (const oldMetric of [100, 800]) {
+      const { renderer, calls } = harness({
+        devices: "eth0:ethernet:connected:yonder-eth\n", connections: [ETHERNET_CONNECTION],
+        fails: {
+          "ip -j -4 route show default dev eth0": { code: 0, stdout: JSON.stringify([{ dst: "default", dev: "eth0", metric: oldMetric }]), stderr: "" },
+          "ip -j -6 route show default dev eth0": { code: 0, stdout: "[]", stderr: "" },
+        },
+      });
+      await renderer.render(config);
+      expect(calls.some(c => c.join(" ") === "nmcli device reapply eth0")).toBe(oldMetric !== 100);
+      expect(calls.some(c => c[1] === "connection" && ["down", "up"].includes(c[2]!))).toBe(false);
+    }
+  });
   it("creates the access point and the ethernet profile", async () => {
     const { renderer, calls } = harness();
     await renderer.render(DEFAULT_CONFIG);

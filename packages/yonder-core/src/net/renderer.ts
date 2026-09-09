@@ -1,6 +1,7 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 import { systemClock, type Clock, type Renderer } from "../apply/types.js";
 import type { Config } from "../schema/config.js";
+import { routeMetricDiffers } from "./route-metrics.js";
 import type { SecretStore } from "../secrets/store.js";
 import { NmcliClient, type DeviceInfo } from "./nmcli/client.js";
 import { enableWifiRadio, radioWanted } from "./radio.js";
@@ -392,7 +393,9 @@ export class NetworkRenderer implements Renderer {
       if (!EGRESS_CONNECTIONS.some(([name]) => name === profile.name)) continue;
       if (profile.name === MODEM_CONNECTION && redial.length > 0) continue;
       const active = devices.find(d => d.connection === profile.name && d.state === "connected");
-      if (active) await this.client.reapply(active.device);
+      const metric = Number(profile.settings.find(([name]) => name === "ipv4.route-metric")?.[1]);
+      if (active && Number.isFinite(metric) && await routeMetricDiffers(this.client.runner, active.device, metric))
+        await this.client.reapply(active.device);
     }
 
     // The radio, arbitrated (K-13). One radio can be an access point or a
