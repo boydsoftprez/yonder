@@ -581,6 +581,32 @@ describe("yonder-captures", () => {
 
 
 describe('yonder-camera-workspace', () => {
+  it('clears retired camera controls through the actual node before hydrating the newly selected camera', async () => {
+    const inputs = [
+      { workspaceKind: 'report', payload: { camera: { id: 'cam0' }, controls: { oldCamera: true } } },
+      { workspaceKind: 'pending', payload: { pending: true, id: 'tx1' }, yonder: { state: 'pending', expiresAt: 1500 } },
+      { workspaceKind: 'report', camera: 'cam1', yonder: { state: 'rejected', message: 'Camera B unavailable' } },
+      { workspaceKind: 'report', camera: 'cam1', payload: { camera: { id: 'cam1' }, controls: { newCamera: true } } },
+    ];
+    const results = await new Promise<Received[]>((resolve) => {
+      void helper.load(workspaceNode, [{ id: 'n1', type: 'yonder-camera-workspace', wires: [['n2']] }, { id: 'n2', type: 'helper' }], () => {
+        const node = helper.getNode('n1') as unknown as { receive(m: unknown): void };
+        const sink = helper.getNode('n2') as unknown as { on(e: string, f: (m: Received) => void): void };
+        const received: Received[] = [];
+        sink.on('input', message => {
+          received.push(message);
+          if (received.length === inputs.length) resolve(received);
+          else node.receive(inputs[received.length]);
+        });
+        node.receive(inputs[0]);
+      });
+    });
+    expect(results[2].payload).not.toHaveProperty('camera');
+    expect(results[2].payload).not.toHaveProperty('controls');
+    expect(results[2].payload).toMatchObject({ workspace: { pending: { id: 'tx1' }, result: { message: 'Camera B unavailable' } } });
+    expect(results[3].payload).toMatchObject({ camera: { id: 'cam1' }, controls: { newCamera: true }, workspace: { pending: { id: 'tx1' }, result: null } });
+    expect(asked).toEqual([]);
+  });
   it('registers a package-backed state adapter and emits a complete hydration snapshot without querying hardware', async () => {
     const result = await send(workspaceNode, 'yonder-camera-workspace', { workspaceKind: 'report', payload: { camera: { id: 'cam0', name: 'Camera' } } });
     expect(result.payload).toMatchObject({ camera: { id: 'cam0' }, workspace: { pending: null, result: null } });

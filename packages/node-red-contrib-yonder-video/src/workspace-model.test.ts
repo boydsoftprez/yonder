@@ -4,6 +4,25 @@ import { CameraWorkspace } from './workspace-model.js';
 
 const report = { camera: { id: 'cam0', name: 'Camera' }, controls: { untouched: true } };
 describe('camera workspace snapshot', () => {
+  it('retires camera A controls on a failed read of B, preserves pending, and hydrates B on recovery', () => {
+    const model = new CameraWorkspace();
+    model.receive({ workspaceKind: 'report', payload: report });
+    model.receive({ workspaceKind: 'pending', payload: { pending: true, id: 'apply-1', keys: [{ action: 'revert' }] }, yonder: { state: 'pending', expiresAt: 1500 } });
+    model.receive({ workspaceKind: 'result', camera: 'cam0', problems: [{ path: 'width', message: 'A refused' }], yonder: { state: 'rejected', message: 'Draft refused' } });
+    const failed = model.receive({ workspaceKind: 'report', camera: 'cam1', payload: 'Read failed', yonder: { state: 'rejected', message: 'B unavailable' } });
+    expect(failed).not.toHaveProperty('camera');
+    expect(failed).not.toHaveProperty('controls');
+    expect(failed).toMatchObject({ problems: [], workspace: { pending: { id: 'apply-1', expiresAt: 1500 }, result: { message: 'B unavailable' } } });
+    expect(model.receive({ workspaceKind: 'pending', payload: { pending: false }, yonder: { state: 'idle' } })).not.toHaveProperty('controls');
+    const recovered = model.receive({ workspaceKind: 'report', camera: 'cam1', payload: { camera: { id: 'cam1' }, controls: { cameraB: true } } });
+    expect(recovered).toMatchObject({ camera: { id: 'cam1' }, controls: { cameraB: true }, workspace: { pending: { pending: false }, result: null } });
+    expect(recovered?.controls).not.toHaveProperty('untouched');
+  });
+  it('retains its own camera report during a same-camera read failure', () => {
+    const model = new CameraWorkspace(); model.receive({ workspaceKind: 'report', payload: report });
+    expect(model.receive({ workspaceKind: 'report', camera: 'cam0', yonder: { state: 'rejected', message: 'Temporarily unavailable' } })).toMatchObject({ ...report, workspace: { result: { message: 'Temporarily unavailable' } } });
+    expect(model.receive({ workspaceKind: 'report', payload: report })).toMatchObject({ ...report, workspace: { result: null } });
+  });
   it('retains the camera while authoritative pending updates arrive and carries exact deadlines/keys', () => {
     const model = new CameraWorkspace(); model.receive({ workspaceKind: 'report', payload: report });
     const snapshot = model.receive({ workspaceKind: 'pending', payload: { pending: true, id: 'apply-1', keys: [{ action: 'revert' }], what: 'Configuration pending', why: 'Device confirms' }, yonder: { state: 'pending', expiresAt: 1500, at: 1000, movesRadio: true, message: 'Device is checking' } });

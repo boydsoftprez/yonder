@@ -17,6 +17,9 @@ export class CameraWorkspace {
       case 'report':
         if (!object(body) || !object(body.camera) || typeof body.camera.id !== 'string') {
           if (status?.state !== 'rejected') return null;
+          if (typeof message.camera === 'string' && this.report?.camera.id !== message.camera) {
+            this.report = null; this.problems = [];
+          }
           this.result = structuredClone(status); this.readFailure = true; break;
         }
         if (this.report?.camera.id !== body.camera.id) { this.result = null; this.problems = []; }
