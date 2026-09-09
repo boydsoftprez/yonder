@@ -5,6 +5,9 @@ import { Intent, type IntentAdmitted, type IntentClock, type IntentIssued, type 
 import { guard, type GimbalAttitude, type GuardContext, type GuardReason, type GuardResult, type MotionCommand } from './guard.js';
 import { normalizedQuaternion, RotationProgress } from './rotation-progress.js';
 
+/** Leave enough of the unchanged Intent deadline for USB write plus IPC completion. */
+const MIN_RATE_DISPATCH_MS = 200;
+
 /** Caller supplies only CRC-validated DUML frames, and the transport's monotonic clock. */
 export function decodeGimbalAttitude(frame: DumlFrame, clock: Pick<IntentClock, 'now'>): GimbalAttitude | null {
   if (frame.commandSet !== 4 || frame.commandId !== 5 || frame.sender !== 4 || frame.response
@@ -171,6 +174,9 @@ export class GimbalController {
     this.clearTimer();
     const live = this.intent.live();
     if (!live || !this.rateAdmission(live)) return;
+    // A skipped end-of-lease repeat is not a transport failure. A renewal
+    // invokes pump again with the next credential's original deadline.
+    if (!this.hasDispatchBudget(live)) return;
     const now = this.options.clock.now();
     if (!this.pending && now - this.lastCompletedAt >= 100) {
       this.pending = true;
@@ -184,9 +190,16 @@ export class GimbalController {
   }
   private async writeRate(live: LiveIntent): Promise<void> {
     const epoch = this.rateEpoch;
+    let budgetRefused = false;
     try {
       await this.options.write(this.wire({ kind: 'rate', ...live.rate }), {
-        signal: live.signal, deadline: live.expiresAt, admission: () => this.rateAdmission(live),
+        signal: live.signal, deadline: live.expiresAt, admission: () => {
+          // Recheck after any writer queue delay. Keep this local flag apart
+          // from arbitrary endpoint errors, which still disconnect below.
+          if (!live.isValid() || this.intent.live() !== live) return false;
+          if (!this.hasDispatchBudget(live)) { budgetRefused = true; return false; }
+          return this.rateAdmission(live);
+        },
       });
       // Promise completion is actual endpoint completion, not admission/enqueue.
       // Renewal preserves the gesture epoch; release, reset and mode/source
@@ -196,13 +209,16 @@ export class GimbalController {
         this.progress.completed(epoch, quantizedRate(live.rate), this.options.clock.now(), context.attitude?.at ?? this.options.clock.now(), context.deviceStopAllowanceMs);
       }
     } catch {
-      if (!live.signal.aborted) this.disconnect();
+      if (!budgetRefused && !live.signal.aborted) this.disconnect();
     } finally {
       // Enqueue can precede actual transport dispatch by an arbitrary delay.
       // Waiting after completion conservatively preserves the wire cadence.
       this.lastCompletedAt = this.options.clock.now();
       this.pending = false;
     }
+  }
+  private hasDispatchBudget(live: LiveIntent): boolean {
+    return live.expiresAt - this.options.clock.now() >= Math.min(MIN_RATE_DISPATCH_MS, this.leaseMs);
   }
   private watchAction(action: NonNullable<GimbalController['discrete']>): void {
     this.clearTimer();

@@ -102,6 +102,43 @@ describe('intent-bound gimbal dispatcher', () => {
     expect(f.writes[1].options.admission!()).toBe(true); dispatched.push(f.clock.time);
     expect(dispatched).toEqual([1199, 1299]); f.controller.close();
   });
+  it('does not start a final repeat with less than the physical completion budget', async () => {
+    const f = fixture(); f.admit(f.issue());
+    f.writes[0].resolve(); await settle();
+    for (let expected = 2; expected <= 4; expected++) {
+      f.freshAdvance(100);
+      expect(f.writes).toHaveLength(expected);
+      f.writes.at(-1)!.resolve(); await settle();
+    }
+    // t=1400 leaves 100 ms on the original t=1500 endpoint deadline. The
+    // 200 ms physical/IPC completion budget forbids another repeat.
+    f.freshAdvance(100); expect(f.writes).toHaveLength(4);
+    f.freshAdvance(100); expect(f.writes).toHaveLength(4);
+    expect(f.controller.issue('alice', 'fresh')).toMatchObject({ accepted: true });
+    f.controller.close();
+  });
+  it('rejects a slow queued dispatch for budget alone and a fresh credential resumes it', async () => {
+    const f = fixture();
+    const first = f.admit(f.issue());
+    if (!first.accepted || !first.next) throw new Error('no renewal');
+    const queued = f.writes[0];
+    f.context.attitude!.at = 1350; f.clock.advance(350, false);
+    expect(queued.options.admission!()).toBe(false);
+    queued.reject(new Error('accessory command admission expired')); await settle();
+
+    // The still-current one-use credential has too little physical budget,
+    // so it advances the credential but sends nothing.
+    const short = f.admit(first.next, 5, -2, 1);
+    expect(short).toMatchObject({ accepted: true });
+    if (!short.accepted || !short.next) throw new Error('no fresh credential');
+    expect(f.writes).toHaveLength(1);
+    // Its returned credential has a fresh original deadline and can resume.
+    expect(f.admit(short.next, 5, -2, 2)).toMatchObject({ accepted: true });
+    f.freshAdvance(100);
+    expect(f.writes).toHaveLength(2);
+    f.controller.end('alice', short.next.gesture);
+    f.writes[1].resolve(); await settle(); f.controller.close();
+  });
   it('never overlaps writes or builds a backlog when a writer stalls', async () => {
     const f = fixture(); f.admit(f.issue());
     for (let n = 0; n < 4; n++) f.freshAdvance(100);
