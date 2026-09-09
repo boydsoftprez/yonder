@@ -29,7 +29,7 @@ import type { CameraReport } from "./viewers.js";
  *   `rate.ts` and none is here. This file decides *when* to ask and *which*
  *   controller to ask; it never clamps, reserves or steps anything.
  * - **Not a reaction to the aircraft** (R-CMD-04, R-CMD-05). The only thing
- *   that reaches a controller here is a browser's measurement of the path
+ *   that reaches a controller here is a receiver measurement of the path
  *   this board's own video is leaving on. No flight mode, no parameter, no
  *   automatic response to link loss beyond what `rate.ts` already does with
  *   it, which is to hold and say so.
@@ -116,7 +116,7 @@ export class Adaptation {
   }
 
   /**
-   * One browser's measurement, routed to the camera it is about.
+   * One browser or external RTSP receiver measurement, routed to its camera.
    *
    * A report for a camera this device is not configured with is dropped: a
    * controller conjured by an arriving measurement would be a controller
@@ -125,6 +125,9 @@ export class Adaptation {
   observe(report: CameraReport): void {
     this.controllerFor(report.camera)?.observe(report);
   }
+
+  forget(camera: string, viewer: string): void { this.controllers.get(camera)?.forget(viewer); }
+  blockRtspIncrease(camera: string, blocked: boolean): void { this.controllerFor(camera)?.blockRtspIncrease(blocked); }
 
   /**
    * Decide once for every configured camera, and report what was decided.

@@ -964,6 +964,85 @@ describe('receiver feedback without a bandwidth estimate', () => {
   });
 });
 
+describe('external RTSP adaptation', () => {
+  function setup(mode: 'fixed' | 'adaptive' = 'adaptive') {
+    const f = fakeChannel({ stream: 2000, preview: 500 });
+    const camera = { ...CAMERA, stream: { mode, floor_kbps: 400, ceiling_kbps: 4000 } } as Camera;
+    const controller = new RateController({ channel: f.channel, policy: () => camera, thresholds: THRESHOLDS });
+    const send = async (at: number, patch: Partial<LinkReport> = {}) => {
+      controller.observe({ viewer: 'rtsp/test', rtt: 70, loss: 0, egress: 2100, capacity: null,
+        encode: 'stream', at, rtsp: { transport: 'tcp', queuedMs: 0, discarded: 0, canIncrease: true, acknowledged: true }, ...patch });
+      const decisions = controller.tick(at); await controller.settled(); return decisions;
+    };
+    return { ...f, camera, controller, send };
+  }
+  it('reduces promptly to acknowledged delivery when the send queue backs up', async () => {
+    const f = setup();
+    const congestion = { egress: 700, rtsp: { transport: 'tcp' as const, queuedMs: 700, discarded: 0, canIncrease: true, acknowledged: true } };
+    await f.send(0, congestion); await f.send(1000, congestion);
+    expect(f.running.stream).toBeLessThanOrEqual(600);
+    expect(f.running.stream).toBeGreaterThanOrEqual(400);
+    expect(f.retunes.every(r => r.encode === 'stream')).toBe(true);
+  });
+  it('backs off on reported UDP loss below the former two-percent threshold', async () => {
+    const f = setup();
+    const loss = { loss: 0.013, rtsp: { transport: 'udp' as const, queuedMs: 0, discarded: 0, canIncrease: true, acknowledged: false } };
+    await f.send(0, loss); await f.send(1000, loss);
+    expect(f.running.stream).toBe(1500);
+  });
+  it('uses pre-transmission discards even when TCP reports no network loss', async () => {
+    const f = setup();
+    const loss = { rtsp: { transport: 'tcp' as const, queuedMs: 0, discarded: 0.01, canIncrease: true, acknowledged: true } };
+    await f.send(0, loss); await f.send(1000, loss);
+    expect(f.running.stream).toBeLessThan(2000);
+  });
+  it('recovers gradually and honors the ceiling after congestion clears', async () => {
+    const f = setup();
+    await f.send(0, { loss: 0.1 }); await f.send(1000, { loss: 0.1 });
+    const reduced = f.running.stream!;
+    for (let at = 2000; at <= 17000; at += 1000) await f.send(at);
+    expect(f.running.stream).toBeGreaterThan(reduced);
+    expect(f.retunes.every(r => r.kbps >= 400 && r.kbps <= 4000)).toBe(true);
+    expect(f.running.stream).toBeLessThan(4000);
+  });
+  it('does not alter Fixed mode even under severe congestion', async () => {
+    const f = setup('fixed');
+    for (let at = 0; at <= 15000; at += 1000) await f.send(at, { loss: 0.7 });
+    expect(f.retunes).toEqual([]);
+    expect(f.running.stream).toBe(2000);
+  });
+  it('does not let one healthy reader justify an increase while another lacks feedback', async () => {
+    const f = setup(); f.controller.blockRtspIncrease(true);
+    for (let at = 0; at <= 15000; at += 1000) await f.send(at);
+    expect(f.retunes).toEqual([]);
+    f.controller.blockRtspIncrease(false);
+    for (let at = 16000; at <= 22000; at += 1000) await f.send(at);
+    expect(f.running.stream).toBeGreaterThan(2000);
+  });
+  it('states congestion at the floor without violating it or stopping the stream', async () => {
+    const f = setup(); let decisions: Awaited<ReturnType<typeof f.send>> = [];
+    for (let at = 0; at <= 20000; at += 1000) decisions = await f.send(at, { loss: 0.9, egress: 100 });
+    expect(f.running.stream).toBe(400);
+    expect(decisions.find(d => d.encode === 'stream')?.reason).toContain('minimum bitrate');
+  });
+  it('forgets a disconnected RTSP reader and does not reuse its measurements', async () => {
+    const f = setup(); await f.send(0); f.controller.forget('rtsp/test');
+    f.controller.tick(5000); await f.controller.settled();
+    expect(f.retunes).toEqual([]);
+  });
+  it('holds after an encoder reports an interruption instead of repeatedly disrupting video', async () => {
+    const f = setup(); let calls = 0;
+    f.channel.retune = async (_camera, encode, kbps) => {
+      calls++; f.running[encode] = kbps;
+      return { requested: kbps, observed: kbps, continuous: false, at: 0 };
+    };
+    let decisions: Awaited<ReturnType<typeof f.send>> = [];
+    for (let at = 0; at <= 10000; at += 1000) decisions = await f.send(at, { loss: 0.1 });
+    expect(calls).toBe(1);
+    expect(decisions.find(d => d.encode === 'stream')?.reason).toContain('interrupted video');
+  });
+});
+
 
 it('probes healthy browser delivery even when its estimate stays at 400 kb/s and RTSP is configured', async () => {
   const f=fakeChannel({preview:400});

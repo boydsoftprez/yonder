@@ -40,6 +40,12 @@ describe("MediaRenderer", () => {
     expect(first).toBeTruthy();
     await r.render(CFG);
     expect(b.secrets.get("rtsp_password")).toBe(first);
+    const observer = b.secrets.get('media_observer_password');
+    expect(observer).toBeTruthy();
+    expect(observer).not.toBe(first);
+    await r.render(CFG);
+    expect(b.secrets.get('media_observer_password')).toBe(observer);
+    expect(b.lines.join('\n')).not.toContain(observer);
   });
 
   it("generates no credential at all on a device with no camera", async () => {

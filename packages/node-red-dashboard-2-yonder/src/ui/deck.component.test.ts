@@ -1455,3 +1455,37 @@ it('restores edits before handling a session that was already expired on mount',
   expect(JSON.parse(sessionStorage.getItem('yonder:camera-drafts:v1')!).elp.imageBrightness).toBe(25);
   expect(wrapper.text()).toContain('Sign in');expect(emit).not.toHaveBeenCalled();wrapper.unmount();
 });
+
+it('shows live RTSP feedback and the actual adaptation decision in the Stream column', () => {
+  const report = makeReport({ policy: { stream: { mode: 'adaptive' } }, applied: { stream: { mode: 'adaptive' } },
+    runtime: { streamKbps: 800, streamDecision: { reason: 'RTSP delivery is congested: receiver loss or queued/discarded video.' },
+      rtspFeedback: { status: 'active', message: 'RTSP feedback is active for 1 receiver(s).',
+        freshReaders: 1, deliveredKbps: 900, loss: 0.013, queuedMs: 340, discarded: 12 } } });
+  const { wrapper } = deck(makeStore(report), 'live');
+  const status = wrapper.find('[aria-label="Stream adaptation status"]');
+  expect(status.text()).toContain('Adaptive delivery');
+  expect(status.text()).toContain('RTSP delivery is congested');
+  expect(status.text()).toContain('900 kb/s');
+  expect(status.text()).toContain('1.3%');
+  expect(status.text()).toContain('340 ms');
+  wrapper.unmount();
+});
+
+it('states unavailable feedback instead of presenting Adaptive as healthy', () => {
+  const report = makeReport({ policy: { stream: { mode: 'adaptive' } }, applied: { stream: { mode: 'adaptive' } },
+    runtime: { rtspFeedback: { status: 'unavailable', message: 'RTSP feedback is unavailable. Adaptive cannot evaluate this connection.' } } });
+  const { wrapper } = deck(makeStore(report), 'live');
+  expect(wrapper.find('.y-deck__adaptation').classes()).toContain('is-unavailable');
+  expect(wrapper.find('.y-deck__adaptation').text()).toContain('cannot evaluate');
+  wrapper.unmount();
+});
+
+it('distinguishes a staged Adaptive selection from the applied Fixed mode', async () => {
+  const { wrapper } = deck(makeStore(makeReport()), 'live');
+  wrapper.vm.stage('streamMode', 'Adaptive'); await nextTick();
+  const status = wrapper.find('[aria-label="Stream adaptation status"]');
+  expect(status.text()).toContain('Adaptive is staged');
+  expect(status.text()).toContain('Press Apply');
+  expect(status.text()).not.toContain('Adaptive delivery');
+  wrapper.unmount();
+});

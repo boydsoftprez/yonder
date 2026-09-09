@@ -61,6 +61,8 @@ const socket={on(){},off(){},emit(_event,widget,message){
     const image={imageBrightness:'brightness',imageContrast:'contrast',imageSaturation:'saturation',imageHue:'hue'}[key]
     if(image)report.policy.image[image]=value
     if(key==='previewSize')report.policy.preview.size=value
+    if(key==='streamMode')report.policy.stream.mode=String(value).toLowerCase()
+    if(key==='streamBitrate')report.policy.stream.bitrate_kbps=value
     if(key==='previewMode')report.policy.preview.mode=String(value).toLowerCase()
     if(key==='previewBitrate')report.policy.preview.bitrate_kbps=value
    }
@@ -71,10 +73,19 @@ const socket={on(){},off(){},emit(_event,widget,message){
  if(payload?.refresh){hydrate();result('probe','confirmed','Camera refreshed.')}
  if(payload?.nativeControl){const c=report.accessory.controls.find(c=>c.key===payload.nativeControl.kind);if(c)c.value=String(payload.nativeControl.value);hydrate();result('controls','confirmed','Camera setting updated.')}
 }}
-function choose(value){scenario.value=value;auth=value!=='Expired session';document.documentElement.removeAttribute('data-yonder-camera-auth');report.run.state={Stopped:'stopped',Starting:'starting',Failed:'failed'}[value]||'running';report.startBlocked=value==='Camera unavailable'?'Connect and power on the camera, then refresh its status.':null;if(value==='Camera unavailable')report.run.state='stopped';epoch.value++;hydrate();if(!auth)expireCameraSession()}
+function choose(value){
+ if(value.startsWith('RTSP ')){
+  report.policy.stream.mode='adaptive';report.policy.stream.floor_kbps=400;report.policy.stream.ceiling_kbps=4000
+  report.outputs=[{kind:'rtsp',label:'RTSP',enabled:true,costKbps:2000,reach:{reachable:true,note:'Fixture connection'}}]
+  const waiting=value==='RTSP waiting',unavailable=value==='RTSP unavailable',congested=value==='RTSP congestion'
+  report.runtime.streamKbps=congested?700:1000
+  report.runtime.streamDecision={reason:unavailable?'No fresh delivery feedback; holding the encoder target.':waiting?'No receiver feedback for this output; its bitrate is held.':congested?'RTSP delivery is congested: receiver loss or queued/discarded video. Requesting 700 kb/s.':'Receiver delivery is healthy; probing within 400–4000 kb/s.'}
+  report.runtime.rtspFeedback={status:unavailable?'unavailable':waiting?'waiting':'active',message:unavailable?'RTSP feedback is unavailable. Adaptive cannot evaluate this connection.':waiting?'Waiting for an RTSP player to receive video.':'RTSP feedback is active for 1 receiver(s).',readers:waiting?0:1,freshReaders:waiting||unavailable?0:1,loss:congested?0.02:0,queuedMs:congested?900:20,discarded:congested?18:0,deliveredKbps:congested?600:1100}
+ }
+ scenario.value=value;auth=value!=='Expired session';document.documentElement.removeAttribute('data-yonder-camera-auth');report.run.state={Stopped:'stopped',Starting:'starting',Failed:'failed'}[value]||'running';report.startBlocked=value==='Camera unavailable'?'Connect and power on the camera, then refresh its status.':null;if(value==='Camera unavailable')report.run.state='stopped';epoch.value++;hydrate();if(!auth)expireCameraSession()}
 hydrate()
-const app=createApp({setup:()=>()=>h('main',[
- h('section',{class:'fixture-tools'},[h('strong','Camera workflow fixture'),h('span','No real device connections'),h('label',['Scenario ',h('select',{'aria-label':'Scenario',value:scenario.value,onChange:e=>choose(e.target.value)},['Running','Stopped','Starting','Failed','Unavailable','Camera unavailable','Expired session','No camera'].map(value=>h('option',value)))]),h('label',['Theme ',h('select',{'aria-label':'Theme',value:theme.value,onChange:e=>{theme.value=e.target.value;document.querySelector('#theme').href=`/theme.${theme.value}.css`}},['day','night'].map(value=>h('option',value)))]),h('label',[h('input',{type:'checkbox',checked:reject.value,onChange:e=>{reject.value=e.target.checked}}),' Reject next Apply'])]),
+const app=createApp({setup:()=>()=>h('main',{id:'nrdb-page-page-camera'},[
+ h('section',{class:'fixture-tools'},[h('strong','Camera workflow fixture'),h('span','No real device connections'),h('label',['Scenario ',h('select',{'aria-label':'Scenario',value:scenario.value,onChange:e=>choose(e.target.value)},['Running','Stopped','Starting','Failed','Unavailable','Camera unavailable','Expired session','No camera','RTSP active','RTSP waiting','RTSP unavailable','RTSP congestion'].map(value=>h('option',value)))]),h('label',['Theme ',h('select',{'aria-label':'Theme',value:theme.value,onChange:e=>{theme.value=e.target.value;document.querySelector('#theme').href=`/theme.${theme.value}.css`}},['day','night'].map(value=>h('option',value)))]),h('label',[h('input',{type:'checkbox',checked:reject.value,onChange:e=>{reject.value=e.target.checked}}),' Reject next Apply'])]),
  h('div',{class:'fixture-grid',key:epoch.value},[h('section',{class:'fixture-picture'},[h(Picture,{id:'picture',props:{path:'cam3-preview'}})]),h('section',[h(Aim,{id:'aim',props:{}})])]),h('section',{class:'fixture-deck',key:'deck-'+epoch.value},[h(Deck,{id:'deck',props:{}})]),h('p',{role:'status'},activity.value)
 ])})
 app.provide('$socket',socket);app.provide('$dataTracker',()=>{});app.config.globalProperties.$store=store;app.mount('#app')

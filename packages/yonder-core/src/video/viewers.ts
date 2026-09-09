@@ -287,6 +287,7 @@ export interface ViewersOptions {
    * see this file's header on why.
    */
   readonly onReport?: (report: CameraReport) => void;
+  readonly rtspFeedback?: (camera: string) => import('./rtsp-feedback.js').RtspFeedbackState | null;
 }
 
 const FULL_RATE_LEASE_MS = 15_000;
@@ -331,6 +332,8 @@ export class Viewers {
   private readonly stillFor: NonNullable<ViewersOptions["stillFor"]>;
   private readonly onState: (state: PreviewState) => void;
   private readonly onReport: (report: CameraReport) => void;
+  private readonly rtspFeedback?: ViewersOptions['rtspFeedback'];
+  private readonly streamSteps = new Map<string, { reason: string; at: number }>();
 
   /** viewer → camera → subscription. */
   private readonly subs = new Map<string, Map<string, Subscription>>();
@@ -347,6 +350,7 @@ export class Viewers {
     this.stillFor = opts.stillFor ?? ((): null => null);
     this.onState = opts.onState ?? ((): void => {});
     this.onReport = opts.onReport ?? ((): void => {});
+    this.rtspFeedback = opts.rtspFeedback;
   }
 
   /**
@@ -454,6 +458,8 @@ export class Viewers {
    */
   decided(decisions: readonly Decision[]): void {
     for (const camera of new Set(decisions.map((d) => d.camera))) {
+      const stream = decisions.find(d => d.camera === camera && d.encode === 'stream');
+      if (stream) this.streamSteps.set(camera, { reason: stream.reason, at: stream.at });
       const mine = decisions.filter((d) => d.camera === camera && d.encode === "preview");
       const chosen = mine.find((d) => d.action === "shortfall")
         ?? mine.find((d) => d.action === "size")
@@ -499,7 +505,9 @@ export class Viewers {
   runtime(camera: string) {
     const run = this.running(camera);
     return { streamKbps: run?.stream ?? null, previewKbps: run?.preview ?? null,
-      shape: run?.shape ?? null, decision: this.steps.get(camera) ?? null };
+      shape: run?.shape ?? null, decision: this.steps.get(camera) ?? null,
+      streamDecision: this.streamSteps.get(camera) ?? null,
+      rtspFeedback: this.rtspFeedback?.(camera) ?? null };
   }
 
   state(camera: string, viewer: string): PreviewState {

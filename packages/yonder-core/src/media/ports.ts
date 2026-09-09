@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 
 /**
- * Where mediamtx listens. Four integers, and nothing else in this file.
+ * Shared media listener ports, including the private observation API.
  *
  * **No imports, and that is the whole point of it.** These constants are read
  * from two directions that must not meet: `media/config.ts`, which generates
@@ -18,6 +18,8 @@
  */
 
 export const RTSP_PORT = 8554;
+/** Internal observation only: never proxied by the console or bound externally. */
+export const MEDIA_OBSERVER_PORT = 9997;
 export const WEBRTC_PORT = 8889;
 export const SRT_PORT = 8890;
 

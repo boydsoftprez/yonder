@@ -48,6 +48,8 @@ import { applyControls } from "../video/controls.js";
 import { EncoderChannel } from "../video/encoder.js";
 import { Viewers } from "../video/viewers.js";
 import { Adaptation } from "../video/adaptation.js";
+import { RtspFeedback, type RtspFeedbackOptions } from "../video/rtsp-feedback.js";
+import { MEDIA_OBSERVER_SECRET } from "../media/config.js";
 import { CAPTURES_ROOT, Recorder } from "../video/recorder.js";
 import { Stills, STILLS_ROOT } from "../video/stills.js";
 import { freeSpaceOn, systemReader } from "../system/read.js";
@@ -123,6 +125,8 @@ export function onceAsync<T>(fn: () => Promise<T>): () => Promise<T> {
 }
 
 export interface ServerOptions {
+  /** Observation dependencies for isolated integration tests. Not configuration. */
+  rtspObservation?: Pick<RtspFeedbackOptions, 'sessions' | 'tcp' | 'localAddresses'>;
   diagnosticRunner?: DiagnosticRunner;
   /** Only production main enables Linux accessory ownership; tests inject explicitly. */
   accessory?: boolean | AccessorySources;
@@ -981,6 +985,7 @@ export async function startServer(opts: ServerOptions): Promise<{ close(): Promi
   const supervisor = built?.supervisor;
   let viewers: Viewers | undefined;
   let adaptation: Adaptation | undefined;
+  let rtspFeedback: RtspFeedback | undefined;
   let recorder: Recorder | undefined;
   let stills: Stills | undefined;
   if (encoders !== undefined && supervisor !== undefined) {
@@ -996,6 +1001,7 @@ export async function startServer(opts: ServerOptions): Promise<{ close(): Promi
       // has already decided whether this browser is an active video
       // subscriber of that camera, which is the filter §8.2 asks for.
       onReport: (report) => { adaptation?.observe(report); },
+      rtspFeedback: (id) => rtspFeedback?.state(id) ?? null,
       stillFor: (id) => stills?.latest(id) ?? null,
     });
     viewers = watching;
@@ -1012,6 +1018,16 @@ export async function startServer(opts: ServerOptions): Promise<{ close(): Promi
       onDecisions: (decisions) => { watching.decided(decisions); },
     });
     adaptation.start();
+    rtspFeedback = new RtspFeedback({
+      ...opts.rtspObservation,
+      cameras: () => reachConfig().cameras,
+      password: () => built?.secrets.get(MEDIA_OBSERVER_SECRET) ?? null,
+      report: report => adaptation?.observe(report),
+      forget: (camera, viewer) => adaptation?.forget(camera, viewer),
+      blockIncrease: (camera, blocked) => adaptation?.blockRtspIncrease(camera, blocked),
+      clock,
+    });
+    rtspFeedback.start();
 
     /**
      * Recording to the board and taking a still (R-CAM-17, R-CAM-18,
@@ -1630,6 +1646,7 @@ export async function startServer(opts: ServerOptions): Promise<{ close(): Promi
         // on writing bitrates into a running pipeline on behalf of a process
         // that has already let go of its socket — and, unlike the others,
         // it would be commanding hardware while it did it.
+        rtspFeedback?.stop();
         adaptation?.stop();
         stills?.stop();
         // The fifth: the telemetry sampler, and with it any sweep this

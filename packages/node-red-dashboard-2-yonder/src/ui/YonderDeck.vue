@@ -1068,7 +1068,7 @@ export default {
       }
       children.push(this.field(YonderSetBar, {
         key: 'streamBitrate',
-        label: adaptive ? 'Going out' : 'Bitrate',
+        label: adaptive ? 'Encoder target' : 'Bitrate',
         unit: 'kb/s',
         min: 100,
         max: 20000,
@@ -1079,6 +1079,24 @@ export default {
         requested: adaptive ? null : this.stagedValue('streamBitrate'),
         onSet: adaptive ? undefined : (v) => this.stage('streamBitrate', v),
       }))
+      const feedback = r.runtime?.rtspFeedback
+      const appliedAdaptive = (applied?.mode ?? policy.mode) === 'adaptive'
+      const stagedMode = adaptive !== appliedAdaptive
+      children.push(h('div', { class: ['y-deck__adaptation', { 'is-unavailable': feedback?.status === 'unavailable' }],
+        role: 'status', 'aria-label': 'Stream adaptation status' }, [
+        h('strong', stagedMode ? (adaptive ? 'Adaptive is staged' : 'Fixed bitrate is staged')
+          : appliedAdaptive ? 'Adaptive delivery' : 'Fixed bitrate'),
+        h('p', stagedMode ? 'Press Apply to change the active bitrate mode.'
+          : appliedAdaptive ? (r.runtime?.streamDecision?.reason || 'Waiting for delivery measurements.')
+            : 'The encoder target stays at the applied bitrate. Delivery feedback does not change it.'),
+        appliedAdaptive && !stagedMode ? h('p', feedback?.message || 'RTSP feedback is not available from this device yet.') : null,
+        feedback?.freshReaders > 0 ? h('p', { class: 'y-deck__feedback-values' }, [
+          feedback.deliveredKbps != null ? 'Delivery ' + Math.round(feedback.deliveredKbps) + ' kb/s' : '',
+          feedback.loss != null ? ' · reported loss ' + (feedback.loss * 100).toFixed(1) + '%' : '',
+          feedback.queuedMs != null ? ' · queued ' + Math.round(feedback.queuedMs) + ' ms' : '',
+          feedback.discarded > 0 ? ' · ' + feedback.discarded + ' video packets discarded' : '',
+        ]) : null,
+      ]))
       // Beneath the bitrate bar, which is where spec §7 lists Resolution and
       // where the blueprint draws it — in this column and not in Capture,
       // because it is what leaves for the ground station.
@@ -1459,6 +1477,10 @@ export default {
 </script>
 
 <style scoped>
+.y-deck__adaptation { margin: 12px 0; padding: 10px; border: 1px solid var(--yonder-divider); font-size: 12px; line-height: 1.5; overflow-wrap: anywhere; }
+.y-deck__adaptation p { margin: 4px 0 0; }
+.y-deck__adaptation.is-unavailable { border-color: var(--yonder-waiting); }
+.y-deck__feedback-values { color: var(--yonder-label); font-variant-numeric: tabular-nums; }
 .y-deck__connection { padding: 16px; border: 1px solid var(--yonder-divider); overflow-wrap: anywhere; font-size: 12px; }
 .y-deck__connection :deep(.y-id) { display: grid; grid-template-columns: minmax(0,1fr) auto; align-items: start; gap: 6px 12px; }
 .y-deck__connection :deep(.y-id__k) { grid-column: 1 / -1; }

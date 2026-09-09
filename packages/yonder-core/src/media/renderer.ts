@@ -5,7 +5,7 @@ import { systemRunner, type CommandRunner } from "../net/runner.js";
 import type { SecretStore } from "../secrets/store.js";
 import type { Config } from "../schema/config.js";
 import type { Renderer } from "../apply/types.js";
-import { mediamtxConfig } from "./config.js";
+import { mediamtxConfig, MEDIA_OBSERVER_SECRET } from "./config.js";
 
 const UNIT = "mediamtx";
 
@@ -137,7 +137,9 @@ export class MediaRenderer implements Renderer {
     // makes R-SEC-07 true of a published image without anything having to
     // remember to strip one.
     const { value: rtspPassword } = this.secrets.ensure("rtsp_password", "password");
-    const next = mediamtxConfig({ config, rtspPassword });
+    const observerPassword = config.cameras.some(camera => camera.outputs.some(output => output.kind === 'rtsp' && output.enabled))
+      ? this.secrets.ensure(MEDIA_OBSERVER_SECRET, "password").value : undefined;
+    const next = mediamtxConfig({ config, rtspPassword, observerPassword });
     const current = existsSync(this.path) ? readFileSync(this.path, "utf8") : null;
     if (current === next) {
       // An unchanged file is an unchanged server. Restarting anyway would drop

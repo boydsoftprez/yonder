@@ -86,11 +86,22 @@ export interface LinkReport {
   readonly rtt: number;
   /** The fraction of what was sent that did not arrive, 0–1. */
   readonly loss: number;
-  /** What is leaving on this path, kb/s at IP. */
+  /** Observed delivery in kb/s. RTSP carries transported payload bytes;
+   * browser accounting uses the existing IP estimate. Neither is capacity. */
   readonly egress: number;
   /** What this path is measured to carry, kb/s at IP. */
   readonly capacity: number | null;
   readonly encode?: EncodeName;
+  /** Trusted server-side observations; browser reports cannot supply this. */
+  readonly rtsp?: {
+    readonly transport: 'tcp' | 'udp';
+    readonly queuedMs: number;
+    readonly discarded: number;
+    readonly canIncrease: boolean;
+    readonly acknowledged: boolean;
+    /** A newly received loss window, not a re-dated historical counter. */
+    readonly lossEvent?: boolean;
+  };
   readonly at: number;
 }
 
@@ -225,6 +236,7 @@ export interface RateControllerOptions {
  * and a ladder belong to; a daemon holding several holds one of these each.
  */
 export class RateController {
+  private rtspIncreaseBlocked = false;
   private readonly channel: RateChannel;
   private readonly policy: () => Camera;
   private readonly clock: Clock;
@@ -278,9 +290,14 @@ export class RateController {
     if (report.rtt < 0 || report.egress < 0) return;
     if (report.capacity !== null && (!Number.isFinite(report.capacity) || report.capacity < 0)) return;
     if (typeof report.viewer !== "string" || report.viewer === "") return;
+    if (report.rtsp && (!Number.isFinite(report.rtsp.queuedMs) || report.rtsp.queuedMs < 0
+      || !Number.isFinite(report.rtsp.discarded) || report.rtsp.discarded < 0 || report.rtsp.discarded > 1)) return;
     this.reports.set(report.viewer, report);
     this.feedback.observe(report);
   }
+
+  forget(viewer: string): void { this.reports.delete(viewer); }
+  blockRtspIncrease(blocked: boolean): void { this.rtspIncreaseBlocked = blocked; }
 
   /**
    * Decide, act, and say what was decided — three decisions, every tick: the
@@ -315,7 +332,7 @@ export class RateController {
     });
     if (fresh.some(r => r.encode !== undefined || r.capacity === null) || (link === null && outside)) {
       this.pinnedSince = null; this.headroomSince = null;
-      return this.feedback.tick(camera, running, fresh, now);
+      return this.feedback.tick(camera, running, fresh, now, !this.rtspIncreaseBlocked);
     }
     if (link === null) {
       // Not merely "no change": the waits are abandoned. A step down is

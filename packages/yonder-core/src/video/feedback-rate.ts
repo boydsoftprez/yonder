@@ -4,7 +4,7 @@ import type { Decision, LinkReport, RateChannel, RateThresholds } from './rate.j
 import type { EncodeName, RunningEncodes } from './pipeline.js';
 
 type Mutable<T> = { -readonly [K in keyof T]: T[K] };
-type State = { sample: number; changed: number; healthy: number | null; congested: number | null; refused: number | null; refusedFrom: number | null; policy: string };
+type State = { sample: number; changed: number; healthy: number | null; congested: number | null; refused: number | null; refusedFrom: number | null; policy: string; paused: string | null };
 /** Receiver-feedback fallback. A probe target is never reported as measured capacity. */
 export class FeedbackRate {
   private readonly histories = new Map<string, Array<{ at: number; rtt: number }>>();
@@ -26,10 +26,10 @@ export class FeedbackRate {
     const history = (this.histories.get(report.viewer) ?? []).filter(sample => sample.at <= now && now - sample.at <= 30_000);
     return history.length ? Math.min(...history.map(sample => sample.rtt)) : report.rtt;
   }
-  tick(camera: Camera, running: RunningEncodes, reports: readonly LinkReport[], now: number): Decision[] {
+  tick(camera: Camera, running: RunningEncodes, reports: readonly LinkReport[], now: number, streamIncreaseAllowed = true): Decision[] {
     const active = new Set(reports.map(report => report.viewer));
     for (const viewer of this.histories.keys()) if (!active.has(viewer)) this.histories.delete(viewer);
-    const reason = 'Waiting for fresh receiver feedback. Browser bitrate estimates are not independent link-capacity measurements.';
+    const reason = 'Waiting for fresh delivery feedback. No independent link-capacity measurement is available.';
     const decisions: Array<Mutable<Decision>> = [
       { action: 'hold-rate', camera: camera.id, encode: 'stream', kbps: running.stream, at: now, reason },
       { action: 'hold-rate', camera: camera.id, encode: 'preview', kbps: running.preview, at: now, reason },
@@ -40,14 +40,15 @@ export class FeedbackRate {
       const rate = running[encode];
       const matching = reports.filter(report => (report.encode ?? 'preview') === encode);
       const decision = decisions[index];
-      if (policy.mode === 'fixed') { decision.reason = 'Fixed bitrate is selected.'; continue; }
+      if (policy.mode === 'fixed') { this.states.delete(encode); decision.reason = 'Fixed bitrate is selected.'; continue; }
       if (rate === null) { decision.reason = 'Waiting for encoder readback.'; continue; }
       let state = this.states.get(encode);
       const policyKey = JSON.stringify(policy);
       if (!state || now < state.sample || state.policy !== policyKey) {
-        state = { sample: -Infinity, changed: -Infinity, healthy: null, congested: null, refused: null, refusedFrom: null, policy: policyKey };
+        state = { sample: -Infinity, changed: -Infinity, healthy: null, congested: null, refused: null, refusedFrom: null, policy: policyKey, paused: null };
         this.states.set(encode, state);
       }
+      if (state.paused) { decision.reason = state.paused; continue; }
       const clamp = (value: number) => Math.min(policy.ceiling_kbps, Math.max(policy.floor_kbps, value));
       let target = clamp(rate);
       let why = `Restoring the applied ${policy.floor_kbps}–${policy.ceiling_kbps} kb/s bounds.`;
@@ -59,19 +60,33 @@ export class FeedbackRate {
         state.sample = newest;
         const loss = Math.max(...matching.map(report => report.loss));
         const queued = matching.some(report => report.rtt > this.baseline(report, now) + (this.timings.rttInflationMs ?? 100));
-        const congested = loss > 0.02 || queued;
-        const receiving = matching.every(report => report.egress > 0);
+        const rtspCongested = matching.some(report => report.rtsp
+          && (report.loss > 0.005 || report.rtsp.discarded > 0 || report.rtsp.queuedMs > 250));
+        const congested = loss > 0.02 || queued || rtspCongested;
+        const receiving = (encode !== 'stream' || streamIncreaseAllowed)
+          && matching.every(report => report.egress > 0 && (report.rtsp?.canIncrease ?? true));
         if (congested) { state.congested ??= now; state.healthy = null; }
         else if (receiving) { state.healthy ??= now; state.congested = null; }
         else { state.healthy = null; state.congested = null; }
-        why = congested ? `Receiver congestion (${(loss * 100).toFixed(1)}% loss${queued ? ', RTT increased' : ''}).`
+        why = rtspCongested ? 'RTSP delivery is congested: receiver loss or queued/discarded video.'
+          : congested ? `Receiver congestion (${(loss * 100).toFixed(1)}% loss${queued ? ', RTT increased' : ''}).`
           : receiving ? `Receiver delivery is healthy; probing within ${policy.floor_kbps}–${policy.ceiling_kbps} kb/s.` : 'No received video to evaluate; holding the rate.';
         decision.reason = why;
         if (this.busy) { decision.reason = 'Waiting for the encoder to confirm the preceding change.'; continue; }
-        if (congested && now - state.congested! >= 1000 && now - state.changed >= 1000) {
+        const lossEvent = matching.some(report => report.rtsp?.lossEvent && report.loss > 0.005);
+        if (congested && (lossEvent || now - state.congested! >= 1000) && now - state.changed >= 1000) {
           target = clamp(Math.floor(rate * 0.75 / 50) * 50);
+          const acknowledged = matching.filter(report => report.rtsp?.acknowledged && report.egress > 0);
+          if (acknowledged.length) {
+            // A congested TCP receiver's acknowledged delivery provides a
+            // conservative down-step. It is never called total link capacity.
+            target = clamp(Math.min(target, Math.floor(Math.min(...acknowledged.map(r => r.egress)) * 0.8 / 50) * 50));
+          }
         } else if (receiving && state.healthy !== null && now - state.healthy >= 5000 && now - state.changed >= 5000) {
           target = clamp(rate + Math.max(50, Math.round(Math.min(200, rate * 0.1) / 50) * 50));
+        }
+        if (congested && target === rate && rate <= policy.floor_kbps) {
+          decision.reason = 'At the minimum bitrate; congestion remains. Reduce the minimum, resolution or frame rate to lower its demand.';
         }
         if (encode === 'preview' && target === rate && camera.preview.size === 'auto' && running.shape) {
           const here = PREVIEW_RUNGS.indexOf(running.shape.size);
@@ -96,8 +111,11 @@ export class FeedbackRate {
         if (state.refused === target && state.refusedFrom === rate) { decision.reason = 'The encoder refused that rate; waiting for a different request or policy.'; continue; }
         this.busy = true; state.refusedFrom = rate; state.changed = now; state.healthy = null;
         this.track(this.channel.retune(camera, encode, target).then(ack => {
-          if ('notControllable' in ack) state!.refused = target;
+          if ('notControllable' in ack || ack.observed !== target) state!.refused = target;
           else state!.refused = null;
+          if (!('notControllable' in ack) && ack.continuous === false) {
+            state!.paused = 'The encoder interrupted video during a bitrate change. Adaptive is holding this rate; change the policy to retry.';
+          }
         }, () => { state!.refused = target; }).finally(() => { this.busy = false; }));
         decisions[index] = { action: 'rate', camera: camera.id, encode, kbps: target, at: now,
           reason: `${why} Requesting ${target} kb/s from delivery feedback; this is not a measured link-capacity value.` };

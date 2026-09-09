@@ -1,5 +1,5 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
-import { describe, it, expect, beforeEach, afterEach } from "vitest";
+import { describe, it, expect, beforeEach, afterEach, vi } from "vitest";
 import { mkdtempSync, rmSync, writeFileSync, readFileSync } from "node:fs";
 import { request } from "node:http";
 import { tmpdir } from "node:os";
@@ -1594,9 +1594,12 @@ describe("the daemon runs the rate controller", () => {
     } as never;
   };
 
-  async function serve(): Promise<{ close(): Promise<void> }> {
+  async function serve(rtspObservation: Parameters<typeof startServer>[0]['rtspObservation'] = {
+    sessions: async () => ({ items: [] }), tcp: async () => '', localAddresses: () => [],
+  }): Promise<{ close(): Promise<void> }> {
     return startServer({
       socketPath, configPath, journalPath, renderers: [noop], secretsPath,
+      rtspObservation,
       runner: async () => ({ code: 0, stdout: "", stderr: "" }),
       counters: noCounters,
       clock,
@@ -1681,6 +1684,38 @@ describe("the daemon runs the rate controller", () => {
     } finally {
       await server.close();
     }
+  });
+
+  it('adapts the main stream from external RTSP delivery without any browser report', async () => {
+    saveConfig(configPath, { ...DEFAULT_CONFIG, cameras: [{ ...ADAPTIVE,
+      outputs: [{ kind: 'rtsp', enabled: true, password: { secret: 'rtsp_password' } }],
+    }] } as never);
+    const reads = vi.fn(async () => ({ items: [{
+      id: '11111111-1111-1111-1111-111111111111', state: 'read', path: 'cam0',
+      remoteAddr: '10.20.0.2:45000', transport: 'TCP',
+      outboundBytes: now * 100, outboundRTPPackets: now,
+      outboundRTPPacketsReportedLost: 0, outboundRTPPacketsDiscarded: 0, inboundRTCPPackets: 0,
+    }] }));
+    const server = await serve({ sessions: reads, localAddresses: () => [],
+      tcp: async () => 'ESTAB 0 200000 10.20.0.1:8554 10.20.0.2:45000\n cubic rtt:40/2 bytes_acked:'
+        + now * 62.5 + ' notsent:190000\n' });
+    try {
+      await call(socketPath, 'POST', '/cameras/cam0/run', { action: 'start' });
+      for (let i = 0; i < 9; i++) {
+        advance(1000);
+        await call(socketPath, 'GET', '/cameras/cam0');
+      }
+      const main = sent.filter(s => s.op === 'retune' && s.sets[0]?.element === 'enc-stream');
+      expect(main.length).toBeGreaterThan(0);
+      expect(main.at(-1)?.sets[0].value).toContain('video_bitrate=500000');
+      expect(spawns).toHaveLength(1);
+      expect((await call(socketPath, 'GET', '/cameras/cam0')).body).toMatchObject({
+        deck: { runtime: { rtspFeedback: { readers: 1, status: 'active' }, streamKbps: 500 } },
+      });
+    } finally { await server.close(); }
+    const stoppedAt = reads.mock.calls.length;
+    advance(2000); await Promise.resolve();
+    expect(reads).toHaveBeenCalledTimes(stoppedAt);
   });
 
   it("stops deciding when the daemon closes", async () => {
