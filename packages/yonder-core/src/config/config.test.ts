@@ -7,13 +7,52 @@ import { fileURLToPath } from "node:url";
 import { loadConfig } from "./load.js";
 import { saveConfig } from "./save.js";
 import { ConfigError } from "./errors.js";
-import { DEFAULT_CONFIG } from "../schema/config.js";
+import { DEFAULT_CONFIG, ConfigSchema } from "../schema/config.js";
 
 let dir: string;
 beforeEach(() => { dir = mkdtempSync(join(tmpdir(), "yonder-")); });
 afterEach(() => { rmSync(dir, { recursive: true, force: true }); });
 
 describe("loadConfig", () => {
+  it('reuses validation for identical bytes while giving every caller an independent nested copy', () => {
+    const p=join(dir,'cached.yaml');saveConfig(p,DEFAULT_CONFIG);
+    const validate=vi.spyOn(ConfigSchema,'safeParse');
+    try {
+      const first=loadConfig(p);first.network.ap.ssid='unsaved edit';
+      const second=loadConfig(p);
+      expect(second.network.ap.ssid).toBe(DEFAULT_CONFIG.network.ap.ssid);
+      expect(validate).toHaveBeenCalledTimes(1);
+      expect(second).not.toBe(first);expect(second.network).not.toBe(first.network);
+    } finally { validate.mockRestore(); }
+  });
+
+  it('sees an immediate same-length edit and rollback without a freshness timeout', () => {
+    const p=join(dir,'current.yaml');saveConfig(p,DEFAULT_CONFIG);const raw=readFileSync(p,'utf8');
+    expect(loadConfig(p).network.ap.ssid).toBe('yonder');
+    writeFileSync(p,raw.replace('ssid: yonder','ssid: camera'));
+    expect(loadConfig(p).network.ap.ssid).toBe('camera');
+    writeFileSync(p,raw);expect(loadConfig(p)).toEqual(DEFAULT_CONFIG);
+  });
+
+  it('never serves the cached configuration over a missing or invalid current file', () => {
+    const p=join(dir,'current.yaml');saveConfig(p,DEFAULT_CONFIG);loadConfig(p);
+    writeFileSync(p,'version: 1\nunknown_field: true\n');expect(()=>loadConfig(p)).toThrow(ConfigError);
+    writeFileSync(p,'version: [bad\n');expect(()=>loadConfig(p)).toThrow(ConfigError);
+    rmSync(p);expect(()=>loadConfig(p)).toThrow(ConfigError);
+    saveConfig(p,DEFAULT_CONFIG);expect(loadConfig(p)).toEqual(DEFAULT_CONFIG);
+  });
+
+  it('bounds cached paths instead of retaining every configuration ever read', () => {
+    const paths=Array.from({length:9},(_,i)=>join(dir,`c${i}.yaml`));
+    for(const p of paths)saveConfig(p,DEFAULT_CONFIG);
+    const validate=vi.spyOn(ConfigSchema,'safeParse');
+    try {
+      for(const p of paths)loadConfig(p);
+      loadConfig(paths[8]);expect(validate).toHaveBeenCalledTimes(9);
+      loadConfig(paths[0]);expect(validate).toHaveBeenCalledTimes(10);
+    } finally {validate.mockRestore();}
+  });
+
   it("round-trips a saved config", () => {
     const p = join(dir, "config.yaml");
     saveConfig(p, DEFAULT_CONFIG);
