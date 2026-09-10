@@ -148,6 +148,7 @@ Parameter writes are vehicle commands. R-CMD applies to every requirement here.
 | R-CTL-09 | Select transport per camera | 2 |
 | R-CTL-10 | Show current settings and running state for each camera, reading back stored values rather than form defaults | 1 |
 | R-CTL-15 | **Say which one is turning the picture.** Where the board corrects orientation because the camera cannot, the interface states that plainly beside the control. The two are indistinguishable in the picture and not in their cost: the board's costs processing on every frame and re-encodes what it changed, the sensor's costs nothing. An operator choosing between mounting the camera differently and paying for the correction needs to know which they are looking at | 2 |
+| R-CTL-16 | Provide named, reproducible ISP image profiles for supported cameras, including normal-light and low-light treatments. Profile selection is explicit, preserves sensor timing, states any video interruption, and restores the previous calibration if activation fails. Distinguish tone mapping from actual HDR capture; advertise HDR as usable only when the sensor, driver and ISP path support it | 2 |
 
 ## R-CEL — Cellular
 

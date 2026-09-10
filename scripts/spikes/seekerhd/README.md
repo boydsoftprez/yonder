@@ -102,3 +102,87 @@ readiness because AIQ's own initialization resets sensor timing.
 The module is built for `6.1.115-vendor-rk35xx`; a kernel update requires a
 matching rebuild. These bench sources do not claim portable support for other
 kernels, camera connectors or Rockchip boards.
+
+## Named image profiles (R-CTL-16)
+
+`profiles.py` generates two first-pass ISP21 treatments from the **original
+`tune.py` output**, plus a byte-identical `legacy-low-light` rollback copy:
+
+| Profile | Gamma | Denoise | ISP gain policy | Sharpening ratio |
+|---|---|---|---|---|
+| `normal-light` | 65% helper curve + 35% linear input | Bayer, luma, chroma and temporal NR off | Up to 16× analogue, no extra ISP gain | 0.6 |
+| `low-light` | Full helper shadow lift | Half-strength reference chroma NR; Bayer, luma and temporal NR off | Up to 29.512× analogue and ~3.388× ISP gain | 0.35 |
+| `legacy-low-light` | Original bring-up profile | Original settings | Original settings | Original settings |
+
+Both preserve the fixed 30 fps exposure/frame-timing setup, black level,
+white-balance/colour matrices and the disabled uncalibrated lens-shading grid.
+These are image treatments, not measured factory colour/noise calibrations.
+The gain limits are tuning choices; the 100× night combination is a permitted
+AE limit, not a claim that every frame uses it. Normal Light deliberately
+accepts visible grain rather than smoothing fine detail away.
+
+Generate from a preserved baseline, not from an already modified named profile:
+
+```sh
+python3 profiles.py original-tuned-iq.json generated-profiles
+```
+
+Install the generated JSONs and `manifest.json` under
+`/usr/local/share/yonder-seekerhd/profiles`, and install `select-profile.py` as
+`/usr/local/bin/yonder-camera-profile` with mode 0755. The selector is a bench
+command, not yet a dashboard dropdown:
+
+```sh
+sudo yonder-camera-profile normal-light
+sudo yonder-camera-profile low-light
+sudo yonder-camera-profile legacy-low-light
+yonder-camera-profile status
+```
+
+Selection checks the generated profile's checksum and the attached IMX462,
+stops its video through the core API, replaces the active IQ JSON atomically,
+restarts the ISP service, and restarts video only if it was previously running.
+Failure restores the exact preceding IQ bytes. The console and network services
+are not restarted. The active IQ file persists across reboot; status identifies
+it by hash rather than maintaining a second copy of the selection.
+
+For an ISP-only comparison, set the Yonder Stream Color controls to neutral
+through Apply (brightness 0, contrast 100, saturation 100, hue 0). Otherwise
+those additional CPU adjustments are applied on top of either profile.
+
+### HDR availability
+
+[Sony's IMX462LQR product information](https://www.sony-semicon.com/files/62/pdf/p-12_IMX462LQR_LQR1_LLR_Flyer.pdf)
+lists multiple-exposure and digital-overlap HDR. This establishes a sensor
+capability, not a working SeekerHD/Radxa camera mode. The current
+`imx462_yonder.c` exposes linear modes and its vendor ioctl handler implements
+module information only; it has no HDR configuration or HDR exposure controls.
+The AIQ service explicitly prepares `RK_AIQ_WORKING_MODE_NORMAL`, and the IQ
+profiles keep `hdr_en=0`. DOL would require verified sensor register sequences,
+CSI framing/virtual-channel handling, exposure controls and ISP merge setup,
+then bandwidth/frame-rate and motion-artifact measurements. Neither named
+profile is labelled HDR: gamma/shadow lifting does not recover clipped data.
+
+### First hardware comparison
+
+On 2026-09-10 UTC, all three profiles produced independently decoded 1920×1080
+JPEG photographs, with neutral Stream Color settings. Normal Light visibly
+reduced the lifted appearance modestly; Low Light retained more shadow lift.
+Noise and clipping around bright lamps remain. The room was illuminated and
+exposure was automatic, so this was not a laboratory sharpness test or a dark
+scene sensitivity test. No lens-focus adjustment was made. Normal Light was
+left active with the established 1080p main / 720p preview H.265 streams.
+
+Run the generator and rollback regression tests with:
+
+```sh
+python3 -m unittest discover -s scripts/spikes/seekerhd -p test_profiles.py -v
+```
+
+The normal-profile playback check decoded both H.265 outputs for 20 seconds:
+29.945 fps on each, with one gap over 50 ms after acquisition. Initial HEVC
+join diagnostics remain, as in the earlier pipeline tests. Profile switching
+and full-resolution still capture were verified for Normal Light and Low
+Light; the rollback path and generation invariants have three unit tests.
+The preserved baseline SHA-256 is
+`d56804d766804397d3dc5a6947e5480146912e3d82909f9bf27a390d41b58fc2`.
