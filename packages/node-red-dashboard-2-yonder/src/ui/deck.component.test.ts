@@ -141,6 +141,24 @@ const barByLabel = (w: VueWrapper<any>, label: string) => controlByLabel(w, "y-s
 const pickerByLabel = (w: VueWrapper<any>, label: string) => controlByLabel(w, "y-pick", label);
 const segByLabel = (w: VueWrapper<any>, label: string) => controlByLabel(w, "y-seg", label);
 
+it('offers and stages 1080p preview only when the capture is large enough', async () => {
+  const { wrapper, emit } = deck(makeStore(makeReport({
+    policy: { capture: { width: 1920, height: 1080 } },
+    applied: { capture: { width: 1920, height: 1080 } },
+  })), 'live');
+  const picker = pickerByLabel(wrapper, 'Size');
+  expect(picker.findAll('option').map(o => o.attributes('value'))).toContain('1920x1080');
+  expect(pickerByLabel(wrapper, 'Largest automatic size').findAll('option').map(o => o.attributes('value'))).toContain('1920x1080');
+  await picker.find('select').setValue('1920x1080');
+  expect(emit).not.toHaveBeenCalled();
+  await wrapper.findAll('.y-deck__key').find(b => b.text() === 'Apply')!.trigger('click');
+  expect(emit.mock.calls[0][2].payload.apply.previewSize).toBe('1920x1080');
+  wrapper.unmount();
+  const small = deck(makeStore(makeReport()), 'live').wrapper;
+  expect(pickerByLabel(small, 'Size').findAll('option:not([disabled])').map(o => o.attributes('value'))).not.toContain('1920x1080');
+  small.unmount();
+});
+
 it("offers the board's codecs and stages H.265 through Apply", async () => {
   const { wrapper, emit } = deck(makeStore(makeReport({ codecs: ['h264', 'h265'] })), 'live');
   const picker = pickerByLabel(wrapper, 'Codec');

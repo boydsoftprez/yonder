@@ -359,7 +359,7 @@ export type CameraOutput = z.infer<typeof CameraOutput>;
  * its own right, so `preview.size` adds it separately instead of folding it
  * in here.
  */
-export const PREVIEW_RUNGS = ["1280x720", "854x480", "640x360"] as const;
+export const PREVIEW_RUNGS = ["1920x1080", "1280x720", "854x480", "640x360"] as const;
 export type PreviewRung = (typeof PREVIEW_RUNGS)[number];
 
 /**

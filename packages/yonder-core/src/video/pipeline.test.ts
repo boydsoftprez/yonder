@@ -86,6 +86,16 @@ describe('accessory input', () => {
 });
 
 describe("compose", () => {
+  it('composes independent 1080p30 hardware HEVC streams', () => {
+    const camera = { ...CAMERA, width: 1920, height: 1080, codec: 'h265' as const,
+      preview: { ...CAMERA.preview, codec: 'h265' as const, size: '1920x1080' as const, framerate: 30 } };
+    const line = compose({ ...mppOpts, camera });
+    expect(line.filter(x => x === 'mpph265enc')).toHaveLength(2);
+    const preview = line.slice(line.indexOf('name=enc-preview'));
+    expect(preview).toContain('width=1920');
+    expect(preview).toContain('height=1080');
+    expect(refuse({ ...mppOpts, camera: { ...camera, width: 1280, height: 720 } })).toContain('larger than');
+  });
   it("encodes an independently selected H.265 preview and preserves the main codec", () => {
     const selected = { ...CAMERA, preview: { ...CAMERA.preview, codec: 'h265' as const } };
     const line = compose({ ...mppOpts, camera: selected });

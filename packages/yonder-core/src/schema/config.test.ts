@@ -600,10 +600,13 @@ describe("camera stream and preview policy", () => {
     expect(c.preview).toMatchObject({ mode: "adaptive", floor_kbps: 300, ceiling_kbps: 2000, size: "auto" });
   });
 
-  it("defaults the ladder to this schema's own widest and narrowest sizes", () => {
+  it("keeps the economical 720p default while permitting an explicit 1080p preview", () => {
     const c = Camera.parse(minimal);
     expect(c.preview.ladder_top).toBe("1280x720");
     expect(c.preview.ladder_bottom).toBe("640x360");
+    expect(Camera.parse({ ...minimal, width: 1920, height: 1080,
+      preview: { size: '1920x1080', ladder_top: '1920x1080', framerate: 30 },
+    }).preview).toMatchObject({ size: '1920x1080', ladder_top: '1920x1080', framerate: 30 });
   });
 
   it("migrates preview width/height into size, and refuses two sources", () => {
@@ -672,7 +675,7 @@ describe("camera stream and preview policy", () => {
   });
 
   it("refuses a ladder endpoint naming no size this schema offers", () => {
-    expect(() => Camera.parse({ ...minimal, preview: { ladder_top: "1920x1080" } })).toThrow();
+    expect(() => Camera.parse({ ...minimal, preview: { ladder_top: "2560x1440" } })).toThrow();
   });
 
   it("seeds a stream's adaptive envelope from its fixed target", () => {

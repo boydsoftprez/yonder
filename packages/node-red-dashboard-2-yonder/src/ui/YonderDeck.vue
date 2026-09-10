@@ -127,6 +127,7 @@ const DRAFT_LABELS = {
 
 const PREVIEW_SIZE_OPTIONS = [
   { value: 'auto', label: 'Auto — steps with the link' },
+  { value: '1920x1080', label: '1920×1080 — hold' },
   { value: '1280x720', label: '1280×720 — hold' },
   { value: '854x480', label: '854×480 — hold' },
   { value: '640x360', label: '640×360 — hold' },
@@ -135,6 +136,7 @@ const PREVIEW_RUNG_OPTIONS = [
   { value: '640x360', label: '640×360' },
   { value: '854x480', label: '854×480' },
   { value: '1280x720', label: '1280×720' },
+  { value: '1920x1080', label: '1920×1080' },
 ]
 
 /**
@@ -1227,6 +1229,14 @@ export default {
       const adaptive = uiMode === 'Adaptive'
       const size = this.draftValue('previewSize', policy.size || 'auto')
       const auto = size === 'auto'
+      const capture = r.policy?.capture || {}
+      const maxWidth = this.draftValue('width', capture.width || 0)
+      const maxHeight = this.draftValue('height', capture.height || 0)
+      const fitsCapture = option => {
+        if (option.value === 'auto') return true
+        const [width, height] = option.value.split('x').map(Number)
+        return width <= maxWidth && height <= maxHeight
+      }
       const children = []
       const hevc = typeof RTCRtpReceiver !== 'undefined' &&
         RTCRtpReceiver.getCapabilities?.('video')?.codecs?.some(c => c.mimeType.toLowerCase() === 'video/h265')
@@ -1255,7 +1265,8 @@ export default {
         reason: this.stagedReason('previewSize'),
         label: 'Size',
         value: size,
-        options: PREVIEW_SIZE_OPTIONS,
+        currentLabel: size === 'auto' ? 'Auto — steps with the link' : `${size.replace('x', '×')} — hold`,
+        options: PREVIEW_SIZE_OPTIONS.filter(fitsCapture),
         onChange: (v) => this.stage('previewSize', v),
       }))
       if (auto) {
@@ -1263,14 +1274,16 @@ export default {
           key: 'previewLadderBottom',
           label: 'Smallest automatic size',
           value: this.draftValue('previewLadderBottom', policy.ladder_bottom || '640x360'),
-          options: PREVIEW_RUNG_OPTIONS,
+          currentLabel: this.draftValue('previewLadderBottom', policy.ladder_bottom || '640x360').replace('x', '×'),
+          options: PREVIEW_RUNG_OPTIONS.filter(fitsCapture),
           onChange: (v) => this.stage('previewLadderBottom', v),
         }))
         children.push(this.field(YonderPicker, {
           key: 'previewLadderTop',
           label: 'Largest automatic size',
           value: this.draftValue('previewLadderTop', policy.ladder_top || '1280x720'),
-          options: PREVIEW_RUNG_OPTIONS,
+          currentLabel: this.draftValue('previewLadderTop', policy.ladder_top || '1280x720').replace('x', '×'),
+          options: PREVIEW_RUNG_OPTIONS.filter(fitsCapture),
           onChange: (v) => this.stage('previewLadderTop', v),
         }))
       }
