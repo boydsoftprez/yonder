@@ -163,6 +163,7 @@ export type Decision =
  * what actually arrives at it. `EncoderChannel` satisfies it structurally.
  */
 export interface RateChannel {
+  generation?(camera: string): number;
   inForce(camera: string): RunningEncodes | null;
   retune(camera: Camera, encode: EncodeName, kbps: number): Promise<Ack<number>>;
   reconfigurePreview(camera: Camera, shape: PreviewShape): Promise<Ack<PreviewShape>>;

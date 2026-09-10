@@ -219,3 +219,79 @@ decoder sample produced 443 frames, no timestamp gaps over 50 ms, and
 preview sample produced 300 frames at 30.000 fps. Initial HEVC reference
 diagnostics during joining remain; the later steady sample showed no frame gaps.
 No thermal protection, frequency limit or encoder governor was overridden.
+
+## Stutter and acknowledgement investigation
+
+The operator's sustained dual-1080p use exposed gaps that the earlier short,
+cooled samples did not establish were absent. Average CPU use and a declared
+30 fps were insufficient evidence of smooth video. Browser preview's
+`videorate` stage could duplicate missing capture frames, hiding capture loss
+behind a 30 fps output cadence. CSI previews at or below capture rate now use
+`drop-only=true`, so delivered frames preserve real capture gaps
+([GStreamer videorate](https://gstreamer.freedesktop.org/documentation/videorate/index.html)).
+
+The original full-resolution thumbnail branch could occupy the serial host
+command loop for 1.7–2.4 seconds and coincide with main-video gaps over one
+second. That also exceeded the bitrate channel's two-second acknowledgement
+budget. The hardware could already be at 600 kb/s while the interface held its
+previous 400 kb/s readback and incorrectly described the request as refused.
+
+R-VID-07/R-CTL-03 now distinguish unconfirmed readback from refusal. A bounded
+late response updates only the same process generation, and cannot overwrite
+a newer acknowledgement. Manual Apply still restarts when live control is
+unconfirmed. Adaptive interruption/refusal holds expire when the actual video
+process is replaced; an old process's hold must not follow its replacement.
+R-VID-13 also rejects an effective preview larger than capture in both camera
+Apply and Settings, including an unchanged preview when capture is reduced.
+
+For CSI stills, the host copies one fresh raw frame through a bounded,
+exact-format branch, detaches it, and performs JPEG encoding separately.
+`mppjpegenc` is used when present, with software JPEG as fallback. Periodic
+interface stills are bounded to 640×360 using the JPEG encoder's hardware
+resize; operator photographs retain capture resolution. This reduces the
+measured automatic JPEG from roughly 300 kB to 34 kB (about 55 kb/s at five
+seconds, before protocol overhead). The final JPEG was decoded independently
+and confirmed as 640×360. The CPU colour filter remains CPU work when its
+controls are non-neutral; the interface now states that this can reduce rate.
+
+The final comparison used H.265 for both streams, 30 fps capture, a fixed
+2000 kb/s main stream, and Adaptive preview bounded to 600–2000 kb/s. Image
+settings were the operator's latest brightness 0, contrast 91, saturation 105,
+hue 0. Both decoders ran on the Mac through a loopback RTSP SSH forward; the
+Radxa did not run the benchmark decoders. The Camera page was also receiving
+video and requesting thumbnails. Frame rates exclude the first two seconds
+of receiver acquisition; these are steady-playback measurements, not a claim
+that startup has no settling interval.
+
+| Configuration | Sample | Main real fps | Preview real fps | Largest steady frame gap |
+| --- | ---: | ---: | ---: | ---: |
+| Original dual 1080p with requested full-size thumbnails | 35 s | 20.83 | 30 with duplication | 1433 ms on main |
+| Updated dual 1080p, small hardware thumbnails | 60 s | 28.37 | 28.37 | 100 ms |
+| Updated 1080p main + 720p preview, small hardware thumbnails | 60 s | 29.81 | 29.81 | 66.8 ms |
+
+The original reproduction had stronger brightness/hue adjustments, so its
+improvement is not attributed solely to the code. The two final rows share
+identical image controls and differ only in preview size. The mixed-resolution
+sample had eleven gaps over 50 ms across one minute, each a single missing
+frame. It is the configuration left installed: dual 1080p remains selectable,
+but was less consistent under this workload. Cooling kept the board around
+43–46°C with a 1.8 GHz CPU ceiling; no thermal protection or frequency governor
+was changed. Increasing MPP's pending queue and replacing Python's frame
+observer with a native diagnostic observer did not solve the loss and were
+not retained. A permanently connected JPEG branch and CPU format-copy
+experiments were also discarded.
+
+Reproduce delivered-frame measurements off-board with
+`scripts/spikes/seekerhd/measure-jitter.py --main <RTSP-main-URL> --preview
+<RTSP-preview-URL> --seconds 60`. A warm stream is required. A nominal 30 fps
+caps value, decoder averages alone, or the browser's jitter-buffer duration
+is not an end-to-end latency or continuity proof.
+
+After disabling diagnostic tracing and restarting, all four video/console
+services were active and Adaptive preview reached its 2000 kb/s ceiling from
+real browser feedback. A ten-second resource sample measured 52.9% CPU busy
+across all cores, roughly 48–50% RKVENC load, and 41.9–43.8°C at 1.8 GHz.
+Load average was 3.07; it is not a CPU percentage and does not establish that
+all processing resources are exhausted. The complete core suite passed 3,684
+tests, the camera deck passed 82, and final late-readback/CSI regressions also
+passed. Python payload and measurement-script compilation passed.

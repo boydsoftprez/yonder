@@ -1346,7 +1346,7 @@ export default {
         ['imageHue', 'Hue', 'hue', -180, 180, '°'],
       ]
       return h(YonderColumn, { legend: 'Stream color', key: 'streamColor' }, () => [
-        h('p', { class: 'y-deck__color-note' }, "Adjusts Yonder's streams and thumbnails. Neutral values bypass processing; adjustments add a few milliseconds per frame. Camera-card files use native settings."),
+        h('p', { class: 'y-deck__color-note' }, "Adjusts Yonder's streams and thumbnails. Neutral values bypass processing; adjustments use CPU and can reduce frame rate. Camera-card files use native settings."),
         ...fields.map(([key, label, property, min, max, unit]) => this.field(YonderSetBar, { key, label, unit, min, max, step: 1,
           actual: image[property], requested: this.stagedValue(key), onSet: value => this.stage(key, value) })),
       ])

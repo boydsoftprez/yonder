@@ -42,9 +42,9 @@ import type { CameraRun, Supervisor } from "./supervisor.js";
  *   the launch line the process is running or from the process itself. K-48
  *   is what config-shaped answers look like: every file that asked the
  *   config agreed with the config, and the encoder was doing something else.
- * - *Invent a confirmation.* An answer that does not arrive, or arrives
- *   malformed, leaves the last confirmed state exactly where it was, and the
- *   `requested` field names what failed.
+ * - *Invent a confirmation.* A missing or unreadable answer leaves the last
+ *   confirmed state in place and marks it unconfirmed. A bounded late reply
+ *   can update readback only for the same process generation.
  * - *Vouch for continuity itself.* See `Ack.continuous`.
  */
 
@@ -52,10 +52,9 @@ import type { CameraRun, Supervisor } from "./supervisor.js";
  * What the channel got for what it asked.
  *
  * `requested` and `observed` are **separate values, and are meant to be
- * compared** (spec §8.1): equal, the request landed; different, it did not,
- * and `observed` is the last state the encoder actually confirmed. There is
- * no third field saying "failed", because the pair already says it and a
- * flag beside them could disagree with them.
+ * compared** (spec §8.1). A readable response reports what the encoder
+ * accepted. `unconfirmed` distinguishes a missing response from a refusal:
+ * the old observed rate alone cannot say what a timed-out command did.
  *
  * `continuous` is a claim about the **main branch**: that the ground-station
  * stream, and any board recording taken off it, did not break while this
@@ -69,10 +68,9 @@ import type { CameraRun, Supervisor } from "./supervisor.js";
  *  3. that the supervisor counted no restart across the request and the
  *     camera did not stop or fail.
  *
- * An unanswered request leaves witness 1 silent and 3 deciding: nothing was
- * done, so nothing broke, and it is `requested` against `observed` that
- * carries the failure rather than a continuity claim the pipeline never
- * earned.
+ * An unanswered request leaves witness 1 silent. `unconfirmed` says both
+ * readback and continuity lack a fresh host observation; the continuity bit
+ * then reports only whether the supervisor witnessed a replacement.
  *
  * `notControllable` is the other answer entirely: there is no encoder on
  * this feed to command — the camera is not running, its pipeline takes no
@@ -87,6 +85,8 @@ export type Ack<T> =
     readonly observed: T;
     readonly continuous: boolean;
     readonly at: number;
+    /** No readable response arrived before the deadline; observed is historical. */
+    readonly unconfirmed?: true;
   }
   | { readonly notControllable: string };
 
@@ -171,6 +171,7 @@ export class EncoderChannel {
   private readonly confirmed = new Map<string, Confirmed>();
   private readonly waiting = new Map<number, { camera: string; settle(a: Answer): void }>();
   private next = 1;
+  private readonly lastReply = new Map<string, number>();
   private readonly pending = new Set<Promise<unknown>>();
 
   /** Drain commands issued before a manual render takes its observed snapshot. */
@@ -215,15 +216,29 @@ export class EncoderChannel {
     }
 
     const before = this.supervisor.state(camera.id);
-    const answer = await this.ask(camera.id, "retune", [set], this.retuneMs);
+    const generation = this.supervisor.generation(camera.id);
+    const key = `${camera.id}:${encode}`;
+    const answer = await this.ask(camera.id, "retune", [set], this.retuneMs, reply => {
+      // A delayed readback is still evidence, but never about a replacement
+      // process or a rate confirmed by a newer command (R-VID-07).
+      const observed = kbpsIn(reply.observed);
+      if (observed !== null && this.supervisor.generation(camera.id) === generation
+          && reply.id > (this.lastReply.get(key) ?? 0)) {
+        held[encode] = observed;
+        this.lastReply.set(key, reply.id);
+      }
+    });
     if (answer.kind === "no channel") return noChannel(camera.id);
 
     const reply = answer.kind === "reply" ? answer.reply : null;
-    const continuous = this.settle(camera.id, argv, before, reply);
-    const observed = reply === null ? null : kbpsIn(reply.observed);
-    if (observed !== null) held[encode] = observed;
+    const sameGeneration = this.supervisor.generation(camera.id) === generation;
+    const continuous = this.settle(camera.id, argv, before, sameGeneration ? reply : null) && sameGeneration;
+    const observed = reply === null || !sameGeneration ? null : kbpsIn(reply.observed);
+    this.hold(camera.id, this.supervisor.argv(camera.id) ?? argv);
+    if (observed !== null && reply?.id === this.lastReply.get(key)) held[encode] = observed;
     return {
       requested: kbps,
+      ...(observed === null ? { unconfirmed: true as const } : {}),
       // The rate the process just confirmed, or — where it confirmed
       // nothing readable — the one it last confirmed, which `settle` has
       // already re-read from the launch line if the pipeline changed under
@@ -287,6 +302,8 @@ export class EncoderChannel {
     };
   }
 
+  generation(camera: string): number { return this.supervisor.generation(camera); }
+
   /**
    * What this camera's encoder is running now — the launch line the process
    * is under, moved by every acknowledgement since (R-VID-07, R-VID-11).
@@ -335,13 +352,21 @@ export class EncoderChannel {
 
   private ask(
     camera: string, op: Command["op"], sets: readonly ElementProperty[], budget: number,
+    observe?: (reply: Reply) => void,
   ): Promise<Answer> {
     return new Promise<Answer>((resolve) => {
       const id = this.next++;
+      if (process.env.YONDER_PIPELINE_TRACE === '1') console.error('encoder-trace', JSON.stringify({
+        event: 'send', at: Date.now(), camera, id, op, sets, budget,
+      }));
       // Registered before it is sent: a process that answers the moment it is
       // written to would otherwise answer into an empty table.
-      const timer = this.clock.setTimer(budget, () => {
-        this.waiting.delete(id);
+      let timer = this.clock.setTimer(budget, () => {
+        if (process.env.YONDER_PIPELINE_TRACE === '1') console.error('encoder-trace', JSON.stringify({ event: 'timeout', at: Date.now(), camera, id }));
+        if (observe) {
+          // Bound late-readback retention; an absent host cannot grow the table.
+          timer = this.clock.setTimer(30_000, () => this.waiting.delete(id));
+        } else this.waiting.delete(id);
         resolve({ kind: "silence" });
       });
       this.waiting.set(id, {
@@ -349,6 +374,7 @@ export class EncoderChannel {
         settle: (answer) => {
           this.clock.clearTimer(timer);
           this.waiting.delete(id);
+          if (answer.kind === "reply") observe?.(answer.reply);
           resolve(answer);
         },
       });
@@ -359,12 +385,15 @@ export class EncoderChannel {
     });
   }
 
-  /** One line from a pipeline. Anything that is not a reply to a request
-   *  still outstanding **for that camera** is dropped without effect. */
+  /** Match a bounded outstanding or recently timed-out request for this camera. */
   private heard(camera: string, line: string): void {
     const reply = parseReply(line);
     if (reply === null) return;
     const waiting = this.waiting.get(reply.id);
+    if (process.env.YONDER_PIPELINE_TRACE === '1') console.error('encoder-trace', JSON.stringify({
+      event: 'reply', at: Date.now(), camera, id: reply.id, pending: waiting !== undefined,
+      observed: typeof reply.observed === 'number' ? reply.observed : undefined, continuous: reply.continuous,
+    }));
     if (waiting === undefined || waiting.camera !== camera) return;
     waiting.settle({ kind: "reply", reply });
   }

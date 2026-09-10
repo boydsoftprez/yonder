@@ -110,6 +110,9 @@ describe("compose", () => {
     expect(line).not.toContain("mppjpegdec");
     expect(line).not.toContain("jpegdec");
     expect(line.filter((token) => token === "mpph264enc")).toHaveLength(2);
+    expect(line).toContain('name=csi-source');
+    expect(line).toContain('drop-only=true');
+    expect(compose(mppOpts)).not.toContain('drop-only=true');
   });
   it("captures the format the camera actually offered", () => {
     expect(text()).toContain("v4l2src");

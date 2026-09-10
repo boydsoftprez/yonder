@@ -1,4 +1,5 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
+import { previewCaptureRefusal } from "../video/settings.js";
 import { PREVIEW_RUNGS, CameraImage, type Config } from "../schema/config.js";
 import type { CameraDraft } from "./draft-shape.js";
 
@@ -168,5 +169,7 @@ export function applyCameraDraft(
   if (draft.controls !== undefined) camera.controls = { ...camera.controls, ...draft.controls };
   if (draft.image !== undefined) camera.image = { ...camera.image, ...draft.image };
 
+  const refusal = previewCaptureRefusal(camera);
+  if (refusal) return { ok: false, error: refusal };
   return { ok: true, config };
 }

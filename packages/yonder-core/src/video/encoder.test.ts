@@ -84,7 +84,7 @@ function fakeSpawner(opts: { controllable?: boolean } = {}) {
   let nextPid = 4200;
   const spawned: {
     argv: string[]; proc: SpawnedProcess; pid: number; sent: Command[];
-    answer(over?: { pid?: number; continuous?: boolean; observed?: unknown }): void;
+    answer(over?: { id?: number; pid?: number; continuous?: boolean; observed?: unknown }): void;
     exit(code: number): void;
   }[] = [];
 
@@ -103,10 +103,10 @@ function fakeSpawner(opts: { controllable?: boolean } = {}) {
         }
         : {}),
     };
-    const answer = (over: { pid?: number; continuous?: boolean; observed?: unknown } = {}): void => {
+    const answer = (over: { id?: number; pid?: number; continuous?: boolean; observed?: unknown } = {}): void => {
       const last = sent[sent.length - 1];
       const reply = {
-        id: last.id,
+        id: over.id ?? last.id,
         pid: over.pid ?? pid,
         continuous: over.continuous ?? true,
         observed: "observed" in over ? over.observed : observedFor(last),
@@ -474,4 +474,42 @@ describe("EncoderChannel.inForce", () => {
     const channel = new EncoderChannel({ supervisor, clock });
     expect(channel.inForce("cam0")).toBeNull();
   });
+});
+
+it("reconciles a late bitrate readback without inventing confirmation at timeout", async () => {
+  const { channel, spawned, camera, advance } = running();
+  const pending = channel.retune(camera, "preview", 600);
+  advance(2000);
+  expect(await pending).toMatchObject({ observed: 400, unconfirmed: true });
+  expect(channel.inForce(camera.id)?.preview).toBe(400);
+  spawned[0].answer({ observed: 600 });
+  expect(channel.inForce(camera.id)?.preview).toBe(600);
+});
+it("does not apply a late reply to a replacement pipeline", async () => {
+  const { channel, supervisor, spawned, camera, advance } = running();
+  const pending = channel.retune(camera, "preview", 600);
+  advance(2000); await pending;
+  const argv = supervisor.argv(camera.id)!;
+  supervisor.stop(camera.id); supervisor.start(camera.id, [...argv]);
+  spawned[0].answer({ observed: 600 });
+  expect(channel.inForce(camera.id)?.preview).toBe(400);
+});
+it("detects manual replacement during a retune even when the restart counter resets", async () => {
+  const { channel, supervisor, camera, advance } = running();
+  const pending = channel.retune(camera, "preview", 600);
+  const argv = supervisor.argv(camera.id)!;
+  supervisor.stop(camera.id); supervisor.start(camera.id, [...argv]);
+  advance(2000);
+  expect(await pending).toMatchObject({ observed: 400, continuous: false, unconfirmed: true });
+});
+
+it("ignores an older late readback after a newer command has confirmed", async () => {
+  const { channel, spawned, camera, advance } = running();
+  const first = channel.retune(camera, "preview", 600);
+  const oldId = spawned[0].sent[0].id;
+  advance(2000); await first;
+  const second = channel.retune(camera, "preview", 800);
+  spawned[0].answer({ observed: 800 }); await second;
+  spawned[0].answer({ id: oldId, observed: 600 });
+  expect(channel.inForce(camera.id)?.preview).toBe(800);
 });

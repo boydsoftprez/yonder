@@ -4,7 +4,7 @@ import type { Decision, LinkReport, RateChannel, RateThresholds } from './rate.j
 import type { EncodeName, RunningEncodes } from './pipeline.js';
 
 type Mutable<T> = { -readonly [K in keyof T]: T[K] };
-type State = { sample: number; changed: number; healthy: number | null; congested: number | null; refused: number | null; refusedFrom: number | null; policy: string; paused: string | null };
+type State = { sample: number; changed: number; healthy: number | null; congested: number | null; refused: number | null; refusedFrom: number | null; policy: string; generation: number; unconfirmed: boolean; paused: string | null };
 /** Receiver-feedback fallback. A probe target is never reported as measured capacity. */
 export class FeedbackRate {
   private readonly histories = new Map<string, Array<{ at: number; rtt: number }>>();
@@ -44,8 +44,9 @@ export class FeedbackRate {
       if (rate === null) { decision.reason = 'Waiting for encoder readback.'; continue; }
       let state = this.states.get(encode);
       const policyKey = JSON.stringify(policy);
-      if (!state || now < state.sample || state.policy !== policyKey) {
-        state = { sample: -Infinity, changed: -Infinity, healthy: null, congested: null, refused: null, refusedFrom: null, policy: policyKey, paused: null };
+      const generation = this.channel.generation?.(camera.id) ?? 0;
+      if (!state || now < state.sample || state.policy !== policyKey || state.generation !== generation) {
+        state = { sample: -Infinity, changed: -Infinity, healthy: null, congested: null, refused: null, refusedFrom: null, policy: policyKey, generation, unconfirmed: false, paused: null };
         this.states.set(encode, state);
       }
       if (state.paused) { decision.reason = state.paused; continue; }
@@ -108,12 +109,13 @@ export class FeedbackRate {
         }
       }
       if (target !== rate && !this.busy) {
-        if (state.refused === target && state.refusedFrom === rate) { decision.reason = 'The encoder refused that rate; waiting for a different request or policy.'; continue; }
+        if (state.refused === target && state.refusedFrom === rate) { decision.reason = state.unconfirmed ? 'Encoder confirmation timed out; holding the last confirmed rate while waiting for readback or a different request.' : 'The encoder refused that rate; waiting for a different request or policy.'; continue; }
         this.busy = true; state.refusedFrom = rate; state.changed = now; state.healthy = null;
         this.track(this.channel.retune(camera, encode, target).then(ack => {
-          if ('notControllable' in ack || ack.observed !== target) state!.refused = target;
+          state!.unconfirmed = !('notControllable' in ack) && ack.unconfirmed === true;
+          if ('notControllable' in ack || ack.unconfirmed || ack.observed !== target) state!.refused = target;
           else state!.refused = null;
-          if (!('notControllable' in ack) && ack.continuous === false) {
+          if (!('notControllable' in ack) && !ack.unconfirmed && ack.continuous === false) {
             state!.paused = 'The encoder interrupted video during a bitrate change. Adaptive is holding this rate; change the policy to retry.';
           }
         }, () => { state!.refused = target; }).finally(() => { this.busy = false; }));
