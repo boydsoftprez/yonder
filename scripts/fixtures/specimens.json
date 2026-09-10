@@ -128,14 +128,6 @@
       "value": "Authorised, not reaching the network",
       "why": "the same messageFor `label`, drawn again at the top of the ZeroTier tab."
     },
-    "nrdb-ui-text \u00b7 Path": {
-      "value": "Relayed",
-      "why": "R-VPN-03's two words, in words rather than a boolean. `Relayed` is the longer."
-    },
-    "nrdb-ui-text \u00b7 Latency": {
-      "value": "9999 ms",
-      "why": "messageFor's `${ms} ms`. Four digits is a relayed hop over a congested cellular uplink, and the widest worth reporting."
-    },
     "nrdb-ui-text \u00b7 Network name": {
       "value": "Yonder field operations mesh",
       "why": "the name the mesh controller published. Nothing caps it, so this is the longest a controller has been configured with here."
@@ -279,6 +271,14 @@
     "nrdb-ui-yonder-sparkline \u00b7 span": {
       "value": "last 5 s",
       "why": "state.ts:214: `span: formatSpan(state.traffic.windowMs)`. windowMs is LinkTracker's own retention window (link.ts:93: DEFAULT_WINDOW_MS = 5_000, taken at link.ts:141 when no override is given), and renderer.ts:245 constructs the one LinkTracker this daemon runs with no windowMs override \u2014 so this is not the widest of several branches, it is the only value this build can ever produce. formatSpan's own seconds branch (format.ts:95-102) renders it 'last 5 s'. Derived by calling formatSpan(5000)."
+    },
+    "nrdb-ui-text \u00b7 Controller path": {
+      "value": "Relayed",
+      "why": "R-VPN-03's two words, in words rather than a boolean. `Relayed` is the longer."
+    },
+    "nrdb-ui-text \u00b7 Controller latency": {
+      "value": "9999 ms",
+      "why": "messageFor's `${ms} ms`. Four digits is a relayed hop over a congested cellular uplink, and the widest worth reporting."
     }
   },
   "masked": {
@@ -299,18 +299,6 @@
     },
     "nrdb-ui-yonder-annunciator.yonder-live.yonder-pending": {
       "why": "The confirmation countdown. It has a widest honest value \u2014 the full window, at three digits \u2014 and writing it would put CHANGE PENDING on every page captured with nothing pending, which is the one thing about this annunciator a picture has to get right. The pending captures (status-pending, network-cellular-pending) exist to photograph the other state, and they are the reason a single specimen cannot be honest for both."
-    },
-    "nrdb-ui-text \u00b7 Host": {
-      "why": "Nothing composes a value for this field yet. The widget binds {{msg.payload}} straight from yonder-diag, which sends the daemon's whole reply object, so the field renders nothing until a probe runs and an object afterwards. A specimen would state a format this console does not have."
-    },
-    "nrdb-ui-text \u00b7 Replies": {
-      "why": "As Host: bound to the whole yonder-diag payload, with no composed value to be the widest of."
-    },
-    "nrdb-ui-text \u00b7 Round trip (ms)": {
-      "why": "As Host: bound to the whole yonder-diag payload, with no composed value to be the widest of."
-    },
-    "nrdb-ui-text \u00b7 Probed": {
-      "why": "As Host: bound to the whole yonder-diag payload, with no composed value to be the widest of."
     },
     "nrdb-ui-text \u00b7 Feed": {
       "why": "Not a reading. `tel-labels` sets this widget's payload to the empty string and never anything else, so the only thing it draws is its own caption, naming the annunciator beside it. A specimen here would put a value on a page where the console never shows one."

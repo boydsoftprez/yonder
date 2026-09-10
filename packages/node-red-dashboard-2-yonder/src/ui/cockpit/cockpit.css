@@ -280,7 +280,7 @@
   color: #d2e0e5
 }
 .y-cockpit .cockpit-mission-sequence {min-width:0; flex:1}
-.y-cockpit .cockpit-mission-sequence b {display:block;white-space:nowrap}
+.y-cockpit .cockpit-mission-sequence b {display:block;white-space:normal;overflow-wrap:anywhere}
 .y-cockpit .cockpit-mission-sequence small {display:block;font-size:9px;color:#c5dce5;margin-top:4px}
 .y-cockpit .cockpit-mission-summary>span {max-width:45%}
 .y-cockpit .mission-sequence-badge {margin-left:auto;align-self:center;white-space:nowrap;font-size:9px;font-style:normal;color:#cfdfed}

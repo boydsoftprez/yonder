@@ -213,6 +213,23 @@ case "\$*" in
 esac
 exit 0
 FAKE
+# Kernel observations for the same fixture board as nmcli. There is no default
+# route, so background reachability remains untested until this gate probes it.
+cat > "$BIN/ip" <<FAKE
+#!/bin/sh
+case "\$*" in
+    "-j address show")
+        if [ "\$(cat "$ETH_STATE")" = connected ]; then
+            printf '%s\n' '[{"ifname":"eth0","operstate":"UP","flags":["UP","LOWER_UP"],"mtu":1500,"addr_info":[{"local":"192.168.77.10","prefixlen":24,"scope":"global"}]},{"ifname":"wlan0","operstate":"DOWN","flags":["NO-CARRIER"],"mtu":1500,"addr_info":[]}]'
+        else
+            printf '%s\n' '[{"ifname":"eth0","operstate":"DOWN","flags":["NO-CARRIER"],"mtu":1500,"addr_info":[]},{"ifname":"wlan0","operstate":"DOWN","flags":["NO-CARRIER"],"mtu":1500,"addr_info":[]}]'
+        fi ;;
+    "-j -4 route show table main"|"-j -6 route show table main"|"-j -4 route show default") printf '[]\n' ;;
+    *) exit 1 ;;
+esac
+FAKE
+chmod +x "$BIN/ip"
+
 # mmcli, replaying what a real EC25-AF on a live SIM answered. The fixtures are
 # the ones yonder-core's own parser tests are written against, so the Cellular
 # tab is captured showing what that board actually reported rather than a panel
@@ -749,6 +766,8 @@ else
     ok "the console logged no error at all"
 fi
 
+# Stream addresses now use the authenticated camera connection route; the
+# reusable yonder-stream-address node is intentionally absent from shipped flows.
 # yonder-confirm is named again, and that is what closed K-30.
 #
 # R-CFG-11 removed the operator confirmation of a *join* - joining takes the
@@ -765,7 +784,7 @@ fi
 # that stopped watching.
 for type in yonder-status yonder-activity yonder-diag yonder-config yonder-scan \
             yonder-apply yonder-join yonder-pending yonder-confirm yonder-revert \
-            yonder-cameras yonder-camera yonder-stream yonder-stream-address; do
+            yonder-cameras yonder-camera yonder-stream; do
     if grep -q "\"$type\"" "$USERDIR/flows.json" || grep -q "$type" "$REPO/flows/flows.json"; then
         ok "the flows use $type"
     else

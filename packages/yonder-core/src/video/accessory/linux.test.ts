@@ -317,13 +317,13 @@ it("ships its executable Python helper through the existing core asset copier", 
   expect(statSync(FUNCTIONFS_HELPER_PATH).mode & 0o111).not.toBe(0);
   const { tmpdir } = await import("node:os");
   const { join } = await import("node:path");
-  const manifest = JSON.parse(readFileSync("package.json", "utf8"));
+  const manifest = JSON.parse(readFileSync(new URL("../../../package.json", import.meta.url), "utf8"));
   expect(manifest.scripts.build).toContain("scripts/copy-assets.mjs");
   const scratch = mkdtempSync(join(tmpdir(), "yonder-helper-assets-"));
   try {
     mkdirSync(join(scratch, "scripts")); mkdirSync(join(scratch, "dist"));
     mkdirSync(join(scratch, "src/video/accessory/assets"), { recursive: true });
-    copyFileSync("scripts/copy-assets.mjs", join(scratch, "scripts/copy-assets.mjs"));
+    copyFileSync(new URL("../../../scripts/copy-assets.mjs", import.meta.url), join(scratch, "scripts/copy-assets.mjs"));
     copyFileSync(FUNCTIONFS_HELPER_PATH, join(scratch, "src/video/accessory/assets/functionfs.py"));
     copyFileSync(new URL('./assets/usb_aio.py', import.meta.url), join(scratch, "src/video/accessory/assets/usb_aio.py"));
     execFileSync("node", [join(scratch, "scripts/copy-assets.mjs")]);
