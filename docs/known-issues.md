@@ -2411,7 +2411,11 @@ variable. It now is.
 
 ### K-65 · The camera page has no codec control
 
-**Status:** Open · **Requirements:** R-CAM-08, R-UI-17
+**Implemented on the Radxa integration branch, 2026-09-09:** `fddc816` adds independent
+main and preview codec selectors through Apply, with board-encoder capability checks
+and browser WebRTC capability checks for the preview. The original observation follows.
+
+**Status:** Implemented; authenticated page visual check pending · **Requirements:** R-CAM-08, R-UI-17
 
 `codec` is a draft field the deck already carries — `DRAFT_PATHS` maps it and
 `YonderDeck.vue` flattens `capture.codec` into the form — and no control stages it, so H.265

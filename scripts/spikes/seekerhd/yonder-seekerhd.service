@@ -1,0 +1,15 @@
+# SPDX-License-Identifier: GPL-3.0-or-later
+[Unit]
+Description=Prepare the SeekerHD CSI camera on Radxa Zero 3
+After=systemd-udev-trigger.service
+Before=yonder-core.service
+ConditionPathExists=/boot/overlay-user/seekerhd-imx462.dtbo
+
+[Service]
+Type=oneshot
+ExecStart=/usr/bin/python3 /usr/local/lib/yonder-seekerhd/prepare.py
+RemainAfterExit=yes
+TimeoutStartSec=60
+
+[Install]
+WantedBy=multi-user.target

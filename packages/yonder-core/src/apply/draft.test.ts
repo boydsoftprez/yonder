@@ -6,6 +6,13 @@ import { Camera, ConfigSchema, DEFAULT_CONFIG, PREVIEW_RUNGS, type Config } from
 
 const RUNGS = [...PREVIEW_RUNGS];
 
+it('stages preview codec independently and reports its pipeline restart', () => {
+  const { draft } = deckDraft({ previewCodec: 'h265' });
+  expect(draft).toEqual({ preview: { codec: 'h265' } });
+  expect(interruption(draft, {})).toContain('restarts the picture');
+  expect(interruption(deckDraft({ previewCodec: 'h264' }).draft, {})).toEqual([]);
+});
+
 /** The smallest real document with one camera in it, parsed by the schema so
  * every default is the schema's own rather than a copy of them here. */
 function configWithCamera(): Config {
@@ -358,4 +365,14 @@ it('stages stream color separately, preserves native controls, and rejects inval
   expect(config.cameras[0].image.brightness).toBe(0);
   expect(applyCameraDraft(config, 'front', { image: { brightness: 101 } }).ok).toBe(false);
   expect(applyCameraDraft(config, 'front', { image: { hue: NaN } }).ok).toBe(false);
+});
+
+it("validates preview against the effective capture, and accepts a matching simultaneous edit", () => {
+  const before = configWithCamera();
+  expect(applyCameraDraft(before, "front", { preview: { size: "1920x1080" } }))
+    .toMatchObject({ ok: false, error: expect.stringContaining("larger") });
+  expect(applyCameraDraft(before, "front", { width: 1920, height: 1080, preview: { size: "1920x1080" } }).ok).toBe(true);
+  before.cameras[0].preview.size = "1280x720";
+  expect(applyCameraDraft(before, "front", { width: 640, height: 360 }).ok).toBe(false);
+  expect(applyCameraDraft(before, "front", { width: 640, height: 360, preview: { size: "640x360" } }).ok).toBe(true);
 });

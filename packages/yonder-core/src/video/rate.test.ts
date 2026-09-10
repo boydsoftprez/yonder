@@ -1030,6 +1030,34 @@ describe('external RTSP adaptation', () => {
     f.controller.tick(5000); await f.controller.settled();
     expect(f.retunes).toEqual([]);
   });
+  it('clears a continuity hold when the actual pipeline is replaced', async () => {
+    const f = setup(); let calls = 0; let generation = 1;
+    f.channel.generation = () => generation;
+    f.channel.retune = async (_camera, encode, kbps) => {
+      calls++; f.running[encode] = kbps;
+      return { requested: kbps, observed: kbps, continuous: calls > 1, at: 0 };
+    };
+    for (let at = 0; at <= 5000; at += 1000) await f.send(at, { loss: 0.1 });
+    expect(calls).toBe(1);
+    generation++;
+    for (let at = 6000; at <= 8000; at += 1000) await f.send(at, { loss: 0.1 });
+    expect(calls).toBeGreaterThan(1);
+  });
+  it('distinguishes missing confirmation from an encoder refusal and reconciles delayed readback', async () => {
+    const f = setup(); let calls = 0;
+    f.channel.retune = async (_camera, encode, kbps) => {
+      calls++;
+      return { requested: kbps, observed: f.running[encode]!, continuous: true, unconfirmed: true, at: 0 };
+    };
+    let decisions: Awaited<ReturnType<typeof f.send>> = [];
+    for (let at = 0; at <= 5000; at += 1000) decisions = await f.send(at, { loss: 0.1 });
+    expect(calls).toBe(1);
+    expect(decisions[0].reason).toContain('confirmation timed out');
+    expect(decisions[0].reason).not.toContain('refused');
+    f.running.stream = 1500; // The channel receives the late hardware readback.
+    await f.send(6000, { loss: 0.1 });
+    expect(calls).toBe(2);
+  });
   it('holds after an encoder reports an interruption instead of repeatedly disrupting video', async () => {
     const f = setup(); let calls = 0;
     f.channel.retune = async (_camera, encode, kbps) => {

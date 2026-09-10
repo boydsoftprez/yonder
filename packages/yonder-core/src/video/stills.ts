@@ -326,7 +326,7 @@ export class Stills {
         this.complain(id, `${this.root} could not be prepared to hold a still`);
         return;
       }
-      const reply = await this.ask(id, { op: "still", path: next }, this.stillMs);
+      const reply = await this.ask(id, { op: "still", path: next, thumbnail: true }, this.stillMs);
       if (reply === null) {
         this.complain(id, "the pipeline did not answer; the last still is kept");
         removeQuietly(next);

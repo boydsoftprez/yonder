@@ -86,6 +86,34 @@ describe('accessory input', () => {
 });
 
 describe("compose", () => {
+  it('composes independent 1080p30 hardware HEVC streams', () => {
+    const camera = { ...CAMERA, width: 1920, height: 1080, codec: 'h265' as const,
+      preview: { ...CAMERA.preview, codec: 'h265' as const, size: '1920x1080' as const, framerate: 30 } };
+    const line = compose({ ...mppOpts, camera });
+    expect(line.filter(x => x === 'mpph265enc')).toHaveLength(2);
+    const preview = line.slice(line.indexOf('name=enc-preview'));
+    expect(preview).toContain('width=1920');
+    expect(preview).toContain('height=1080');
+    expect(refuse({ ...mppOpts, camera: { ...camera, width: 1280, height: 720 } })).toContain('larger than');
+  });
+  it("encodes an independently selected H.265 preview and preserves the main codec", () => {
+    const selected = { ...CAMERA, preview: { ...CAMERA.preview, codec: 'h265' as const } };
+    const line = compose({ ...mppOpts, camera: selected });
+    expect(line[line.indexOf('name=enc-stream') - 1]).toBe('mpph264enc');
+    expect(line[line.indexOf('name=enc-preview') - 1]).toBe('mpph265enc');
+    expect(line.slice(line.indexOf('name=enc-preview'))).toContain('h265parse');
+    expect(refuse({ ...opts, camera: selected })).toContain('no H.265 preview encoder');
+  });
+  it("feeds CSI NV12 frames directly to both hardware encoders", () => {
+    const line = compose({ ...mppOpts, camera: { ...CAMERA, source: "csi" } });
+    expect(line).toContain("video/x-raw,format=NV12,width=1280,height=720,framerate=30/1");
+    expect(line).not.toContain("mppjpegdec");
+    expect(line).not.toContain("jpegdec");
+    expect(line.filter((token) => token === "mpph264enc")).toHaveLength(2);
+    expect(line).toContain('name=csi-source');
+    expect(line).toContain('drop-only=true');
+    expect(compose(mppOpts)).not.toContain('drop-only=true');
+  });
   it("captures the format the camera actually offered", () => {
     expect(text()).toContain("v4l2src");
     expect(text()).toContain("image/jpeg,width=1280,height=720,framerate=30/1");

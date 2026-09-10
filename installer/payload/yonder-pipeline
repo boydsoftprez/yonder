@@ -467,7 +467,7 @@ class Host(object):
                 note("a %s with no path to write to: %r" % (op, command))
                 return None
             mark = self.main.mark()
-            observed = self.still(path) if op == "still" else self.record(path)
+            observed = self.still(path, command.get("thumbnail") is True) if op == "still" else self.record(path)
             broke = self.main.broke_over(
                 mark, STILL_WATCH_S if op == "still" else RECORD_WATCH_S)
         elif op == "record-stop":
@@ -487,7 +487,7 @@ class Host(object):
 
     # -- a still, off the raw tee (R-CAM-18) -------------------------------
 
-    def still(self, path):
+    def still(self, path, thumbnail=False):
         """
         One frame off `raw`, written to `path`, with everything else left
         running.
@@ -507,6 +507,8 @@ class Host(object):
         capture an operator can open and find nothing in is worse than being
         told the pipeline had nothing to give.
         """
+        if self.pipeline.get_by_name("csi-source") is not None:
+            return self.isolated_still(path, thumbnail)
         tee = self.pipeline.get_by_name(RAW_TEE)
         if tee is None:
             return {"refused": "this pipeline has no `%s` tee to take a frame "
@@ -561,6 +563,74 @@ class Host(object):
         if shape is not None:
             answer.update(shape)
         return answer
+
+    def isolated_still(self, path, thumbnail=False):
+        """Copy one CSI frame, release capture, then JPEG-encode separately.
+
+        JPEG negotiation and teardown must not touch the live DMA capture
+        pool. Only an exact-caps, bounded raw sink joins the live tee.
+        """
+        tee = self.pipeline.get_by_name(RAW_TEE)
+        caps = tee.get_static_pad("sink").get_current_caps() if tee else None
+        if caps is None:
+            return {"refused": "the capture has no negotiated frame to take"}
+        branch = Branch(self.pipeline, tee, [
+            ("queue", {"leaky": 2, "max-size-buffers": 1, "max-size-bytes": 0, "max-size-time": 0}),
+            ("appsink", {"caps": caps, "sync": False, "async": False,
+                         "max-buffers": 1, "drop": True, "enable-last-sample": False}),
+        ])
+        def keep_capture(pad, info):
+            event = info.get_event()
+            return Gst.PadProbeReturn.DROP if event and event.type == Gst.EventType.RECONFIGURE else Gst.PadProbeReturn.OK
+        branch.head().add_probe(Gst.PadProbeType.EVENT_UPSTREAM, keep_capture)
+        frame = None
+        try:
+            branch.start()
+            sample = branch.elements[-1].emit("try-pull-sample", int(STILL_FRAME_WAIT_S * Gst.SECOND))
+            if sample is not None:
+                # Release the camera's DMA buffer before doing JPEG work.
+                frame = sample.get_buffer().copy_deep()
+                caps = sample.get_caps().copy()
+                sample = None
+        finally:
+            branch.unhook()
+            branch.dispose()
+        if frame is None:
+            remove_quietly(path)
+            return {"refused": "the capture delivered no fresh frame"}
+        hardware = Gst.ElementFactory.find("mppjpegenc") is not None
+        codec = "mppjpegenc max-pending=1" if hardware else "videoconvert ! jpegenc"
+        if thumbnail:
+            shape = caps.get_structure(0)
+            width, height = shape.get_value("width"), shape.get_value("height")
+            scale = min(1.0, 640 / width, 360 / height)
+            width, height = max(2, int(width * scale) // 2 * 2), max(2, int(height * scale) // 2 * 2)
+            codec = (codec + " width=%d height=%d" % (width, height)) if hardware else (
+                "videoscale ! video/x-raw,width=%d,height=%d ! " % (width, height) + codec)
+        jpeg = Gst.parse_launch("appsrc name=frame-source format=time ! " + codec + " ! appsink name=jpeg-sink sync=false async=false max-buffers=1 enable-last-sample=false")
+        try:
+            source = jpeg.get_by_name("frame-source")
+            source.set_property("caps", caps)
+            jpeg.set_state(Gst.State.PLAYING)
+            source.emit("push-buffer", frame)
+            source.emit("end-of-stream")
+            encoded = jpeg.get_by_name("jpeg-sink").emit("try-pull-sample", int(STILL_FRAME_WAIT_S * Gst.SECOND))
+            if encoded is None:
+                remove_quietly(path)
+                return {"refused": "the copied frame could not be JPEG encoded"}
+            buffer = encoded.get_buffer()
+            payload = buffer.extract_dup(0, buffer.get_size())
+            if not payload:
+                remove_quietly(path)
+                return {"refused": "the copied frame produced an empty JPEG"}
+            shape = encoded.get_caps().get_structure(0)
+            answer = {"path": path, "bytes": len(payload),
+                      "width": shape.get_value("width"), "height": shape.get_value("height")}
+            with open(path, "wb") as output:
+                output.write(payload)
+            return answer
+        finally:
+            jpeg.set_state(Gst.State.NULL)
 
     # -- a recording, off the encoded tee (R-CAM-17) -----------------------
 
@@ -1149,7 +1219,18 @@ def main(args):
         # instruction is lost either way, and a lost instruction is already
         # reported: no reply is a request the channel says did not land.
         try:
+            trace = os.environ.get("YONDER_PIPELINE_TRACE") == "1"
+            started_at = time.time()
+            if trace:
+                note("host-trace " + json.dumps({"event": "start", "at": round(started_at * 1000),
+                     "id": command.get("id"), "op": command.get("op")}))
             reply = host.obey(command)
+            if trace:
+                note("host-trace " + json.dumps({"event": "done", "at": round(time.time() * 1000),
+                     "id": command.get("id"), "op": command.get("op"),
+                     "elapsed_ms": round((time.time() - started_at) * 1000),
+                     "continuous": reply.get("continuous") if reply else None,
+                     "observed": reply.get("observed") if reply and isinstance(reply.get("observed"), (int, float)) else None}))
         except Exception:                                 # noqa: BLE001
             note("that command went wrong, and the pipeline is still running:\n%s"
                  % traceback.format_exc())

@@ -1,0 +1,16 @@
+Format Video Capture Multiplanar:
+	Width/Height      : 1280/720
+	Pixel Format      : 'NM12' (Y/UV 4:2:0 (N-C))
+	Field             : None
+	Number of planes  : 2
+	Flags             : set-csc
+	Colorspace        : JPEG
+	Transfer Function : Rec. 709
+	YCbCr/HSV Encoding: Rec. 709
+	Quantization      : Full Range
+	Plane 0           :
+	   Bytes per Line : 1280
+	   Size Image     : 921600
+	Plane 1           :
+	   Bytes per Line : 1280
+	   Size Image     : 460800

@@ -191,7 +191,7 @@ export class PipelineRenderer implements Renderer {
             if (camera[branch].mode !== "fixed" && encodesIn(current)[branch] === wanted) continue;
             if (wanted === null || this.channel.inForce(camera.id)?.[branch] === wanted) continue;
             const ack = await this.channel.retune(camera, branch, wanted);
-            if ("notControllable" in ack || ack.observed !== wanted) { accepted = false; break; }
+            if ("notControllable" in ack || ack.unconfirmed || ack.observed !== wanted) { accepted = false; break; }
             continuous &&= ack.continuous;
           }
         } catch (e) {

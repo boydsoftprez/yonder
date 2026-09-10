@@ -359,7 +359,7 @@ export type CameraOutput = z.infer<typeof CameraOutput>;
  * its own right, so `preview.size` adds it separately instead of folding it
  * in here.
  */
-export const PREVIEW_RUNGS = ["1280x720", "854x480", "640x360"] as const;
+export const PREVIEW_RUNGS = ["1920x1080", "1280x720", "854x480", "640x360"] as const;
 export type PreviewRung = (typeof PREVIEW_RUNGS)[number];
 
 /**
@@ -400,6 +400,7 @@ export type PreviewRung = (typeof PREVIEW_RUNGS)[number];
  * alike rather than three copies of the same bound that could drift apart.
  */
 const PreviewShape = z.object({
+  codec: z.enum(["h264", "h265"]).optional(),
   mode: z.enum(["adaptive", "fixed"]).default("adaptive"),
   size: z.enum(["auto", ...PREVIEW_RUNGS]).default("auto"),
   ladder_top: z.enum(PREVIEW_RUNGS).default("1280x720"),
@@ -638,8 +639,8 @@ export type GimbalPreset = z.infer<typeof GimbalPreset>;
 export const CameraShape = z.object({
   id: CameraId,
   name: z.string().min(1).max(48),
-  /** M6 adds `csi` and `hdmi`; M5 adds the accessory camera. One today. */
-  source: z.enum(["usb", "accessory"]),
+  /** R-CAM-01: CSI uses the board ISP; accessory cameras supply framed media. */
+  source: z.enum(["usb", "accessory", "csi"]),
   accessory_mount: AccessoryMount.nullable().optional(),
   gimbal_presets: z.object({
     revision: z.number().int().nonnegative(),

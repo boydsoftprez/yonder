@@ -2120,6 +2120,11 @@ export function createRouter(deps: RouterDeps): Router {
           // can recognise while they think of a better one.
           name: detected.card.slice(0, 48),
           source: detected.source ?? "usb",
+          ...(detected.source === "csi" && detected.capabilities.formats.state === "present"
+            ? { width: detected.capabilities.formats.value[0].width,
+              height: detected.capabilities.formats.value[0].height,
+              framerate: detected.capabilities.formats.value[0].rates[0] }
+            : {}),
           device,
         } as (typeof next.cameras)[number]);
         say(`cameras: adopted ${device} as ${id}`);

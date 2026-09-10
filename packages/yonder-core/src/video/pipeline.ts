@@ -1,4 +1,5 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
+import { previewCaptureRefusal } from "./settings.js";
 import { PREVIEW_RUNGS, type Camera, type CameraOutput, type PreviewRung } from "../schema/config.js";
 import { captureRefusal, type CameraCapabilities } from "./capability.js";
 import { orientation } from "./orientation.js";
@@ -454,6 +455,9 @@ function color(opts: ComposeOptions): string[] {
 export function compose(opts: ComposeOptions): string[] {
   const { camera, encoder, rtspBase } = opts;
   const main = encoderFor(encoder, camera.codec);
+  const previewCodec = camera.preview.codec ?? 'h264';
+  const previewEncoder = encoderFor(encoder, previewCodec);
+  if (previewEncoder === null) throw new Error('This board has no H.265 preview encoder');
   if (main === null) {
     throw new Error(
       `${camera.id} asks for ${camera.codec} and this board's encoder offers none; refuse() answers this before compose() is reached`,
@@ -472,12 +476,16 @@ export function compose(opts: ComposeOptions): string[] {
       `video/x-raw,width=${camera.width},height=${camera.height},framerate=${camera.framerate}/1`, LINK,
       ...color(opts), ...turn(opts), 'tee', 'name=raw');
   } else push(
-    "v4l2src", `device=/dev/v4l/by-path/${camera.device}`, "io-mode=4", LINK,
-    `image/jpeg,width=${camera.width},height=${camera.height},framerate=${camera.framerate}/1`, LINK,
+    "v4l2src", ...(camera.source === "csi" ? ["name=csi-source"] : []), `device=/dev/v4l/by-path/${camera.device}`, "io-mode=4", LINK,
+    ...(camera.source === "csi" ? [
+      `video/x-raw,format=NV12,width=${camera.width},height=${camera.height},framerate=${camera.framerate}/1`, LINK,
+    ] : [
+      `image/jpeg,width=${camera.width},height=${camera.height},framerate=${camera.framerate}/1`, LINK,
     // Spec §5: decode in hardware where the board has it, so the frames
     // never leave the SoC between capture and encode. Measured at +3 points
     // against software's +8 for one branch, +4 against +14 for two.
     encoder.decoder ?? "jpegdec", LINK,
+    ]),
     ...color(opts), ...turn(opts),
     "tee", "name=raw",
   );
@@ -499,15 +507,14 @@ export function compose(opts: ComposeOptions): string[] {
   const [scale, rate] = previewCaps({
     size: heldRung(camera.preview), fps: camera.preview.framerate,
   });
-  // The interface's copy is always H.264, whatever the main stream carries:
-  // a browser reaches it over WebRTC (R-VID-20).
+  // Preview codec is independent of the ground-station codec (R-VID-20).
   if (encoderScales(encoder)) {
     push(
       "raw.", LINK, ...QUEUE, LINK,
-      "videorate", LINK,
+      "videorate", ...(camera.source === 'csi' && camera.preview.framerate <= camera.framerate ? ['drop-only=true'] : []), LINK,
       "capsfilter", `name=${rate.element}`, token(anyMemory(rate)), LINK,
-      ...encode(encoder.element, "preview", camera.preview.bitrate_kbps, previewSize(camera.preview)), LINK,
-      "h264parse", LINK,
+      ...encode(previewEncoder, "preview", camera.preview.bitrate_kbps, previewSize(camera.preview)), LINK,
+      parser(previewCodec), LINK,
       "rtspclientsink", `location=${rtspBase}/${camera.id}-preview`, "latency=0",
     );
   } else {
@@ -517,8 +524,8 @@ export function compose(opts: ComposeOptions): string[] {
       "capsfilter", `name=${scale.element}`, token(scale), LINK,
       "videorate", LINK,
       "capsfilter", `name=${rate.element}`, token(rate), LINK,
-      ...encode(encoder.element, "preview", camera.preview.bitrate_kbps, null), LINK,
-      "h264parse", LINK,
+      ...encode(previewEncoder, "preview", camera.preview.bitrate_kbps, null), LINK,
+      parser(previewCodec), LINK,
       "rtspclientsink", `location=${rtspBase}/${camera.id}-preview`, "latency=0",
     );
   }
@@ -687,13 +694,14 @@ export function refuse(opts: ComposeOptions): string | null {
       ? `this board has no /dev/v4l/by-path/${camera.device}; the cameras it can see are ${offered}`
       : `this board has no /dev/v4l/by-path/${camera.device}, and no camera on it has a stable name at all`;
   }
-  const preview = previewSize(camera.preview);
-  if (preview.width > camera.width || preview.height > camera.height) {
-    return `the preview is ${preview.width}x${preview.height}, larger than the ${camera.width}x${camera.height} it is scaled from`;
-  }
+  const previewRefusal = previewCaptureRefusal(camera);
+  if (previewRefusal) return previewRefusal;
 
   if (encoderFor(encoder, camera.codec) === null) {
     return `this board has no H.265 encoder — its encoder is ${encoder.detail}; set codec to h264, or run this camera on a board that encodes H.265 (R-CAM-08)`;
+  }
+  if (encoderFor(encoder, camera.preview.codec ?? 'h264') === null) {
+    return 'This board has no H.265 preview encoder; select H.264 for preview';
   }
 
   if (camera.source === 'accessory') {

@@ -385,7 +385,8 @@
             "type": "string",
             "enum": [
               "usb",
-              "accessory"
+              "accessory",
+              "csi"
             ]
           },
           "accessory_mount": {
@@ -856,6 +857,13 @@
           "preview": {
             "type": "object",
             "properties": {
+              "codec": {
+                "type": "string",
+                "enum": [
+                  "h264",
+                  "h265"
+                ]
+              },
               "mode": {
                 "type": "string",
                 "enum": [
@@ -868,6 +876,7 @@
                 "type": "string",
                 "enum": [
                   "auto",
+                  "1920x1080",
                   "1280x720",
                   "854x480",
                   "640x360"
@@ -877,6 +886,7 @@
               "ladder_top": {
                 "type": "string",
                 "enum": [
+                  "1920x1080",
                   "1280x720",
                   "854x480",
                   "640x360"
@@ -886,6 +896,7 @@
               "ladder_bottom": {
                 "type": "string",
                 "enum": [
+                  "1920x1080",
                   "1280x720",
                   "854x480",
                   "640x360"

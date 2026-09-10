@@ -142,5 +142,16 @@ export function setCameraSettings(
     if (leaf === "preview") camera.preview.bitrate_kbps = n;
     else camera[leaf as "width" | "height" | "framerate" | "bitrate_kbps"] = n;
   }
+  const refusal = previewCaptureRefusal(camera);
+  if (refusal) return { ok: false, error: refusal };
   return { ok: true, config };
+}
+
+/** R-VID-13: validate the effective pair, including an unchanged preview. */
+export function previewCaptureRefusal(camera: Pick<Camera, "width" | "height" | "preview">): string | null {
+  const size = camera.preview.size === "auto" ? camera.preview.ladder_bottom : camera.preview.size;
+  const [width, height] = size.split("x").map(Number);
+  return width > camera.width || height > camera.height
+    ? `The preview is ${size}, larger than the ${camera.width}x${camera.height} capture. Reduce preview size or increase capture size.`
+    : null;
 }

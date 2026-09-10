@@ -118,7 +118,7 @@ const OUTPUT_PATH = { rtp: 'outputRtp', rtsp: 'outputRtsp', srt: 'outputSrt' }
 const DRAFT_LABELS = {
   name:'Camera name', width:'Output width', height:'Output height', framerate:'Output frame rate', codec:'Output codec',
   streamMode:'Stream bitrate mode', streamBitrate:'Stream bitrate', streamFloor:'Stream minimum bitrate', streamCeiling:'Stream maximum bitrate',
-  previewMode:'Preview bitrate mode', previewSize:'Preview size', previewLadderBottom:'Smallest preview size', previewLadderTop:'Largest preview size',
+  previewMode:'Preview bitrate mode', previewCodec:'Preview codec', previewSize:'Preview size', previewLadderBottom:'Smallest preview size', previewLadderTop:'Largest preview size',
   previewFloor:'Preview minimum bitrate', previewCeiling:'Preview maximum bitrate', previewBitrate:'Preview bitrate', previewRate:'Preview frame rate',
   rotation:'Rotation', horizontalFlip:'Mirror', verticalFlip:'Flip', outputRtp:'RTP output', outputRtsp:'RTSP output', outputSrt:'SRT output',
   imageBrightness:'Stream brightness', imageContrast:'Stream contrast', imageSaturation:'Stream saturation', imageHue:'Stream hue',
@@ -127,6 +127,7 @@ const DRAFT_LABELS = {
 
 const PREVIEW_SIZE_OPTIONS = [
   { value: 'auto', label: 'Auto — steps with the link' },
+  { value: '1920x1080', label: '1920×1080 — hold' },
   { value: '1280x720', label: '1280×720 — hold' },
   { value: '854x480', label: '854×480 — hold' },
   { value: '640x360', label: '640×360 — hold' },
@@ -135,6 +136,7 @@ const PREVIEW_RUNG_OPTIONS = [
   { value: '640x360', label: '640×360' },
   { value: '854x480', label: '854×480' },
   { value: '1280x720', label: '1280×720' },
+  { value: '1920x1080', label: '1920×1080' },
 ]
 
 /**
@@ -248,6 +250,7 @@ export function appliedForDraft (payload) {
     flat.previewCeiling = preview.ceiling_kbps
     flat.previewBitrate = preview.bitrate_kbps
     flat.previewRate = preview.framerate
+    flat.previewCodec = preview.codec || 'h264'
   }
   if (payload && payload.camera && typeof payload.camera.name === 'string') {
     flat.name = payload.camera.name
@@ -1100,6 +1103,16 @@ export default {
       // Beneath the bitrate bar, which is where spec §7 lists Resolution and
       // where the blueprint draws it — in this column and not in Capture,
       // because it is what leaves for the ground station.
+      const codecs = r.codecs || ['h264']
+      children.push(this.field(YonderPicker, {
+        key: 'codec', label: 'Codec',
+        value: this.draftValue('codec', r.policy?.capture?.codec || 'h264'),
+        options: codecs.map(value => ({ value, label: value === 'h265' ? 'H.265' : 'H.264' })),
+        state: this.signInRequired ? 'gated' : 'present',
+        onChange: value => { if (codecs.includes(value)) this.stage('codec', value) },
+      }))
+      children.push(h('p', { class: 'y-deck__connection-note' },
+        'This codec is for the ground-station stream. Changing codec restarts video.'))
       for (const child of this.buildCaptureShape()) children.push(child)
       return h(YonderColumn, { legend: GROUP_LEGEND.stream, qualifier: 'to the ground station', key: 'stream' }, () => children)
     },
@@ -1216,7 +1229,29 @@ export default {
       const adaptive = uiMode === 'Adaptive'
       const size = this.draftValue('previewSize', policy.size || 'auto')
       const auto = size === 'auto'
+      const capture = r.policy?.capture || {}
+      const maxWidth = this.draftValue('width', capture.width || 0)
+      const maxHeight = this.draftValue('height', capture.height || 0)
+      const fitsCapture = option => {
+        if (option.value === 'auto') return true
+        const [width, height] = option.value.split('x').map(Number)
+        return width <= maxWidth && height <= maxHeight
+      }
       const children = []
+      const hevc = typeof RTCRtpReceiver !== 'undefined' &&
+        RTCRtpReceiver.getCapabilities?.('video')?.codecs?.some(c => c.mimeType.toLowerCase() === 'video/h265')
+      const codecs = (r.codecs || ['h264']).filter(codec => codec !== 'h265' || hevc)
+      const previewCodec = this.draftValue('previewCodec', policy.codec || 'h264')
+      children.push(this.field(YonderPicker, {
+        key: 'previewCodec', label: 'Preview codec', value: previewCodec,
+        currentLabel: previewCodec === 'h265' ? 'H.265' : 'H.264',
+        options: codecs.map(value => ({ value, label: value === 'h265' ? 'H.265' : 'H.264' })),
+        state: this.signInRequired ? 'gated' : 'present',
+        onChange: value => { if (codecs.includes(value)) this.stage('previewCodec', value) },
+      }))
+      children.push(h('p', { class: 'y-deck__connection-note' }, hevc
+        ? 'This browser supports H.265. H.264 is available for compatibility; changing codec restarts video.'
+        : 'This browser does not advertise H.265 for WebRTC. Select H.264 for browser playback.'))
       children.push(this.field(YonderSegmented, {
         key: 'previewMode',
         reason: this.stagedReason('previewMode'),
@@ -1230,7 +1265,8 @@ export default {
         reason: this.stagedReason('previewSize'),
         label: 'Size',
         value: size,
-        options: PREVIEW_SIZE_OPTIONS,
+        currentLabel: size === 'auto' ? 'Auto — steps with the link' : `${size.replace('x', '×')} — hold`,
+        options: PREVIEW_SIZE_OPTIONS.filter(fitsCapture),
         onChange: (v) => this.stage('previewSize', v),
       }))
       if (auto) {
@@ -1238,14 +1274,16 @@ export default {
           key: 'previewLadderBottom',
           label: 'Smallest automatic size',
           value: this.draftValue('previewLadderBottom', policy.ladder_bottom || '640x360'),
-          options: PREVIEW_RUNG_OPTIONS,
+          currentLabel: this.draftValue('previewLadderBottom', policy.ladder_bottom || '640x360').replace('x', '×'),
+          options: PREVIEW_RUNG_OPTIONS.filter(fitsCapture),
           onChange: (v) => this.stage('previewLadderBottom', v),
         }))
         children.push(this.field(YonderPicker, {
           key: 'previewLadderTop',
           label: 'Largest automatic size',
           value: this.draftValue('previewLadderTop', policy.ladder_top || '1280x720'),
-          options: PREVIEW_RUNG_OPTIONS,
+          currentLabel: this.draftValue('previewLadderTop', policy.ladder_top || '1280x720').replace('x', '×'),
+          options: PREVIEW_RUNG_OPTIONS.filter(fitsCapture),
           onChange: (v) => this.stage('previewLadderTop', v),
         }))
       }
@@ -1308,7 +1346,7 @@ export default {
         ['imageHue', 'Hue', 'hue', -180, 180, '°'],
       ]
       return h(YonderColumn, { legend: 'Stream color', key: 'streamColor' }, () => [
-        h('p', { class: 'y-deck__color-note' }, "Adjusts Yonder's streams and thumbnails. Neutral values bypass processing; adjustments add a few milliseconds per frame. Camera-card files use native settings."),
+        h('p', { class: 'y-deck__color-note' }, "Adjusts Yonder's streams and thumbnails. Neutral values bypass processing; adjustments use CPU and can reduce frame rate. Camera-card files use native settings."),
         ...fields.map(([key, label, property, min, max, unit]) => this.field(YonderSetBar, { key, label, unit, min, max, step: 1,
           actual: image[property], requested: this.stagedValue(key), onSet: value => this.stage(key, value) })),
       ])

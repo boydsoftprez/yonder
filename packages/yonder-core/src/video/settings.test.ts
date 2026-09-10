@@ -117,3 +117,11 @@ describe("setCameraSettings", () => {
     expect([...held]).toEqual(["bitrate_kbps", "enabled", "autostart", "preview_bitrate_kbps"]);
   });
 });
+
+it("rejects reducing capture below the unchanged held preview", () => {
+  const before = withCamera();
+  before.cameras[0].preview.size = "1280x720";
+  expect(setCameraSettings(before, "front", { width: 640, height: 360 }))
+    .toMatchObject({ ok: false, error: expect.stringContaining("larger") });
+  expect(before.cameras[0].width).toBe(1280);
+});
