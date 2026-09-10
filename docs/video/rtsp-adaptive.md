@@ -96,3 +96,27 @@ real LTE performance. The isolated TCP and UDP bandwidth tests supply the
 congestion/recovery evidence. After the temporary receiver left, the live
 surface correctly returned to waiting for a receiver rather than inventing
 healthy feedback. Adaptive remains enabled with the operator's existing bounds.
+
+## QGroundControl receiver verification
+
+The actual QGroundControl application subsequently connected over ZeroTier using
+RTSP with UDP media. Its RTCP receiver reports were consumed by the installed
+controller. A temporary traffic shaper restricted only that receiver's outbound
+RTP packets to 1500 kb/s for approximately 70 seconds. Other traffic used an
+unrestricted queue; an independent timed rollback protected the test, and the
+original queue configuration was restored afterward.
+
+The encoder began at 4000 kb/s. During the constraint, sampled readback fell
+through 2250, 1200, 900 and 650 kb/s. Receiver-reported loss subsequently reached
+zero, and the target began rising again. The same camera run and USB generation
+continued with zero pipeline restarts. The shaper recorded no drops in the
+unrestricted traffic queue. QGroundControl screenshots showed updated decoded
+pictures during and after the test; they do not establish its rendered frame
+rate or uninterrupted visual smoothness.
+
+This verifies QGroundControl feedback causing real encoder adjustment and
+recovery. The initial reduction took several receiver-report cycles: the first
+sample showing a lower target was about 23 seconds after the limit began. UDP
+can lose video during that interval. This was a controlled video-only constraint
+over ZeroTier, not a measurement of fluctuating LTE capacity or a guarantee of
+seamless in-flight recovery.
