@@ -1,12 +1,17 @@
 <!-- SPDX-License-Identifier: GPL-3.0-or-later -->
 <template>
-    <div class="y-aimpanel" :data-aim-state="drawerState">
+    <div class="y-aimpanel" :class="{ 'y-aimpanel--collapsible': collapsible }" :data-aim-state="collapsible ? drawerState : null">
         <!-- An absent capability owns no edge handle. The camera workspace
              leaves this empty mount point in place so its layout can respond
              without mounting or remounting the picture receiver. -->
         <div v-if="!report" class="y-aimpanel__empty">Waiting for this camera's report.</div>
-        <template v-else-if="aimOffered">
+        <div v-else-if="!collapsible && aimState === 'not-offered'" class="y-aimpanel__fact">
+            <span class="y-aimpanel__fact-l">Aim</span>
+            <span class="y-aimpanel__fact-v">{{ reason || 'this camera has none' }}</span>
+        </div>
+        <template v-else-if="!collapsible || aimOffered">
             <button
+                v-if="collapsible"
                 type="button"
                 class="y-aimpanel__handle"
                 :aria-expanded="String(drawerOpen)"
@@ -14,11 +19,12 @@
                 :title="drawerOpen ? 'Hide Aim controls' : 'Show Aim controls'"
                 @click="toggleDrawer"
             ><span>Aim</span><i aria-hidden="true">{{ drawerOpen ? '›' : '‹' }}</i></button>
-            <section
-                v-show="drawerOpen"
-                :id="drawerId"
-                class="y-aimpanel__drawer"
-                aria-label="Aim controls"
+            <component
+                :is="collapsible ? 'section' : 'div'"
+                v-show="!collapsible || drawerOpen"
+                :id="collapsible ? drawerId : undefined"
+                :class="collapsible ? 'y-aimpanel__drawer' : undefined"
+                :aria-label="collapsible ? 'Aim controls' : undefined"
             >
         <YonderColumn legend="Aim" :qualifier="badgeText" :tone="badgeTone">
             <!--
@@ -82,7 +88,7 @@
             <YonderAimPresets v-if="report.presets && report.url" :presets="report.presets" :endpoint="presetEndpoint" :can-move="presetReady"
                 :move-reason="presetBlockReason" :active-slot="activePreset" :movement-message="presetMessage" @recall="recallPreset" @stop="aimDisconnect" />
         </YonderColumn>
-            </section>
+            </component>
         </template>
     </div>
 </template>
@@ -295,6 +301,9 @@ export default {
         drawerOpen: true
     }),
     computed: {
+        /** The Camera workspace opts in; standalone panels, including Cockpit,
+         * retain their full Aim presentation. */
+        collapsible () { return this.props?.collapsible === true },
         presetEndpoint () { return this.report?.url?.replace(/\/aim$/, '/presets') || '' },
         presetBlockReason () {
             if (this.signInRequired) return 'Sign in to use saved positions.'
@@ -343,6 +352,7 @@ export default {
             return this.cameraKey || this.report?.camera || this.report?.cameraKey || this.report?.cameraId || this.id
         },
         drawerState () {
+            if (!this.collapsible) return null
             if (!this.aimOffered) return 'absent'
             return this.drawerOpen ? 'open' : 'closed'
         },
@@ -477,7 +487,7 @@ export default {
     },
     watch: {
         drawerCameraKey (now, before) {
-            if (now !== before) this.drawerOpen = drawerPreference(now)
+            if (this.collapsible && now !== before) this.drawerOpen = drawerPreference(now)
         },
         /** The nearest honest "seen since" signal this payload has for a
          * fire-and-forget Recentre press — see this component's own doc
@@ -492,7 +502,7 @@ export default {
         }
     },
     created () {
-        this.drawerOpen = drawerPreference(this.drawerCameraKey)
+        if (this.collapsible) this.drawerOpen = drawerPreference(this.drawerCameraKey)
         this.$dataTracker(this.id)
         this.aimTransport = new AimTransport(() => this.report, (rate, reason) => { this.commandedPan = rate.pan; this.commandedTilt = rate.tilt; this.aimError = reason }, undefined, state => {
             this.activePreset = state?.state === 'moving' ? state.slot : null
@@ -503,7 +513,7 @@ export default {
     beforeUnmount () { this.aimTransport?.close(); this.$socket.off?.('disconnect', this.aimDisconnect) },
     methods: {
         setDrawerOpen (open) {
-            if (!this.aimOffered || this.drawerOpen === open) return
+            if (!this.collapsible || !this.aimOffered || this.drawerOpen === open) return
             // Hiding a live pad ends its active gesture. `onEnd()` is
             // idempotent, so this relays a stop only when movement is active.
             if (!open) this.$refs.aimPad?.onEnd()
@@ -572,13 +582,17 @@ export default {
 .y-aimpanel__position div { display: flex; justify-content: space-between; gap: 8px; }
 .y-aimpanel__position dt { color: var(--yonder-label, #7f8a95); font-size: 11px; }
 .y-aimpanel__position dd { margin: 0; font-variant-numeric: tabular-nums; font-size: 13px; color: var(--yonder-value, #fff); }
-.y-aimpanel {
+.y-aimpanel { font-family: var(--yonder-font, system-ui, sans-serif); }
+.y-aimpanel--collapsible {
     font-family: var(--yonder-font, system-ui, sans-serif);
     display: flex;
     align-items: stretch;
     min-width: 0;
     position: relative;
 }
+.y-aimpanel__fact { display: flex; gap: 10px; align-items: baseline; padding: 4px 16px; font-size: 13px; }
+.y-aimpanel__fact-l { font-size: 10.5px; letter-spacing: 0.1em; text-transform: uppercase; color: var(--yonder-label, #7f8a95); min-width: 90px; }
+.y-aimpanel__fact-v { color: var(--yonder-neutral, #7d7869); }
 .y-aimpanel__empty {
     padding: 14px 16px;
     color: var(--yonder-label, #7f8a95);

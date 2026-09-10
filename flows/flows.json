@@ -4503,6 +4503,7 @@
         "z": "yonder-console",
         "group": "group-cam-aim",
         "name": "the gimbal",
+        "collapsible": true,
         "order": 1,
         "width": 12,
         "height": 0,

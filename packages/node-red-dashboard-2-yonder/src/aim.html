@@ -9,13 +9,18 @@
     <input type="text" id="node-input-group" /></div>
   <div class="form-row"><label for="node-input-name"><i class="fa fa-tag"></i> Name</label>
     <input type="text" id="node-input-name" placeholder="Name" /></div>
+  <div class="form-row"><label for="node-input-collapsible"><i class="fa fa-columns"></i> Camera drawer</label>
+    <input type="checkbox" id="node-input-collapsible" style="display:inline-block; width:auto; vertical-align:baseline;" />
+    <span>Collapse Aim into a drawer</span></div>
   <div class="form-tips">
     <b>Stands alone (R-UI-28).</b> This node draws the gimbal pad, the
     reported pan/tilt against their bounds, the gimbal mode and Recenter from
     <code>msg.payload</code> alone &mdash; it does not read anything
     <code>ui-yonder-deck</code> draws, and needs no camera deck on the same
     page. Place it on the Cockpit, or beside a deck on a camera page; either
-    way it is the same node with the same payload.
+    way it is the same node with the same payload. Enable the drawer only in
+    the Camera workspace, where it returns picture space; standalone Cockpit
+    Aim remains fully shown.
   </div>
 </script>
 <script type="text/html" data-help-name="ui-yonder-aim">
@@ -43,6 +48,7 @@ the page, marked, carrying the reason, rather than disappearing (R-UI-20).</p>
     defaults: {
       name: { value: "" },
       group: { type: "ui-group", required: true },
+      collapsible: { value: false },
       order: { value: 0 }, width: { value: 0 }, height: { value: 0 }
     },
     inputs: 1, outputs: 1,

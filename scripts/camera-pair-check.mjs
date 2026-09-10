@@ -34,7 +34,11 @@ export async function prepareCameraPair(page, selected) {
     }, previous, {timeout: 45000});
     await page.locator('.y-pic__state .y-ov__cap').filter({hasText: 'STILLS'}).waitFor();
     await page.locator('.y-pic__state .y-ov__bitrate').waitFor();
-    await page.locator('.y-aimpanel__fact').waitFor();
+    if (await page.locator('.y-deck--workspace').count()) {
+      await page.locator('.y-aimpanel[data-aim-state="absent"]').waitFor({state: 'attached'});
+      assert.equal(await page.locator('.y-aimpanel__handle').count(), 0, 'a camera without Aim has no drawer handle');
+      assert.equal(await page.locator('#nrdb-ui-group-group-cam-aim').isVisible(), false, 'unsupported Aim consumes no workspace column');
+    } else await page.locator('.y-aimpanel__fact').waitFor();
     assert.equal(await page.locator('.y-aim__dial').count(), 0, 'switching to a camera without aim retires the dial');
     assert.match(await page.locator('.y-strip__thumb.on').innerText(), /Tail camera/);
   }
