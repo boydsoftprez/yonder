@@ -68,3 +68,25 @@ The diagnostic profiler's cleanup command caused an unexpected core restart
 through an unsupported debugger dynamic-import callback. That diagnostic fault
 was separate from the camera issue; the video session was restored. No profiler
 or debugger is left running, and the diagnostic command is not production code.
+
+## Installed acceptance
+
+The intent and UI changes, followed by the configuration-read fix, were installed
+with their original video/USB pipeline and saved settings preserved. Each planned
+core activation used the established 45-second USB absence and verified a stable
+camera run afterward. The final run retained its identity and zero restarts
+through both movement checks.
+
+Two explicit 2 degree/s checks, one pan and one tilt, each sent eight renewals
+with an added 255 ms delay between requests. All 16 were accepted, including
+measured renewal intervals from 260 to 362 ms. The requests themselves took
+4–107 ms. Pan changed from -160.2 to -156.5 degrees with unchanged tilt; tilt then
+changed from 138.9 to 134.8 degrees with unchanged pan. Both Stop requests were
+accepted, with no reported fault or native limit. These small checks establish
+working renewal and movement on both axes; they are not a full travel-range or
+preset-recall verification. The existing Free mode was preserved.
+
+Validation included 3672 core tests, 943 widget tests, the workspace build and
+107 picture tests after the final joystick-origin stacking correction. The
+camera page was inspected in the browser with the new drag guidance above video.
+Saved-position recall remains pending the reference choice and device validation.
