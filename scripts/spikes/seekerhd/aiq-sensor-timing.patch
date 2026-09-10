@@ -1,0 +1,28 @@
+--- a/rkaiq/hwi/SensorHw.cpp
++++ b/rkaiq/hwi/SensorHw.cpp
+@@ -428,14 +428,23 @@
+     if (io_control(VIDIOC_QUERYCTRL, &ctrl) < 0) {
+         return -errno;
+     }
+-    horzBlank = ctrl.minimum;
++    // G_FRAME_INTERVAL reports the current rate. Pair it with current
++    // blanking, not minima, or the inferred pixel clock is halved at 30 fps.
++    struct v4l2_control current = {};
++    current.id = V4L2_CID_HBLANK;
++    if (io_control(VIDIOC_G_CTRL, &current) < 0)
++        return -errno;
++    horzBlank = current.value;
+ 
+     memset(&ctrl, 0, sizeof(ctrl));
+     ctrl.id = V4L2_CID_VBLANK;
+     if (io_control(VIDIOC_QUERYCTRL, &ctrl) < 0) {
+         return -errno;
+     }
+-    vertBlank = ctrl.minimum;
++    current.id = V4L2_CID_VBLANK;
++    if (io_control(VIDIOC_G_CTRL, &current) < 0)
++        return -errno;
++    vertBlank = current.value;
+ 
+     sns_des->pixel_periods_per_line = horzBlank + sns_des->sensor_output_width;
+     sns_des->line_periods_per_field = vertBlank + sns_des->sensor_output_height;
