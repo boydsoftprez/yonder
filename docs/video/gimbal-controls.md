@@ -45,3 +45,26 @@ Before enabling recall on this camera, establish the chosen position reference
 and validate a bounded, interruptible recall using that reference. A saved
 command-duration macro is not a measured position and must not be labeled one.
 There is no save/recall control exposed until it can complete the requested move.
+
+## Configuration parsing contention
+
+A subsequent live check still returned `inactive`: its first motion request
+spent 576 ms on the local Unix-socket path after a deliberate 255 ms delay.
+No movement was observed. A 20.3-second core CPU profile attributed 11.15 seconds
+to `loadConfig`, including 10.0 seconds in YAML parsing. Configuration consumers
+were repeatedly parsing identical bytes on the same event loop that admits
+camera controls.
+
+`loadConfig` now retains validated results for at most eight file paths, keyed
+by exact file content. Every call still reads the current file; changed bytes,
+a missing file and invalid data are observed immediately. Each caller receives
+an independent deep copy, so editing an unsaved configuration cannot contaminate
+a later read. Apply and rollback use the same file and validation semantics.
+A separate-process benchmark on the Pi improved median repeated-read time from
+35.58 ms to 0.52 ms (20 reads each). This measures configuration loading, not
+end-to-end camera latency.
+
+The diagnostic profiler's cleanup command caused an unexpected core restart
+through an unsupported debugger dynamic-import callback. That diagnostic fault
+was separate from the camera issue; the video session was restored. No profiler
+or debugger is left running, and the diagnostic command is not production code.
