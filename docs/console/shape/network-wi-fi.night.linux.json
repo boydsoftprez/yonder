@@ -51,6 +51,15 @@
       }
     },
     {
+      "key": "nrdb-ui-widget.nrdb-ui-yonder-interfaces",
+      "box": {
+        "x": 0,
+        "y": 0,
+        "w": 0,
+        "h": 0
+      }
+    },
+    {
       "key": "nrdb-ui-text.nrdb-ui-widget.yonder-fixed#0",
       "box": {
         "x": 0,

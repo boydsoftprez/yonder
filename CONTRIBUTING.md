@@ -71,5 +71,17 @@ This software talks to an aircraft. Two things are non-negotiable:
 ## Hardware you do not have
 
 Most contributors have one board. That is fine — say in the PR what you tested on.
-Board-specific work lives in `installer/profiles/` so it can be reviewed by someone who
-owns that board.
+Board-specific preparation lives in the installer roles and the documented
+hardware bring-up sources. Link the exact board/OS evidence so an owner can review it.
+
+
+## Versions and user documentation
+
+Use the shared monthly CalVer described in [versioning](docs/versioning.md).
+`npm run version:set -- YYYY.M.RELEASE` updates first-party metadata;
+`npm run version:check` verifies it. Keep the configuration schema version separate.
+
+User-facing changes belong in the [user guide](docs/user-guide.md) and, when
+setup changes, [getting started](docs/getting-started.md). Keep the README’s tested
+hardware table tied to evidence. Screenshots must identify fixture or simulator
+state and must not expose credentials.

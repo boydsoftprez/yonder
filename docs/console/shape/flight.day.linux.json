@@ -1,0 +1,27 @@
+{
+  "platform": "linux",
+  "viewport": {
+    "w": 1280,
+    "h": 900
+  },
+  "widgets": [
+    {
+      "key": "nrdb-ui-group.yonder-cockpit-group",
+      "box": {
+        "x": 268,
+        "y": 76,
+        "w": 1000,
+        "h": 808
+      }
+    },
+    {
+      "key": "nrdb-ui-widget.nrdb-ui-yonder-cockpit",
+      "box": {
+        "x": 285,
+        "y": 93,
+        "w": 966,
+        "h": 774
+      }
+    }
+  ]
+}

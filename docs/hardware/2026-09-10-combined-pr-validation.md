@@ -19,7 +19,9 @@ Integration-specific corrections:
 - The Flight mission label wraps, and camera thumbnail traffic text can shrink
   or wrap on tablet widths.
 
-The full local suite passed 5,078 tests in 265 files after source integration.
+The full local suite passed 5,080 tests in 265 files after CalVer adoption.
+Both the macOS reference-reproduction run and the Linux reference-recording
+run completed 196 browser/console checks with no failures.
 Production-source lint, build, generated schema/default consistency, shellcheck,
 installer dry run, the 16 installer-library checks, and SeekerHD profile tests
 were also exercised. Browser geometry and Linux CI results are recorded in the PR.
@@ -32,3 +34,10 @@ checks remain in place.
 This integration did not deploy to a board or issue aircraft commands. Prior
 hardware records retain their own measured scope, outstanding power-cycle or
 flight checks, and camera limitations. HDR remains unimplemented.
+
+
+The reader-facing documentation now starts from a base OS and a blank SD card,
+links the project and Flight guides, identifies tested hardware, and distinguishes
+local fixture screenshots from flight evidence. The documented standalone core
+production install was executed from the package directory and its module graph
+loaded successfully as 2026.9.0. No new physical-board installation was performed.

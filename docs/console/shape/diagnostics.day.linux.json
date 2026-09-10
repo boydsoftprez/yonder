@@ -6,111 +6,21 @@
   },
   "widgets": [
     {
-      "key": "nrdb-ui-group#0",
+      "key": "nrdb-ui-group",
       "box": {
         "x": 268,
         "y": 76,
-        "w": 494,
-        "h": 381
-      }
-    },
-    {
-      "key": "nrdb-ui-form.nrdb-ui-widget",
-      "box": {
-        "x": 285,
-        "y": 148,
-        "w": 460,
-        "h": 112
-      }
-    },
-    {
-      "key": "nrdb-ui-text-field.nrdb-ui-widget",
-      "box": {
-        "x": 285,
-        "y": 156,
-        "w": 460,
-        "h": 48
-      }
-    },
-    {
-      "key": "nrdb-ui-text.nrdb-ui-widget#0",
-      "box": {
-        "x": 285,
-        "y": 272,
-        "w": 460,
-        "h": 48
-      }
-    },
-    {
-      "key": "nrdb-ui-text.nrdb-ui-widget#1",
-      "box": {
-        "x": 285,
-        "y": 332,
-        "w": 460,
-        "h": 48
-      }
-    },
-    {
-      "key": "nrdb-ui-text.nrdb-ui-widget#2",
-      "box": {
-        "x": 285,
-        "y": 392,
-        "w": 460,
-        "h": 48
-      }
-    },
-    {
-      "key": "nrdb-ui-group#1",
-      "box": {
-        "x": 774,
-        "y": 76,
-        "w": 494,
-        "h": 381
-      }
-    },
-    {
-      "key": "nrdb-ui-markdown.nrdb-ui-widget",
-      "box": {
-        "x": 791,
-        "y": 148,
-        "w": 460,
-        "h": 90
-      }
-    },
-    {
-      "key": "nrdb-ui-text.nrdb-ui-widget#0",
-      "box": {
-        "x": 791,
-        "y": 250,
-        "w": 460,
-        "h": 48
-      }
-    },
-    {
-      "key": "nrdb-ui-text.nrdb-ui-widget#1",
-      "box": {
-        "x": 791,
-        "y": 310,
-        "w": 460,
-        "h": 48
-      }
-    },
-    {
-      "key": "nrdb-ui-group.yonder-rail",
-      "box": {
-        "x": 268,
-        "y": 469,
         "w": 1000,
-        "h": 82
+        "h": 815
       }
     },
     {
-      "key": "nrdb-ui-widget.nrdb-ui-yonder-softkeys",
+      "key": "nrdb-ui-widget.nrdb-ui-yonder-diagnostics",
       "box": {
         "x": 285,
-        "y": 486,
+        "y": 148,
         "w": 966,
-        "h": 48
+        "h": 726
       }
     }
   ]

@@ -65,8 +65,8 @@
       "why": "formatUptime (system/format.ts:46) prints the largest two units, which is not the same as the widest string: `365 days 23 hours` is 17 characters and this is 21. Derived by calling the built formatUptime(3599). A day count would need eight digits to beat it."
     },
     "nrdb-ui-yonder-databar \u00b7 YONDER": {
-      "value": "1.0.0-rc.1+build.42",
-      "why": "the version out of package.json. A pre-release with build metadata is the longest semver this project can publish."
+      "value": "2026.12.999",
+      "why": "A valid monthly CalVer: four-digit year, two-digit month and a three-digit within-month counter. The counter has no fixed presentation cap, so this is a producible long example, not a claimed maximum."
     },
     "nrdb-ui-yonder-databar \u00b7 SYSTEM": {
       "value": "Debian GNU/Linux 12 (bookworm)",

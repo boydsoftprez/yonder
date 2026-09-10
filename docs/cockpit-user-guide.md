@@ -1,11 +1,22 @@
 # Using the Yonder cockpit
 
-The Flight page is the PFD/MFD flight display. **YONDER Systems ›** in its header opens
-device settings; the cockpit's **Systems** tab inspects telemetry. Cameras retains
-capture, stream, exposure and other camera controls. The existing **Cockpit** page
-retains the standalone camera picture and aim controls. The flight display
-uses the authenticated device session. Opening a panel or editing a local reference
-never sends an aircraft command.
+[Yonder user guide](user-guide.md) · [Installation](getting-started.md) · [Tested hardware](hardware.md)
+
+The **Flight** page is Yonder’s PFD/MFD aircraft display. Its controls share the
+branded app header: Flight actions, Flight plan, Display, and Aircraft. At narrow
+widths, additional actions move into **Menu**. Use the app navigation to open
+**Status**, **Network**, or **Settings**; the Flight MFD’s **Systems** page is the
+telemetry catalog, not device settings.
+
+**Camera** holds capture, streams, exposure and other camera controls. **Cockpit**
+retains the standalone camera picture and aim panel. Flight uses the authenticated
+device session. Opening a panel or editing a local reference never sends an
+aircraft command.
+
+![Current Flight header and display in the Yonder console](images/overview/flight.png)
+*Current branded console with synthetic telemetry. The detailed instructional
+screenshots below include earlier control arrangements; follow the current menu
+paths in the text. Their fixture/simulator provenance is retained.*
 
 ## How to use it
 

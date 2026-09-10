@@ -717,9 +717,10 @@ done
 rm -f "$CONSOLE/node_modules/yonder-core" "$USERDIR/node_modules/yonder-core"
 ln -s "$CORE" "$CONSOLE/node_modules/yonder-core"
 ln -s "$CORE" "$USERDIR/node_modules/yonder-core"
-cat > "$USERDIR/package.json" <<'MANIFEST'
+WIDGET_VERSION=$(node -p 'require(process.argv[1]).version' "$REPO/packages/node-red-dashboard-2-yonder/package.json")
+cat > "$USERDIR/package.json" <<MANIFEST
 { "name": "yonder-console-state", "version": "0.0.0", "private": true,
-  "dependencies": { "node-red-dashboard-2-yonder": "0.1.0" } }
+  "dependencies": { "node-red-dashboard-2-yonder": "$WIDGET_VERSION" } }
 MANIFEST
 # The dashboard and node-red itself come from the staged tree.
 for entry in "$CONSOLE_TREE/node_modules"/*; do

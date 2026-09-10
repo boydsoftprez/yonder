@@ -1,8 +1,8 @@
 {
   "name": "node-red-dashboard-2-yonder",
-  "version": "0.1.0",
+  "version": "2026.9.0",
   "license": "GPL-3.0-or-later",
-  "description": "Yonder's instrument objects for Dashboard 2.x \u2014 engine bars, tapes, annunciators, data bars, identities, soft keys, hold keys and sparklines. The console's visual language, built once (ADR-0009).",
+  "description": "Yonder's instrument objects for Dashboard 2.x — engine bars, tapes, annunciators, data bars, identities, soft keys, hold keys and sparklines. The console's visual language, built once (ADR-0009).",
   "keywords": [
     "node-red",
     "node-red-dashboard-2",
@@ -131,7 +131,7 @@
   },
   "dependencies": {
     "leaflet": "1.9.4",
-    "yonder-core": "^0.1.0"
+    "yonder-core": "2026.9.0"
   },
   "devDependencies": {
     "@types/node": "^20.19.43",

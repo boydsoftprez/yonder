@@ -1,5 +1,17 @@
 # Roadmap
 
+**Current integration — 2026-09-10:** the pre-alpha console includes cellular
+and ZeroTier networking, MAVLink telemetry, the Flight PFD/MFD and reviewed
+command workflows, camera/video control, diagnostics, settings and branding.
+Pi 4 and Radxa Zero 3W bench evidence is linked in [tested hardware](hardware.md).
+Tailscale and a published disk image remain future work. Implementation is not
+the same as satisfying each milestone’s hardware exit criterion; outstanding
+cold-flash, power-cycle and flight acceptance stays explicit below.
+
+For operation and installation, use [Getting started](getting-started.md),
+[the user guide](user-guide.md), and [the Flight guide](cockpit-user-guide.md).
+
+
 [`requirements.md`](requirements.md) says what Yonder must do. This says in what order.
 
 **Ordering principle: build the front door first, then add rooms behind it.**

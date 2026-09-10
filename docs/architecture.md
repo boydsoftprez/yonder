@@ -1,10 +1,16 @@
 # Yonder architecture
 
-Status: **draft for review** · Last updated: 2026-08-31
+Status: **pre-alpha implementation** · Overview updated: 2026-09-10
 
-Yonder is a companion-computer stack for fixed-wing and multirotor UAS that gives
-unlimited range over 4G/5G. It runs on Raspberry Pi and Radxa boards alongside an
-ArduPilot flight controller, and it works with no internet connection, ever.
+Yonder is a Linux companion-computer stack alongside an ArduPilot flight
+controller. It carries telemetry, video and explicit operator commands over
+Ethernet, Wi-Fi and configured cellular/mesh links. The console runs on the
+board; optional remote access and external geographic data depend on their
+network services. Coverage and capacity bound remote operation.
+
+For the current operator workflow, start with [Getting started](getting-started.md),
+[the user guide](user-guide.md), and [tested hardware](hardware.md). This document
+explains the engineering boundaries; it is not an installation checklist.
 
 This document explains what runs, why, and where the boundaries are. What it must do is
 in [`requirements.md`](requirements.md).
@@ -17,18 +23,21 @@ These are load-bearing. Where a design choice below looks odd, it is usually one
 being enforced.
 
 1. **Offline-first, always.** No component may require a network call to a server we
-   operate. Not at boot, not at first run, not to unlock a feature. If the aircraft is in
-   a field with no signal, everything still works.
+   operate to boot, serve the local console, or unlock an installed feature.
+   Optional online imagery, traffic, remote mesh connectivity and public tests
+   retain their explicit network dependencies.
 2. **The autopilot flies the aircraft.** Yonder is a radio, a camera and a web page. It
    relays commands an operator asked for — mode changes, parameter writes, payload
    outputs — and never originates one. If Yonder stops, the aircraft carries on under the
    autopilot's own logic. That property is never traded away for a feature.
-3. **Unbrickable.** No configuration change may leave the device unreachable. There is
-   always a way back in without a card reader.
+3. **Recoverable configuration.** Risky changes use the rollback engine and
+   access-point fallback to preserve reachability. This is not a guarantee
+   against failed power, storage, an unmanaged radio, or a broken base OS.
 4. **Reviewable by strangers.** Every behaviour lives in source a contributor can read,
    diff and test. Generated blobs are build outputs, never the source of truth.
-5. **One installer.** The installer is the only definition of a working system. Images are
-   produced by running it. There is no hand-made image.
+5. **One installer.** The installer defines the application installation.
+   Future Yonder disk images use that same procedure; no ready-to-flash image
+   is currently published.
 6. **Requirements first.** Every behaviour traces to a numbered requirement, so scope is
    arguable in the open rather than assumed.
 
@@ -36,16 +45,23 @@ being enforced.
 
 ## 2. What runs on the device
 
-Five long-lived processes. Everything else is a library or a system service that ships
-with the distribution.
+The installed system combines Yonder services with OS and media processes.
+Optional components run according to configuration and the attached hardware.
 
-| Process | Role | Licence | Ours? |
-|---|---|---|---|
-| **Node-RED** | Control plane: operator UI, MAVLink logic, orchestration of everything below | Apache-2.0 | Configure + custom nodes |
-| **mavlink-router** | MAVLink fan-out: serial/USB in, UDP + TCP out | Apache-2.0 | Configure |
-| **mediamtx** | Media server: WebRTC, RTSP, SRT, RTMP, HLS from one binary | MIT | Configure |
-| **GStreamer** | One capture/encode pipeline per camera | LGPL-2.1 | Compose pipelines |
-| **NetworkManager + ModemManager** | Interfaces, Wi-Fi AP, cellular | GPL-2.0 | Configure |
+| Process / service | Role | License | Yonder integration |
+| --- | --- | --- | --- |
+| **yonder-core** | Typed network/configuration, telemetry, mission, camera and diagnostic services; private Unix-socket API | GPL-3.0-or-later | Our implementation |
+| **Node-RED + FlowFuse Dashboard** | Authenticated console, wiring and thin adapters; Vue instruments render in the browser | Apache-2.0 | Custom packages and generated configuration |
+| **mavlink-router** | Owns the flight-controller serial link and fans MAVLink out to configured endpoints and the private local reader | Apache-2.0 | Generated configuration |
+| **MediaMTX** | Configured browser/ground-station media endpoints | MIT | Generated configuration and private observer API |
+| **GStreamer / pipeline host** | Per-camera capture, encoding, retuning, recording and stills | Component licenses | Composed pipelines and our control host |
+| **NetworkManager + ModemManager** | Interfaces, Wi-Fi AP and cellular | GPL-2.0 family | OS packages controlled through their native tools |
+| **ZeroTier** | Configured optional mesh connectivity | Upstream package license | Pinned package and lifecycle integration |
+| **Camera-specific helpers** | Pocket 2 accessory transport or prepared Radxa sensor/ISP services | Component licenses | Used only for the relevant camera path |
+
+Application logic lives in reviewable packages. Node-RED flows connect services
+and presentation; they do not contain an independent copy of flight, network or
+camera decision logic. The autopilot owns flight execution.
 
 Two absences are deliberate:
 

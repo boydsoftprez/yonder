@@ -1,5 +1,5 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
-export const VERSION = "0.1.0";
+export const VERSION = "2026.9.0";
 export { ConfigSchema, DEFAULT_CONFIG, type Config, type SecretRef } from "./schema/config.js";
 export {
   RETIRED_KEYS,

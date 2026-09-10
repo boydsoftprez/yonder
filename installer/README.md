@@ -1,198 +1,145 @@
-# Installer
+# Installer and payload reference
 
-`install.sh` is the single definition of a working Yonder system. Images are
-built by running it in a chroot over a base OS image, so there is no
-hand-made image and no drift between "installed" and "flashed".
+**Installing your first board? Follow [Getting started](../docs/getting-started.md).**
+That guide covers the SD card, base OS, SSH, build computer, transfer, first login
+and verification. This page explains the installer and payload behind that procedure.
 
-    sudo ./installer/install.sh              # install on this board
-    ./installer/install.sh --dry-run         # print the plan, change nothing
-    sudo ./installer/install.sh --only 20-yonder-core
-
-## Roles
-
-Roles are `roles/NN-name.sh`, sourced in ascending numeric order. Each one:
-
-- is **idempotent** — running it twice changes nothing the second time
-- can run **standalone** via `--only`
-- uses only helpers from `lib/common.sh` and POSIX `sh`
-
-No bashisms, no Python, no Ansible. This has to run in a chroot on a base
-image where none of those are guaranteed to exist.
-
-## Building an offline payload
-
-Yonder installs without a network (R-CFG-07). `install_bundled_node` installs
-a vendored Node runtime rather than reaching for the distro package,
-`20-yonder-core.sh` installs a prebuilt `yonder-core` rather than building
-one, and `30-console.sh` copies a prebuilt console rather than fetching
-Node-RED. None of those is present in a checkout. This is how to make them.
-
-**Everything an install needs and this repository does not carry — the Node
-runtime, ZeroTier, `mavlink-router` and the console — comes from one
-script:**
+`install.sh` is the shared definition of the installed system. It can run on a
+prepared board or inside an appropriately prepared image-building environment.
+There is no published ready-to-flash Yonder image yet.
 
 ```sh
-./installer/make-payload.sh --arch linux-arm64     # a Raspberry Pi or Radxa
-./installer/make-payload.sh --arch linux-x64       # a PC
-./installer/make-payload.sh --arch linux-arm64 --only console   # just one part
+./installer/install.sh --dry-run
+sudo ./installer/install.sh
+sudo ./installer/install.sh --only 20-yonder-core
 ```
 
-It stages `vendor/node/bin/node`,
-`vendor/zerotier/zerotier-one_<version>_<arch>.deb`,
-`vendor/mavlink-router/mavlink-routerd` and
-`vendor/console/node_modules/node-red/red.js`, and it is re-runnable: each run
-replaces what the last one left. `--only` narrows a run to one or more of
-`node`, `zerotier`, `mavlink-router` and `console`; what it does not stage it
-leaves exactly as an earlier run left it, so it is a way to update one part of
-a payload rather than a way to build a smaller one. `vendor/` is downloaded
-and built binaries rather than source, so `.gitignore` keeps it out of the
-repository.
+An existing device configuration is preserved. Source files and runtime artifacts
+are replaced by the selected build. Configuration rollback does not roll back a
+software install. Use a bench maintenance session and keep a private backup.
 
-What it stages:
+## What the installer needs
 
-- `vendor/zerotier/zerotier-one_<version>_<arch>.deb` — the primary mesh client.
-  One file, ~2.7 MB, depending only on `adduser`, `libstdc++6` and `openssl`, all
-  of which a stock Debian board already has. Pinned, fingerprinted, and verified
-  against ZeroTier's repository signature using `installer/keys/zerotier.gpg`.
-  Installed by role `40-zerotier`, which leaves it stopped and disabled until
-  a network is configured (R-VPN-05, R-VPN-08). **Disabled offline**, with
-  `deb-systemd-helper` rather than `systemctl`: the package's `postinst`
-  enables the unit with `deb-systemd-helper enable`, which writes the `.wants`
-  symlink straight to the filesystem and so works perfectly well in a chroot,
-  while `systemctl disable` in that same chroot answers `Running in chroot,
-  ignoring request` and exits 0. An image built with the latter shipped the
-  client enabled, and nothing on the device would ever have turned it off —
-  `yonder-core` only stops a client it has a record of starting, and a fresh
-  image has none. The role asserts the result rather than assuming it, so a
-  build that cannot disable the unit fails where the message can be read.
-  Tailscale is **not** carried: it is 31 MB, pulls in `iptables` and two
-  libraries that a board does not have, and switches four `update-alternatives`
-  entries. It is fetched over the network and installed when Tailscale is
-  configured (R-VPN-08).
+- A supported 64-bit Debian-family target with systemd and apt.
+- NetworkManager ownership of the interfaces, including the Wi-Fi radio used
+  for fallback. The installer does not automatically retire an Armbian
+  netplan/systemd-networkd configuration.
+- A complete source tree with all active console packages built.
+- The target-architecture payload and the core’s standalone production dependencies.
+- Internet access for missing OS packages, or those packages already installed/cached.
 
-- `vendor/mavlink-router/mavlink-routerd` — the service that owns the serial
-  port and fans MAVLink out to the ground stations. One file, 325 KB stripped,
-  needing nothing but `libc6`, `libstdc++6` and `libgcc-s1`, which every Debian
-  board already has — so the role that installs it calls no package manager at
-  all. Installed by role `15-mavlink-router`, which leaves it **stopped and
-  disabled** (R-MAV-17): `yonder-core` starts it, and only once detection has
-  found a port and a speed and generated `/etc/mavlink-router/main.conf`. A
-  unit enabled at install would open the serial port at every boot before the
-  sweep could, which is the one resource the two of them contend for.
+The payload reduces network work on the board. It does **not** contain the whole
+Debian package repository: GStreamer, NetworkManager, ModemManager, Python GI,
+diagnostic utilities and other system dependencies may still be installed by apt.
+The earlier fully offline Radxa install also pre-cached its apt dependencies.
 
-  **It is the only component that is built rather than downloaded.** It is not
-  in Debian and publishes no binary, so `make-payload.sh` clones the pinned
-  commit, checks that the checkout *is* that commit, and builds it inside a
-  `debian:trixie` container for the target's architecture — Docker or Podman,
-  and there is no third option, because a C++ build for another architecture
-  needs that architecture's toolchain. The post-condition is the built binary's
-  own `--version` reporting the pinned commit, run inside the same container,
-  which is the only place an arm64 binary can be executed on an x86 build host.
+## Build the application
 
-  **The pin is a commit, and that commit is the fingerprint.** Node and
-  ZeroTier are downloads, so a recorded `sha256` is what says the bytes are the
-  bytes. Here the bytes come out of a compiler, and a compiler's output moves
-  with its version — a hash of the *binary* would fail the day Debian updated
-  gcc rather than the day somebody changed the source. A git commit id is a
-  hash over the complete tree, every submodule included, so checking it checks
-  precisely the input the build consumes.
-
-  Building on the board was measured and rejected: a stock image is missing
-  `meson`, `ninja-build`, `libsystemd-dev` **and** `systemd-dev` — the build
-  asks pkg-config for `systemd`, not `libsystemd`, so installing the obvious
-  one still fails with a message naming neither — and a default parallel build
-  is killed by the OOM killer on a 905 MiB Pi 4. See
-  [an autopilot on the UART](../docs/hardware/an-autopilot-on-the-uart.md).
-
-  The `payload-mavlink-router` job in CI builds the arm64 binary on every
-  change to `make-payload.sh` and uploads it, so a payload can be assembled on
-  a machine with no container runtime: download the artifact into
-  `vendor/mavlink-router/` and the role takes it from there.
-
-Two things it does that a by-hand download does not:
-
-- **It verifies the Node tarball against the published `SHASUMS256.txt`** and
-  refuses to unpack one that does not match. The thing being substituted would
-  be the process that talks to an aircraft.
-- **It resolves the console's dependencies for the *board*, not for the build
-  machine** — `--os`, `--cpu` and `--libc`. Node-RED pulls `@node-rs/bcrypt`,
-  whose real code is in a per-platform optional package, so a payload built on
-  a laptop otherwise carries a macOS binary and no Linux one at all. Node-RED
-  catches that and falls back to pure JavaScript, which is exactly why it
-  would never have been noticed.
-
-`installer/console/package-lock.json` **is** committed, and is what makes two
-payloads built a week apart identical: the script installs with `npm ci` when
-it is there, and writes one when it is not.
-
-**Node 24, not 20.** Node 20 reached end of life in April 2026 and Node-RED 5
-requires 22.9 or newer, so the payload's runtime is the current 24 LTS line.
-The two roles still ask for different minimums, on purpose: `require_node 20`
-in `20-yonder-core.sh` is genuinely the daemon's floor, and `require_node 22.12`
-in `30-console.sh` is the floor that is actually true for the console — Node-RED
-itself needs 22.9, but the generated `settings.js` and both contrib packages
-`require()` an ES module, which node supports from 22.12. A board with a distro Node 20 and no payload
-therefore installs a working daemon and fails loudly at the console, with a
-reason, rather than installing a console that cannot start.
-
-**The daemon.** `packages/yonder-core` also needs a `dist/` and a
-`node_modules/` holding its *production* dependencies. That one is built from
-this repository rather than downloaded, so it is not part of `make-payload.sh`:
+On a build computer with Node 24 and npm:
 
 ```sh
-npm run build -w yonder-core
-npm ci --omit=dev --prefix packages/yonder-core --workspaces=false
+npm ci
+npm run version:check
+npm run build
+(cd packages/yonder-core && npm ci --omit=dev --workspaces=false --os=linux --cpu=arm64 --libc=glibc)
 ```
 
-`--workspaces=false` is the part that matters. Without it npm hoists the
-dependencies to the repository root, which is not what gets copied to the
-board: only `packages/yonder-core/node_modules` is. A tree hoisted that way
-looks complete from the repository root and arrives on the board empty.
+The root build orders the core before the adapters and Vue widgets. The asset
+copier carries HTML, scripts and other runtime assets that TypeScript alone does
+not emit. Every active package’s `dist/` and the dashboard’s resources must reach
+the board.
 
-**The console's node packages.** `node-red-contrib-yonder-system` and
-`node-red-contrib-yonder-network` are also built from this repository, and
-`30-console.sh` copies their `dist/` into the console's `node_modules`. Unlike
-the daemon there is **no fallback that builds them on the board**: they are
-TypeScript compiled against the workspace's own tooling, and a board has none
-of it. A missing `dist/` stops the install with a reason rather than producing
-a console whose four pages are empty groups.
+`--workspaces=false` creates a real `packages/yonder-core/node_modules/`. A
+workspace-root dependency tree, or a `.vite` cache, is not that standalone tree.
+The installer checks dependency completeness and loads the installed core entry
+point before enabling it. The core has a build-on-board fallback, but the console
+packages require prebuilt artifacts; the complete prebuilt path is the recommended
+first-install procedure.
+
+## Build the target payload
 
 ```sh
-npm run build       # yonder-core first, then both contrib packages, in that order
+# Pi 4: skip the Rockchip plugin build.
+./installer/make-payload.sh --arch linux-arm64 --only node,zerotier,mavlink-router,console
+
+# Radxa: all components, including the Rockchip stack.
+./installer/make-payload.sh --arch linux-arm64
+
+# PC test environment, where those components support it.
+./installer/make-payload.sh --arch linux-x64
 ```
 
-The order is not decorative: `npm run --workspaces` does not sort
-topologically, and the contrib packages type-resolve `yonder-core` through its
-built declarations. The root `build` and `lint` scripts name the order for that
-reason.
+The selector accepts `node`, `zerotier`, `mavlink-router`, `gst-rockchip`, and
+`console`. **MediaMTX is currently staged on every run**, including a `--only`
+run. Components omitted from the selector remain as previously staged; selecting
+one component does not clean the others. `--out DIR` changes the destination.
 
-They have no runtime dependency but `yonder-core` itself, which the installer
-**symlinks** into the console tree rather than copying — one device, one
-`yonder-core`, and a copy would be a second version to keep in step. That is
-also why `30-console.sh` needs node 22.12 rather than Node-RED's own 22.9: the
-nodes are CommonJS and `yonder-core` is an ES module, and `require()` of an ES
-module is what lets one package serve both the daemon and the console.
+| Staged path | Contents / validation |
+| --- | --- |
+| `vendor/node/bin/node` | Node 24.20.0 by default; archive checked against published checksums |
+| `vendor/zerotier/` | ZeroTier package; recorded hash plus signed apt-index verification |
+| `vendor/mavlink-router/mavlink-routerd` | Built from pinned source in a target-architecture container; version and ELF architecture checked |
+| `vendor/gst-rockchip/lib/` and `vendor/gst-rockchip/gstreamer-1.0/` | MPP, librga and Rockchip GStreamer plugin from pinned sources |
+| `vendor/mediamtx/mediamtx` | MediaMTX 1.20.1 by default; recorded release checksum verified |
+| `vendor/console/` | Node-RED and FlowFuse Dashboard, installed from the console lockfile for the target OS/CPU/libc |
 
-`node_modules/.vite` — a vitest cache, created by `npm test` — is **not** a
-dependency tree. The installer says so and builds instead of trusting it.
+Exact pins and checksums live in `make-payload.sh`. Docker or Podman with the
+appropriate ARM64 execution support is required for the source-built payload
+components. Building those C++ dependencies on a low-memory aircraft board is
+not the recommended route.
 
-`npm run build` also copies `src/**/assets` into `dist/`, which is how the
-console's pages get onto a board. `tsc` copies only what it compiles, so a
-`dist/` built any other way produces a console that answers every request
-with a stack trace about a missing `setup.html`.
+CI’s `payload-mavlink-router` and `payload-gst-rockchip` jobs upload their ARM64
+outputs. To use a verified artifact from the same source revision, place the
+router at `vendor/mavlink-router/mavlink-routerd` or the Rockchip artifact’s
+`lib/` and `gstreamer-1.0/` under `vendor/gst-rockchip/`. Preserve executable bits
+where applicable, then stage the other components with `--only`. These artifacts
+are not complete installations and are not SD images.
 
-**Checking the payload before it is flashed.** A dry run reports which route
-each half took:
+`vendor/` is ignored by Git. Transfer it with the source/build tree; do not commit
+it. The console and standalone core lockfiles are committed. First-party versions
+move together using [CalVer tooling](../docs/versioning.md).
 
+## Install roles
+
+Roles are POSIX shell files in `roles/`, sourced in numeric order. A `--only`
+argument is an exact role basename, such as `30-console`. Running only a role
+assumes its prerequisites are already installed.
+
+| Role | Responsibility |
+| --- | --- |
+| `10-base` | System dependencies, service accounts, owned directories, mDNS |
+| `15-mavlink-router` | Verified telemetry router and service; starts only when configured by the core |
+| `20-yonder-core` | Core runtime, seeded defaults, assets and service validation |
+| `30-console` | Dashboard runtime, all Yonder adapters/widgets, generated settings and authenticated editor |
+| `40-modem` | Modem integration |
+| `40-uart` | Supported boot-layout UART preparation; requires reboot |
+| `40-zerotier` | Mesh client; disabled until a network is configured |
+| `50-mediamtx` | Media server, authentication/configuration path and required GStreamer elements |
+| `52-gst-rockchip` | Matching Rockchip plugin/libraries and registry checks on the applicable hardware |
+| `55-pipeline-host` | Python/GStreamer pipeline host and accessory support prerequisites |
+
+SeekerHD sensor/ISP preparation is still an explicit board-specific procedure in
+[its bring-up sources](../scripts/spikes/seekerhd/README.md). The standard installer
+does not install an arbitrary CSI sensor driver or tuning profile.
+
+## Verify the result
+
+A dry run checks the planned inputs but cannot prove service startup, radio
+ownership, a camera picture or a full power cycle. For the actual install,
+inspect its exit status and service journals, then check the console and hardware
+as described in [installation verification](../docs/getting-started.md#8-verify-your-own-installation).
+
+The local automated checks are:
+
+```sh
+npm run lint
+npm test
+npm run build
+./installer/install.sh --dry-run
+./scripts/verify-installer-lib.sh
 ```
-bundled node found at …/vendor/node; installing to /opt/yonder/node, …
-prebuilt dist/ and a complete node_modules/ found in …; using them, …
-```
 
-Anything else means that half will be built or fetched on the board. The
-installer refuses to trust a half-built tree rather than copying one: a
-`node_modules` without the daemon's dependencies in it produces
-`ERR_MODULE_NOT_FOUND` on the board's first start, and under `Restart=always`
-that is a crash loop with no socket, no access point and no console. On a real
-install the daemon's entry point is loaded, imports and all, before anything
-is enabled.
+`verify-pages.sh` additionally starts an isolated fixture console and browser;
+see [Verifying the console](../docs/verifying-the-console.md). It does not touch
+an aircraft. Node 20 remains the tested core-only runtime floor; the complete
+console needs at least Node 22.12 and the payload ships Node 24.

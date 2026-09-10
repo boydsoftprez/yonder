@@ -19,7 +19,7 @@ const require=createRequire(join(vendor,'node-red/package.json')),RED=require('n
 const userDir=mkdtempSync(join(tmpdir(),'yonder-header-preview-')),modules=join(userDir,'node_modules');mkdirSync(join(modules,'@flowfuse'),{recursive:true});
 cpSync(join(vendor,'@flowfuse/node-red-dashboard'),join(modules,'@flowfuse/node-red-dashboard'),{recursive:true});
 symlinkSync(join(root,'packages/node-red-dashboard-2-yonder'),join(modules,'node-red-dashboard-2-yonder'),'dir');
-writeFileSync(join(userDir,'package.json'),JSON.stringify({name:'yonder-header-preview',dependencies:{'@flowfuse/node-red-dashboard':'1.31.0','node-red-dashboard-2-yonder':'0.1.0'}}));
+writeFileSync(join(userDir,'package.json'),JSON.stringify({name:'yonder-header-preview',dependencies:{'@flowfuse/node-red-dashboard':'1.31.0','node-red-dashboard-2-yonder':JSON.parse(readFileSync(join(root,'packages/node-red-dashboard-2-yonder/package.json'),'utf8')).version}}));
 const index=join(modules,'@flowfuse/node-red-dashboard/dist/index.html');writeFileSync(index,readFileSync(index,'utf8').replace('</head>','<link rel="stylesheet" href="/fixture-theme.css"></head>'));
 const ids=['yonder-console','dashboard','palette','page-flight','group-cockpit','cockpit-display','page-status'];
 const flows=JSON.parse(readFileSync(join(root,'flows/flows.json'),'utf8')).filter(n=>ids.includes(n.id));writeFileSync(join(userDir,'flows.json'),JSON.stringify(flows));
