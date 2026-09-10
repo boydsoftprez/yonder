@@ -130,3 +130,29 @@ describe('current-gesture native rotation watchdog',()=>{
     const h=harness();h.issue();expect(h.renew(.09,.09)).toMatchObject({accepted:true,next:null});expect(h.writes).toHaveLength(0);h.controller.close();
   });
 });
+
+it('keeps native writes continuous across 300 ms renewals while each old dispatch deadline still expires',async()=>{
+  const h=harness();h.issue();
+  for(let renewal=0;renewal<10;renewal++) {
+    await h.step(quaternion(renewal),300);
+    expect(h.renew(3,1)).toMatchObject({accepted:true});await settle();
+  }
+  expect(h.writes).toHaveLength(10);
+  for(let i=1;i<h.writes.length;i++) expect(h.writes[i].at-h.writes[i-1].at).toBe(300);
+  const last=h.writes.at(-1)!;await h.step(quaternion(10),500);
+  expect(last.options.signal?.aborted).toBe(true);
+  expect(h.renew(3,1)).toMatchObject({accepted:false,reason:'inactive'});
+  expect(h.writes).toHaveLength(10);h.controller.close();
+});
+
+it.each(['fault','limit','mode'] as const)('a %s during a renewal gap revokes the credential even after feedback clears',async kind=>{
+  const h=harness();h.issue();await h.step(quaternion(0),300);h.renew(3,1);await settle();
+  await h.step(quaternion(1),200);
+  if(kind==='fault')h.context.attitude!.fault=true;
+  if(kind==='limit')h.context.attitude!.yawLimit=true;
+  if(kind==='mode')h.context.attitude!.mode=1;
+  h.controller.refresh();Object.assign(h.context.attitude!,{fault:false,yawLimit:false,mode:2});
+  await h.step(quaternion(1),50);
+  expect(h.renew(3,1)).toMatchObject({accepted:false,reason:'inactive'});
+  expect(h.writes).toHaveLength(1);h.controller.close();
+});

@@ -108,7 +108,9 @@ describe("daemon-owned camera intent", () => {
     clock.advance(1);
     expect(command.signal.aborted).toBe(true);
     expect(intent.live()).toBeNull();
-    expect(admit(intent, grant, 12)).toMatchObject({ accepted: false });
+    // The next credential remains fresh for another 100 ms; the expired rate
+    // is gone, but a new explicit renewal can still use that credential.
+    expect(admit(intent, grant, 12)).toMatchObject({ accepted: true });
   });
 
   it("rejects a reused credential even with an increasing sequence", () => {
@@ -158,7 +160,37 @@ describe("daemon-owned camera intent", () => {
     if (check === "live") expect(intent.live()).toBeNull();
     else expect(command.isValid()).toBe(false);
     expect(command.signal.aborted).toBe(true);
-    expect(admit(intent, renewal, 1)).toMatchObject({ accepted: false });
+    expect(admit(intent, renewal, 1)).toMatchObject({ accepted: true });
+  });
+
+  it('keeps renewing a held input over a 300 ms round trip without extending any old rate deadline', () => {
+    const { intent, clock } = setup();
+    let grant = issue(intent);
+    clock.advance(300);
+    for (let seq = 0; seq < 10; seq++) {
+      const originalDeadline = grant.deadline;
+      grant = next(intent, grant, seq);
+      const command = intent.live()!;
+      expect(command.expiresAt).toBe(originalDeadline);
+      clock.advance(200);
+      expect(command.isValid()).toBe(false);
+      expect(command.signal.aborted).toBe(true);
+      expect(intent.live()).toBeNull();
+      clock.advance(100);
+    }
+    clock.advance(500);
+    expect(admit(intent, grant, 11)).toMatchObject({ accepted: false, reason: 'inactive' });
+  });
+
+  it('release revokes the still-fresh next credential after the previous rate expires', () => {
+    const { intent, clock } = setup();
+    const issued = issue(intent);
+    clock.advance(300);
+    const grant = next(intent, issued);
+    clock.advance(200);
+    expect(intent.live()).toBeNull();
+    intent.end('alice', grant.gesture);
+    expect(admit(intent, grant, 1)).toMatchObject({ accepted: false, reason: 'inactive' });
   });
 
   it("grant freshness and a shorter forwarding lease have independent deadlines", () => {

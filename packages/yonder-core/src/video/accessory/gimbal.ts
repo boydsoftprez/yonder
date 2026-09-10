@@ -82,6 +82,13 @@ export class GimbalController {
     if (this.discrete) this.discreteAdmission(this.discrete);
     const live = this.intent.live();
     if (live) this.rateAdmission(live);
+    else if (this.rateEpoch) {
+      // Between one expired rate and its still-fresh next credential, camera
+      // faults/limits/mode changes must retire the gesture too. A later clear
+      // report cannot revive it without a new operator press.
+      const verdict = this.check({ kind: 'rate', pan: 0.1, tilt: 0 });
+      if (!verdict.allowed || this.options.context().attitude?.mode !== this.rateEpoch.mode) this.reset();
+    }
   }
   reset(): void {
     this.clearTimer(); this.intent.reset();

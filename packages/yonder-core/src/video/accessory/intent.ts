@@ -174,12 +174,24 @@ export class Intent {
 
   private expiresAt(active: Generation): number {
     return active.command
-      ? Math.min(active.command.view.deadline, active.command.leaseUntil)
+      ? Math.min(active.command.view.expiresAt, active.grant.deadline)
       : active.grant.deadline;
   }
 
   private expire(now: number): void {
-    if (this.active && now >= this.expiresAt(this.active)) this.reset();
+    const active = this.active;
+    if (!active) return;
+    if (now >= active.grant.deadline) { this.reset(); return; }
+    if (active.command && now >= active.command.view.expiresAt) {
+      // The old rate expires at its ORIGINAL dispatch deadline. The separately
+      // issued next credential may still be travelling to the held browser and
+      // back. Retain only that credential, never the expired rate or its I/O.
+      // Release, fault, disconnect and generation changes still revoke both.
+      const command = active.command;
+      active.command = undefined;
+      command.controller.abort();
+      this.armTimer(now);
+    }
   }
 
   private clearTimer(): void {

@@ -2223,3 +2223,30 @@ it('local preview controls do not stop the camera stream', async () => {
   expect(wrapper.get('.y-pic__action').text()).toBe('Stop video');
   expect(wrapper.text()).toContain('Preview is off in this browser.');
 });
+
+function dragPoint(type: string, clientX: number, clientY: number): Event {
+  const e = new MouseEvent(type, {clientX, clientY, bubbles:true});
+  Object.defineProperty(e, 'pointerId', {value:1}); return e;
+}
+
+it('keeps a captured video drag active outside the frame and releases capture on release',async()=>{
+  const {wrapper,press}=mountWithRail();await settle();await press({aim:{state:'present',maxRate:120}});await nextTick();
+  const el=wrapper.get('.y-pic__frame').element as any;
+  el.setPointerCapture=vi.fn();el.hasPointerCapture=vi.fn(()=>true);el.releasePointerCapture=vi.fn();
+  el.dispatchEvent(dragPoint('pointerdown',100,100));el.dispatchEvent(dragPoint('pointermove',172,100));await nextTick();
+  const vm=wrapper.vm as any;const gesture=vm.dragGesture;
+  expect(gesture).toBeTruthy();expect(wrapper.find('.y-pic__stick-origin').exists()).toBe(true);
+  el.dispatchEvent(dragPoint('pointerleave',900,100));expect(vm.dragGesture).toBe(gesture);
+  el.dispatchEvent(dragPoint('pointerup',900,100));await nextTick();
+  expect(vm.dragGesture).toBeNull();expect(el.releasePointerCapture).toHaveBeenCalled();
+  expect(wrapper.find('.y-pic__stick-origin').exists()).toBe(false);
+});
+
+it('a tiny video drag does not start a zero-wire gesture; continuing the same hold starts real motion',async()=>{
+  const {wrapper,press}=mountWithRail();await settle();await press({aim:{state:'present',maxRate:120}});await nextTick();
+  const vm=wrapper.vm as any;vm.responseExpo=100;vm.responseSpeed=40;const el=wrapper.get('.y-pic__frame').element;
+  el.dispatchEvent(dragPoint('pointerdown',100,100));el.dispatchEvent(dragPoint('pointermove',109,100));
+  expect(vm.dragGesture).toBeNull();el.dispatchEvent(dragPoint('pointermove',172,100));expect(vm.dragGesture).toBeTruthy();
+  expect(vm.dragAt({clientX:172,clientY:100,shiftKey:true}).pan).toBe(10);
+  expect(vm.dragAt({clientX:172,clientY:100}).pan).toBe(40);
+});

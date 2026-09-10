@@ -40,6 +40,24 @@ export function responseMagnitude(throwFraction: number, expo: number, speed: nu
   return ((1 - e) * k + e * k * k * k) * speed;
 }
 
+/** A rate below the camera's 0.1 degree/s wire resolution is rest, not a gesture. */
+export function hasWireMotion(pan: number, tilt: number): boolean {
+  return Math.trunc(pan * 10) !== 0 || Math.trunc(tilt * 10) !== 0;
+}
+
+export function aimFailure(reason: string): string {
+  const messages: Record<string, string> = {
+    inactive: 'The control signal expired. Release and press again.',
+    deadline: 'The control signal arrived too late. Release and press again.',
+    busy: 'Another camera control is active. Release it before moving here.',
+    unavailable: 'The camera control connection is unavailable.',
+    'attitude-stale': 'Camera position feedback is delayed. Release and try again.',
+    'limit-direction-unknown': 'The gimbal reached a travel limit. Release the control.',
+    revoked: 'Movement stopped because the camera control state changed. Release and try again.',
+  };
+  return messages[reason] ?? reason;
+}
+
 export function saveResponse(key: string, value: number): void {
   try { localStorage.setItem(key, String(value)); } catch { /* Current pad still uses its chosen value. */ }
   // Retire any image drag as well as the pad gesture when its response changes.

@@ -16,6 +16,7 @@
                 <span v-if="staleFor > 0" class="y-pic__age">{{ ageText }}</span>
                 <span v-if="cost && !previewState" class="y-pic__cost">{{ cost }}</span>
             </div>
+            <span v-if="aimable" class="y-pic__aim-help">Drag and hold to move · farther = faster · Shift for fine control · release to stop</span>
 
             <!-- R-VID-18: what the shared preview encode is doing, composed
                  verbatim from Task 19's own part — see this file's own doc
@@ -48,7 +49,7 @@
             @pointermove="dragMove"
             @pointerup="onDragEnd"
             @pointercancel="onDragEnd"
-            @pointerleave="onDragEnd"
+            @pointerleave="onDragLeave"
             @lostpointercapture="onDragEnd"
         >
             <video
@@ -68,7 +69,8 @@
                  (R-UI-05); the banner says where it went. -->
             <div v-if="flashing" class="y-pic__flash" aria-hidden="true"></div>
 
-            <div v-if="dragGesture" class="y-pic__orb" :style="{ left: orbX + 'px', top: orbY + 'px' }"></div>
+            <div v-if="dragPointerId !== null" class="y-pic__stick-origin" :style="{ left: originX + 'px', top: originY + 'px' }" aria-hidden="true"></div>
+            <div v-if="dragGesture" class="y-pic__orb" :style="{ left: orbX + 'px', top: orbY + 'px' }" aria-hidden="true"></div>
 
             <div v-if="mode === 'off'" class="y-pic__off">
                 Preview is off in this browser.
@@ -102,7 +104,7 @@
 import { videoAction, previewFailure } from './camera-workflow.ts'
 import { cameraSessionMixin, expireCameraSession } from './camera-session.ts'
 import { AimTransport } from './aim-transport.ts'
-import { AIM_RESPONSE_CHANGED, EXPO_KEY, SPEED_KEY, savedNumber, rateLimit, responseMagnitude } from './aim-response.ts'
+import { AIM_RESPONSE_CHANGED, EXPO_KEY, SPEED_KEY, savedNumber, rateLimit, responseMagnitude, hasWireMotion } from './aim-response.ts'
 import { ThumbnailDemand } from './thumbnail-demand.ts'
 import YonderStateOverlay from './YonderStateOverlay.vue'
 import YonderThumbStrip from './YonderThumbStrip.vue'
@@ -410,8 +412,8 @@ export const FLASH_MS = 1200
  * file's own doc comment on why nothing here divides by a measured
  * `getBoundingClientRect()` width or height.
  */
-const DRAG_DEAD = 12
-const DRAG_RANGE = 120
+const DRAG_DEAD = 8
+const DRAG_RANGE = 64
 /** Degrees per second at full extension — matches `YonderAimPad`'s own
  * `MAX_RATE`, so a rate commanded from here and one commanded from the aim
  * panel mean the same thing to whatever reads them. */
@@ -641,6 +643,8 @@ export default {
             responseExpo: savedNumber(EXPO_KEY, 50, 0, 100),
             responseSpeed: savedNumber(SPEED_KEY, 60, 1, 120),
             orbX: 0,
+            originX: 0,
+            originY: 0,
             orbY: 0,
             downX: 0,
             downY: 0,
@@ -994,7 +998,10 @@ export default {
     mounted () {
         this.thumbnailDemand = new ThumbnailDemand()
         this.thumbnailTimer = setInterval(() => this.refreshThumbnails(), 5000)
-        this.aimTransport = new AimTransport(() => this.aim, (_rate, reason) => { this.aimRefusal = reason })
+        this.aimTransport = new AimTransport(() => this.aim, (_rate, reason) => {
+            if (reason) this.onDragEnd()
+            this.aimRefusal = reason
+        })
         this.$socket.on?.('disconnect', this.aimDisconnect)
         this.tick = setInterval(() => { this.now = Date.now(); this.frameNow = performance.now() }, 1000)
         // The media clock, which is the only honest source for the age this
@@ -1560,7 +1567,8 @@ export default {
             if (d <= DRAG_DEAD) return null
             const k = Math.min(1, (d - DRAG_DEAD) / DRAG_RANGE)
             const speed = responseMagnitude(k, this.responseExpo,
-                Math.min(this.responseSpeed, rateLimit(this.aim?.maxRate ?? DRAG_MAX_RATE)))
+                Math.min(this.responseSpeed, rateLimit(this.aim?.maxRate ?? DRAG_MAX_RATE))) * (e.shiftKey ? 0.25 : 1)
+            if (!hasWireMotion((dx / d) * speed, -(dy / d) * speed)) return null
             return {
                 // Screen y grows downward; tilt does not, hence the sign flip
                 // — the identical convention `YonderAimPad.at()` states.
@@ -1576,10 +1584,14 @@ export default {
             // One active gesture at a time, the same reasoning
             // `YonderAimPad.down()` gives for its own identical guard.
             if (this.dragPointerId !== null) return
+            if (e.button !== undefined && e.button !== 0) return
             this.dragPointerId = e.pointerId
             this.downX = e.clientX
             this.downY = e.clientY
-            this.$refs.frame?.setPointerCapture?.(e.pointerId)
+            const rect = this.$refs.frame.getBoundingClientRect()
+            this.originX = e.clientX - rect.left
+            this.originY = e.clientY - rect.top
+            try { this.$refs.frame?.setPointerCapture?.(e.pointerId) } catch { /* Leaving an uncaptured frame stops. */ }
             this.updateDrag(e)
         },
         dragMove (e) {
@@ -1599,8 +1611,10 @@ export default {
             // orb's on-screen position, which measuring zero under `jsdom`
             // leaves harmlessly parked at the frame's own top-left corner.
             const rect = this.$refs.frame ? this.$refs.frame.getBoundingClientRect() : { left: 0, top: 0 }
-            this.orbX = e.clientX - rect.left
-            this.orbY = e.clientY - rect.top
+            const dx = e.clientX - this.downX, dy = e.clientY - this.downY
+            const scale = Math.min(1, (DRAG_DEAD + DRAG_RANGE) / Math.hypot(dx, dy))
+            this.orbX = this.downX - rect.left + dx * scale
+            this.orbY = this.downY - rect.top + dy * scale
             this.dragSeq += 1
             if (this.aim?.url) this.aimTransport?.update({ pan: a.pan, tilt: a.tilt, gesture: this.dragGesture })
             else this.post({ slew: { pan: a.pan, tilt: a.tilt, seq: this.dragSeq, gesture: this.dragGesture } })
@@ -1622,15 +1636,24 @@ export default {
          * identical reason `YonderAimPad.onEnd`'s own doc comment gives:
          * provably redundant with `endDragGesture`'s own `dragGesture ===
          * null` check for every state this component can reach. */
-        onDragEnd () {
+        onDragLeave () {
+            try { if (this.dragPointerId !== null && this.$refs.frame?.hasPointerCapture?.(this.dragPointerId)) return } catch { /* No capture: stop. */ }
+            this.onDragEnd()
+        },
+        onDragEnd (event) {
+            if (event?.pointerId !== undefined && this.dragPointerId !== null && event.pointerId !== this.dragPointerId) return
+            const pointer = this.dragPointerId
             this.dragPointerId = null
             this.endDragGesture()
+            try { if (pointer !== null && this.$refs.frame?.hasPointerCapture?.(pointer)) this.$refs.frame.releasePointerCapture(pointer) } catch { /* Already released. */ }
         }
     }
 }
 </script>
 
 <style scoped>
+.y-pic__aim-help { color:var(--yonder-label); font-size:11px; line-height:1.4; }
+.y-pic__stick-origin { position:absolute; width:144px; height:144px; border:1px solid rgba(255,255,255,.65); border-radius:50%; transform:translate(-50%,-50%); pointer-events:none; box-shadow:0 0 0 1px rgba(0,0,0,.45); background:radial-gradient(circle,rgba(255,255,255,.8) 0 2px,rgba(0,0,0,.25) 3px 7px,transparent 8px); }
 .y-pic__camera { max-width:24ch; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; font-size:13px; }
 .y-pic__controls { display:flex; flex:1 0 100%; align-items:center; justify-content:space-between; gap:8px; flex-wrap:wrap; }
 .y-pic__view-modes { display:flex; align-items:center; gap:4px; font-size:12px; }

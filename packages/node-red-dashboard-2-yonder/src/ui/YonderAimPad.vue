@@ -44,7 +44,7 @@
 </template>
 
 <script>
-import { EXPO_KEY, SPEED_KEY, savedNumber, rateLimit, responseMagnitude, saveResponse } from './aim-response.ts'
+import { EXPO_KEY, SPEED_KEY, savedNumber, rateLimit, responseMagnitude, saveResponse, hasWireMotion } from './aim-response.ts'
 /**
  * The aim pad — a gimbal's pan and tilt, slewed at a rate for as long as an
  * operator holds the pad (R-CAM-11). This is the only control in this whole
@@ -278,6 +278,7 @@ export default {
             const speed = responseMagnitude(k, this.expo, this.selectedSpeed)
             const ux = x / d
             const uy = y / d
+            if (!hasWireMotion(ux * speed, -uy * speed)) return null
             return {
                 x: CENTER + ux * Math.min(d, RIM),
                 y: CENTER + uy * Math.min(d, RIM),
@@ -294,6 +295,7 @@ export default {
             // pointerdown overwrite `pointerId` would orphan the first
             // pointer's own eventual release.
             if (this.pointerId !== null) return
+            if (e.button !== undefined && e.button !== 0) return
             this.pointerId = e.pointerId
             try { this.$refs.dial.setPointerCapture?.(e.pointerId) } catch { /* Leave stops if capture was refused. */ }
             this.updateFromEvent(e)
