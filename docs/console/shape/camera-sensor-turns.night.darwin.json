@@ -10,8 +10,8 @@
       "box": {
         "x": 268,
         "y": 76,
-        "w": 663,
-        "h": 638
+        "w": 1000,
+        "h": 889
       }
     },
     {
@@ -19,60 +19,60 @@
       "box": {
         "x": 285,
         "y": 93,
-        "w": 629,
-        "h": 537
+        "w": 966,
+        "h": 789
       }
     },
     {
       "key": "nrdb-ui-widget.nrdb-ui-yonder-holdkey.yonder-content-height",
       "box": {
         "x": 285,
-        "y": 642,
-        "w": 629,
+        "y": 894,
+        "w": 966,
         "h": 54
       }
     },
     {
       "key": "nrdb-ui-group#1",
       "box": {
-        "x": 943,
-        "y": 76,
-        "w": 325,
-        "h": 638
+        "x": 0,
+        "y": 0,
+        "w": 0,
+        "h": 0
       }
     },
     {
       "key": "nrdb-ui-widget.nrdb-ui-yonder-aim.yonder-content-height",
       "box": {
-        "x": 960,
-        "y": 93,
-        "w": 291,
-        "h": 48
+        "x": 0,
+        "y": 0,
+        "w": 0,
+        "h": 0
       }
     },
     {
       "key": "nrdb-ui-group.yonder-camera-controls",
       "box": {
         "x": 268,
-        "y": 726,
+        "y": 977,
         "w": 1000,
-        "h": 2276
+        "h": 1917
       }
     },
     {
       "key": "nrdb-ui-widget.nrdb-ui-yonder-deck.yonder-content-height",
       "box": {
         "x": 285,
-        "y": 743,
+        "y": 994,
         "w": 966,
-        "h": 2242
+        "h": 1883
       }
     },
     {
       "key": "nrdb-ui-group.yonder-captures",
       "box": {
         "x": 268,
-        "y": 3014,
+        "y": 2906,
         "w": 1000,
         "h": 145
       }
@@ -81,7 +81,7 @@
       "key": "nrdb-ui-widget.nrdb-ui-yonder-captures",
       "box": {
         "x": 285,
-        "y": 3031,
+        "y": 2923,
         "w": 966,
         "h": 111
       }

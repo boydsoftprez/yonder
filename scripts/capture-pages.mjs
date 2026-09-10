@@ -654,12 +654,13 @@ for (const page of pages) {
   // actually doing.
   await tab.screenshot({ path: join(artifacts, `${stem}.png`), fullPage: true });
 
-  // R-UI-29 supersedes the Live/Setup split: picture and Aim remain bounded;
-  // capture and transaction controls stay on the single scrolling workspace.
+  // R-UI-29: the Camera image scales to workspace width and may exceed a
+  // short viewport. Capture stays reachable while viewing it. Standalone
+  // Cockpit retains its bounded picture/Aim contract.
   const workspace = await tab.locator('.y-deck--workspace').count() > 0;
   const declared = page.contract;
-  const foldParts = ABOVE_THE_FOLD.filter(([name]) => name === 'the picture' ? declared.picture
-    : name === 'the Aim panel' ? declared.aim : declared.deck && !workspace);
+  const foldParts = ABOVE_THE_FOLD.filter(([name]) => name === 'the picture' ? declared.picture && !workspace
+    : name === 'the Aim panel' ? declared.aim && !workspace : declared.deck && !workspace);
   const shape = await tab.evaluate(measure, [LIVE, FIXED, specimens.fields, specimens.masked, foldParts, DECK]);
   for (const reading of shape.readings) fieldsSeen.add(reading.key);
 
@@ -832,6 +833,22 @@ for (const page of pages) {
       );
     }
     if (workspace) {
+      const previewLayout = await tab.evaluate(() => {
+        const frame = document.querySelector('.y-pic__frame');
+        const picture = document.querySelector('.y-pic');
+        const host = document.querySelector('.y-pic__capture-host');
+        const shutter = host?.querySelector('.y-shutter__btn');
+        const f = frame?.getBoundingClientRect(), p = picture?.getBoundingClientRect(), b = shutter?.getBoundingClientRect();
+        const aspect = Number(frame?.style.getPropertyValue('--y-pic-aspect'));
+        return { fills: f && p && Math.abs(f.width-p.width)<2,
+          proportional: f && aspect && Math.abs(f.width/f.height-aspect)<0.02,
+          captureVisible: b && b.top>=0 && b.bottom<=innerHeight+1,
+          captureAfterImage: Boolean(frame && host && (frame.compareDocumentPosition(host)&Node.DOCUMENT_POSITION_FOLLOWING)) };
+      });
+      if (!previewLayout.fills || !previewLayout.proportional || !previewLayout.captureVisible || !previewLayout.captureAfterImage) {
+        note(`  FAIL  ${page.title} (${palette}) must fill preview width proportionally and keep capture reachable below the image: ${JSON.stringify(previewLayout)}`);
+        failures += 1;
+      } else note(`  ok    ${page.title} (${palette}) fills preview width and keeps capture visible below the image`);
       for (const [name, selector] of [['transaction area', '.y-deck__transaction'], ['capture control', '.y-shutter']]) {
         const control = tab.locator(selector);
         if (await control.count() !== 1) {
@@ -919,6 +936,11 @@ for (const page of pages) {
   // with no reference yet records one and says so.
   const refPath = join(refs, "shape", `${stem}.${process.platform}.json`);
   const next = JSON.stringify(recorded, null, 2) + "\n";
+
+  // Publish measured geometry for review alongside the synthetic screenshots.
+  // This is a candidate only; the committed reference still gates CI.
+  mkdirSync(join(artifacts, "shape-candidates"), { recursive: true });
+  writeFileSync(join(artifacts, "shape-candidates", `${stem}.${process.platform}.json`), next);
 
   if (accept || !existsSync(refPath)) {
     writeFileSync(refPath, next);

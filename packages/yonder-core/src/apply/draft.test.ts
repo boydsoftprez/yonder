@@ -350,6 +350,42 @@ describe('staged output enablement', () => {
     if (rtsp.ok) expect(rtsp.config.cameras[0].outputs).toContainEqual({ kind: 'rtsp', enabled: true, password: { secret: 'rtsp_password' } });
     expect(config.cameras[0].outputs).toHaveLength(1);
   });
+  it('stages, validates, and applies an RTP destination without guessing one', () => {
+    const translated = deckDraft({ rtpHost: '192.0.2.44', rtpPort: 5604, outputRtp: true });
+    expect(translated.draft.outputs).toEqual({ rtpHost: '192.0.2.44', rtpPort: 5604, rtp: true });
+    expect(validateDraft({ outputs: { rtpHost: 'receiver', rtpPort: 0 } }, [])).toEqual([
+      { path: 'outputs.rtpHost', message: 'must be an IPv4 address, for example 192.168.1.50' },
+      { path: 'outputs.rtpPort', message: 'must be a whole port number from 1 to 65535' },
+    ]);
+
+    const config = structuredClone(DEFAULT_CONFIG);
+    config.cameras = [Camera.parse({ id: 'cam0', name: 'Camera', source: 'usb', device: 'test-camera', outputs: [] })];
+    const added = applyCameraDraft(config, 'cam0', translated.draft);
+    expect(added).toMatchObject({ ok: true });
+    if (added.ok) expect(added.config.cameras[0].outputs).toEqual([
+      { kind: 'rtp', host: '192.0.2.44', port: 5604, enabled: true },
+    ]);
+    // Disabling an absent output is a no-op; it cannot invent a destination.
+    expect(applyCameraDraft(config, 'cam0', { outputs: { rtp: false } })).toMatchObject({ ok: true });
+  });
+  it('adds a typed but disabled RTP destination until the operator enables it', () => {
+    const config = structuredClone(DEFAULT_CONFIG);
+    config.cameras = [Camera.parse({ id: 'cam0', name: 'Camera', source: 'usb', device: 'test-camera', outputs: [] })];
+    const added = applyCameraDraft(config, 'cam0', { outputs: { rtpHost: '192.0.2.44', rtpPort: 5604 } });
+    expect(added).toMatchObject({ ok: true });
+    if (added.ok) expect(added.config.cameras[0].outputs).toEqual([
+      { kind: 'rtp', host: '192.0.2.44', port: 5604, enabled: false },
+    ]);
+  });
+  it('changes an RTP destination and preserves it while stopping the output', () => {
+    const config = structuredClone(DEFAULT_CONFIG);
+    config.cameras = [Camera.parse({ id: 'cam0', name: 'Camera', source: 'usb', device: 'test-camera', outputs: [{ kind: 'rtp', host: '192.0.2.1', port: 5600 }] })];
+    const changed = applyCameraDraft(config, 'cam0', { outputs: { rtpHost: '198.51.100.7', rtpPort: 5604, rtp: false } });
+    expect(changed).toMatchObject({ ok: true });
+    if (changed.ok) expect(changed.config.cameras[0].outputs).toEqual([
+      { kind: 'rtp', host: '198.51.100.7', port: 5604, enabled: false },
+    ]);
+  });
 });
 
 it('stages stream color separately, preserves native controls, and rejects invalid values', () => {

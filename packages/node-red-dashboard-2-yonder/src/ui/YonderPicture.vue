@@ -82,6 +82,8 @@
         </div>
       </div>
 
+        <div class="y-pic__capture-host"></div>
+
         <div class="y-pic__notices">
             <button v-if="playbackBlocked" type="button" class="y-pic__resume" @click="resumePlayback">Resume live video</button>
             <div v-if="signInRequired || reason || aimRefusal" class="y-pic__reason" role="status">{{ signInRequired ? 'Your session expired. Sign in to restore video and controls.' : aimRefusal || reason }}</div>
@@ -450,6 +452,7 @@ const VIEWER_HEADER = 'x-yonder-viewer'
  * itself runs on (`video/adaptation.ts`) — a slower report would leave that
  * tick reasoning about a reading older than the decision it feeds. */
 const REPORT_INTERVAL_MS = 1000
+const DECODE_STALL_MS = 5000
 
 /**
  * One tick's own raw numbers off `RTCPeerConnection.getStats()` — the
@@ -663,6 +666,7 @@ export default {
              * own doc comment on why the first tick after any reset has
              * none. Reset on every new connection alongside `viewerId`. */
             reportBaseline: null,
+            decodeProgress: null,
             thumbnailDemand: null,
             thumbnailTimer: null
         }
@@ -1224,7 +1228,35 @@ export default {
             clearInterval(this.reportTimer)
             this.reportTimer = null
             this.reportBaseline = null
+            this.decodeProgress = null
             this.viewerId = null
+        },
+        /** A connected WebRTC peer can keep receiving damaged RTP without
+         * decoding another frame. ICE therefore never triggers retry. Use
+         * decoder progress, not paint callbacks (suppressed offscreen), to
+         * recover a visible stalled preview within a bounded interval (R-VID-14).
+         */
+        checkDecodeProgress (sample) {
+            const video = this.$refs.video
+            const rect = video?.getBoundingClientRect()
+            const visible = rect && rect.width > 0 && rect.height > 0
+                && rect.bottom > 0 && rect.top < window.innerHeight
+                && rect.right > 0 && rect.left < window.innerWidth
+            if (this.mode !== 'live' || document.hidden || !visible || this.playbackBlocked
+                || this.pc?.connectionState !== 'connected' || !Number.isFinite(sample?.framesDecoded)) {
+                this.decodeProgress = null
+                return
+            }
+            const prior = this.decodeProgress
+            if (!prior || sample.framesDecoded !== prior.frames) {
+                this.decodeProgress = { frames: sample.framesDecoded, at: sample.at }
+                return
+            }
+            if (sample.at - prior.at >= DECODE_STALL_MS && this.retryTimer === null) {
+                this.reason = 'video stopped decoding; reconnecting'
+                this.decodeProgress = null
+                this.retry()
+            }
         },
         /**
          * One tick: read `getStats()`, diff against the previous tick, and
@@ -1252,6 +1284,7 @@ export default {
             // makes after every await of its own, for the identical reason.
             if (session !== this.session) return
             const sample = sampleReport(raw)
+            this.checkDecodeProgress(sample)
             const prev = this.reportBaseline
             // The baseline moves on every usable tick, whether or not this
             // particular one goes on to produce a report — so the *next*
@@ -1342,6 +1375,7 @@ export default {
             this.reason = ''
             this.stillSrc = ''
             clearTimeout(this.retryTimer)
+            this.retryTimer = null
             clearTimeout(this.stillsTimer)
             this.stillsTimer = setTimeout(() => {
                 // Twelve seconds: long enough for a slow negotiation to
@@ -1492,7 +1526,10 @@ export default {
             clearTimeout(this.retryTimer)
             // No button. The operator asked for a live picture and never
             // withdrew the request.
-            this.retryTimer = setTimeout(() => this.connect(), wait)
+            this.retryTimer = setTimeout(() => {
+                this.retryTimer = null
+                this.connect()
+            }, wait)
         },
         /**
          * Full rate while the key is held, and the cheap copy the moment it is
@@ -1673,6 +1710,8 @@ export default {
     background: var(--yonder-pane, #0a0e13); color: var(--yonder-value, #fff);
     border-bottom: 1px solid var(--yonder-divider, #2b333c);
 }
+.y-pic__capture-host { position: sticky; bottom: 0; z-index: 6; align-self: end; }
+.y-pic__capture-host:empty { display: none; }
 .y-pic__toolbar .y-pic__hud, .y-pic__toolbar .y-pic__state,
 .y-pic__toolbar .y-pic__rec, .y-pic__toolbar .y-pic__foot, .y-pic__toolbar .y-pic__osd {
     position: static; inset: auto; max-width: 100%; margin: 0; background: transparent;
@@ -1680,10 +1719,20 @@ export default {
 .y-pic__toolbar .y-pic__state { flex: 1 1 260px; }
 .y-pic__toolbar .y-pic__rec { margin-left: auto; }
 .y-pic__toolbar .y-pic__cost { color: var(--yonder-value, #fff); }
-@media (min-width: 1300px) {
-    :global(#nrdb-page-page-camera #nrdb-ui-group-group-cam-picture) { grid-column-end: span min(9, var(--layout-columns)) !important; }
-    :global(#nrdb-page-page-camera #nrdb-ui-group-group-cam-aim) { grid-column-end: span min(3, var(--layout-columns)) !important; }
+/* R-UI-29: the handle has its own rail, never covering preview controls.
+   Use available workspace width, including embedded/narrow layouts. */
+:global(#nrdb-page-page-camera) { position: relative; container-type: inline-size; container-name: camera-workspace; }
+:global(#nrdb-page-page-camera #nrdb-ui-group-group-cam-picture) { grid-column: 1 / -1 !important; grid-row: 1 !important; min-width: 0; }
+:global(#nrdb-page-page-camera:has(.y-aimpanel[data-aim-state="open"]) #nrdb-ui-group-group-cam-picture),
+:global(#nrdb-page-page-camera:has(.y-aimpanel[data-aim-state="closed"]) #nrdb-ui-group-group-cam-picture) { margin-right: 64px; }
+:global(#nrdb-page-page-camera #nrdb-ui-group-group-cam-aim) { grid-row: 1 !important; grid-column: 1 / -1 !important; justify-self: end; align-self: start; width: min(340px, 100%); z-index: 5; }
+:global(#nrdb-page-page-camera #nrdb-ui-group-group-cam-aim:has([data-aim-state="absent"])) { display: none !important; }
+:global(#nrdb-page-page-camera #nrdb-ui-group-group-cam-aim:has([data-aim-state="closed"])) { width: 56px; background: transparent; border: 0; }
+:global(#nrdb-page-page-camera #nrdb-ui-group-group-cam-aim .nrdb-ui-group-content) { padding: 0; }
+@container camera-workspace (min-width: 900px) {
+    :global(#nrdb-page-page-camera:has(.y-aimpanel[data-aim-state="open"]) #nrdb-ui-group-group-cam-picture) { margin-right: 352px; }
 }
+
 /* **The widget's whole slot**, and a grid so the picture and the strip
    under it divide it explicitly: one flexible row for the picture, one
    `auto` row for the strip. `minmax(0, 1fr)` in both axes rather than `1fr`,
@@ -1761,7 +1810,7 @@ export default {
 }
 #nrdb-page-page-camera .y-pic {
     height: auto;
-    grid-template-rows: auto auto minmax(34px, auto) minmax(80px, max-content);
+    grid-template-rows: auto auto auto minmax(34px, auto) minmax(80px, max-content);
 }
 #nrdb-page-page-camera .y-pic__fit {
     container-type: normal;

@@ -68,5 +68,22 @@ class ProfilesTest(unittest.TestCase):
                 with self.assertRaisesRegex(RuntimeError, 'failed'): selector.main()
             self.assertEqual(active.read_bytes(), original)
 
+    def test_live_selector_never_falls_back_to_restart(self):
+        spec = importlib.util.spec_from_file_location('selector', Path(__file__).with_name('select-profile.py'))
+        selector = importlib.util.module_from_spec(spec); spec.loader.exec_module(selector)
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory); (root/'profiles').mkdir(); (root/'iqfiles').mkdir()
+            active = root/'iqfiles/active.json'; selected = json.dumps(profiles.build(baseline(), 'normal-light')).encode()
+            active.write_bytes(selected)
+            (root/'profiles/normal-light.json').write_bytes(selected)
+            (root/'profiles/manifest.json').write_text(json.dumps({'profiles': {'normal-light': {'sha256': hashlib.sha256(selected).hexdigest()}}}))
+            view = {'camera': {'source': 'csi'}, 'card': 'm00_b_imx462 2-001a', 'deck': {'isp': {'available': True}}}
+            with patch.object(selector, 'ROOT', root), patch.object(selector, 'ACTIVE', active), patch.object(selector, 'LOCK', root/'lock'), patch.object(selector.os, 'geteuid', return_value=0), patch.object(sys, 'argv', ['select-profile', 'normal-light']), patch.object(selector, 'api', side_effect=[view, RuntimeError('live write refused')]) as api, patch.object(selector, 'restart_isp') as restart:
+                with self.assertRaisesRegex(RuntimeError, 'live write refused'): selector.main()
+                self.assertEqual(api.call_count, 2)
+                self.assertEqual(api.call_args.args, ('/cameras/cam0/controls', {'kind': 'isp-profile', 'value': 'normal-light'}))
+                restart.assert_not_called()
+            self.assertEqual(active.read_bytes(), selected)
+
 
 if __name__ == '__main__': unittest.main()

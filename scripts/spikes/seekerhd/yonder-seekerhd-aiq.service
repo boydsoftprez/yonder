@@ -7,6 +7,8 @@ Before=yonder-core.service
 
 [Service]
 Type=notify
+RuntimeDirectory=yonder-seekerhd
+RuntimeDirectoryMode=0700
 Environment=LD_LIBRARY_PATH=/usr/local/lib/yonder-seekerhd
 ExecStart=/usr/local/lib/yonder-seekerhd/rkaiq_3A_server
 ExecStartPost=/usr/bin/python3 /usr/local/lib/yonder-seekerhd/prepare.py

@@ -4,6 +4,7 @@
  * Adapted from the IMX290 driver; see README.md for provenance and changes.
  *
  * Copyright (C) 2019 FRAMOS GmbH.
+ * Copyright (C) 2020 Rockchip Electronics Co., Ltd.
  *
  * Copyright (C) 2019 Linaro Ltd.
  * Author: Manivannan Sadhasivam <manivannan.sadhasivam@linaro.org>
@@ -19,6 +20,8 @@
 #include <linux/regmap.h>
 #include <linux/regulator/consumer.h>
 #include <linux/rk-camera-module.h>
+#include <linux/rk-preisp.h>
+#include <linux/uaccess.h>
 #include <asm/unaligned.h>
 
 #include <media/media-entity.h>
@@ -27,6 +30,13 @@
 #include <media/v4l2-event.h>
 #include <media/v4l2-fwnode.h>
 #include <media/v4l2-subdev.h>
+
+#include "imx462_hdr2.h"
+
+static bool experimental_hdr2;
+module_param(experimental_hdr2, bool, 0444);
+MODULE_PARM_DESC(experimental_hdr2,
+	"Expose the experimental two-lane 1952x1089 DOL HDR2 mode");
 
 #define IMX290_REG_SIZE_SHIFT				16
 #define IMX290_REG_ADDR_MASK				0xffff
@@ -37,6 +47,7 @@
 #define IMX290_STANDBY					IMX290_REG_8BIT(0x3000)
 #define IMX290_REGHOLD					IMX290_REG_8BIT(0x3001)
 #define IMX290_XMSTA					IMX290_REG_8BIT(0x3002)
+#define IMX290_SW_RESET					IMX290_REG_8BIT(0x3003)
 #define IMX290_ADBIT					IMX290_REG_8BIT(0x3005)
 #define IMX290_ADBIT_10BIT				(0 << 0)
 #define IMX290_ADBIT_12BIT				(1 << 0)
@@ -54,6 +65,8 @@
 #define IMX290_HMAX					IMX290_REG_16BIT(0x301c)
 #define IMX290_HMAX_MAX					0xffff
 #define IMX290_SHS1					IMX290_REG_24BIT(0x3020)
+#define IMX290_SHS2					IMX290_REG_24BIT(0x3024)
+#define IMX290_GAIN_SHORT				IMX290_REG_8BIT(0x30f2)
 #define IMX290_WINWV_OB					IMX290_REG_8BIT(0x303a)
 #define IMX290_WINPV					IMX290_REG_16BIT(0x303c)
 #define IMX290_WINWV					IMX290_REG_16BIT(0x303e)
@@ -117,6 +130,13 @@
 
 #define IMX290_PIXEL_RATE				148500000
 #define IMX290_NAME						"imx462"
+
+#define IMX290_HDR_MODE_LINEAR				NO_HDR
+#define IMX290_HDR_MODE_2X				HDR_X2
+#define IMX290_HDR2_WIDTH				1952
+#define IMX290_HDR2_HEIGHT				1089
+#define IMX290_HDR2_HMAX				2028
+#define IMX290_HDR2_FSC					2440
 
 /*
  * The IMX290 pixel array is organized as follows:
@@ -218,6 +238,7 @@ struct imx290_mode {
 	u32 vmax_min;
 	u8 link_freq_index;
 	u8 ctrl_07;
+	u8 hdr_mode;
 	struct v4l2_fract max_fps;
 	const struct imx290_regval *data;
 	u32 data_size;
@@ -250,6 +271,12 @@ struct imx290 {
 	struct media_pad pad;
 
 	const struct imx290_mode *current_mode;
+	bool streaming;
+	bool configuring_mode;
+	bool hdr_reset_required;
+	bool has_init_hdrae;
+	u32 hdr_fsc;
+	struct preisp_hdrae_exp_s init_hdrae;
 
 	struct regulator_bulk_data supplies[IMX290_NUM_SUPPLIES];
 	struct gpio_desc *rst_gpio;
@@ -367,6 +394,102 @@ static const struct imx290_regval imx290_720p_settings[] = {
 	{ IMX290_OPB_SIZE_V, 4 },
 	{ IMX290_X_OUT_SIZE, 1280 },
 	{ IMX290_Y_OUT_SIZE, 720 },
+};
+
+/*
+ * Rockchip's IMX462 DOL2 table at f39b590ea11da2d897644e42119ba5099b2eefc8,
+ * converted experimentally from four lanes at 445.5Mbit/s to two lanes at
+ * 891Mbit/s.  The lane controls are 1 and the PHY timing is the already used
+ * imx290_csi_445_5mhz timing with repetition 0.  The reset and its 16ms delay
+ * are issued explicitly before this array.
+ */
+static const struct imx290_regval imx290_hdr2_1080p_settings[] = {
+	{ IMX290_REG_8BIT(0x3000), 0x01 },
+	{ IMX290_REG_8BIT(0x3001), 0x00 },
+	{ IMX290_REG_8BIT(0x3002), 0x01 },
+	{ IMX290_REG_8BIT(0x3005), 0x00 },
+	{ IMX290_REG_8BIT(0x3007), 0x40 },
+	{ IMX290_REG_8BIT(0x3009), 0x01 },
+	{ IMX290_REG_8BIT(0x300a), 0x3c },
+	{ IMX290_REG_8BIT(0x300c), 0x11 },
+	{ IMX290_REG_8BIT(0x3011), 0x02 },
+	{ IMX290_REG_8BIT(0x3018), 0xc4 },
+	{ IMX290_REG_8BIT(0x3019), 0x04 },
+	{ IMX290_REG_8BIT(0x301a), 0x00 },
+	{ IMX290_REG_8BIT(0x301c), 0xec },
+	{ IMX290_REG_8BIT(0x301d), 0x07 },
+	{ IMX290_REG_8BIT(0x3045), 0x05 },
+	{ IMX290_REG_8BIT(0x3046), 0x00 },
+	{ IMX290_REG_8BIT(0x304b), 0x0a },
+	{ IMX290_REG_8BIT(0x305c), 0x18 },
+	{ IMX290_REG_8BIT(0x305d), 0x03 },
+	{ IMX290_REG_8BIT(0x305e), 0x20 },
+	{ IMX290_REG_8BIT(0x305f), 0x01 },
+	{ IMX290_REG_8BIT(0x309e), 0x4a },
+	{ IMX290_REG_8BIT(0x309f), 0x4a },
+	{ IMX290_REG_8BIT(0x30d2), 0x19 },
+	{ IMX290_REG_8BIT(0x30d7), 0x03 },
+	{ IMX290_REG_8BIT(0x3106), 0x11 },
+	{ IMX290_REG_8BIT(0x3129), 0x1d },
+	{ IMX290_REG_8BIT(0x313b), 0x61 },
+	{ IMX290_REG_8BIT(0x315e), 0x1a },
+	{ IMX290_REG_8BIT(0x3164), 0x1a },
+	{ IMX290_REG_8BIT(0x317c), 0x12 },
+	{ IMX290_REG_8BIT(0x31ec), 0x37 },
+	{ IMX290_REG_8BIT(0x3405), 0x00 },
+	{ IMX290_REG_8BIT(0x3407), 0x01 },
+	{ IMX290_REG_8BIT(0x3414), 0x00 },
+	{ IMX290_REG_8BIT(0x3415), 0x00 },
+	{ IMX290_REG_8BIT(0x3418), 0x72 },
+	{ IMX290_REG_8BIT(0x3419), 0x09 },
+	{ IMX290_REG_8BIT(0x3441), 0x0a },
+	{ IMX290_REG_8BIT(0x3442), 0x0a },
+	{ IMX290_REG_8BIT(0x3443), 0x01 },
+	{ IMX290_REG_8BIT(0x3444), 0x20 },
+	{ IMX290_REG_8BIT(0x3445), 0x25 },
+	{ IMX290_REG_8BIT(0x3446), 0x77 },
+	{ IMX290_REG_8BIT(0x3447), 0x00 },
+	{ IMX290_REG_8BIT(0x3448), 0x67 },
+	{ IMX290_REG_8BIT(0x3449), 0x00 },
+	{ IMX290_REG_8BIT(0x344a), 0x47 },
+	{ IMX290_REG_8BIT(0x344b), 0x00 },
+	{ IMX290_REG_8BIT(0x344c), 0x37 },
+	{ IMX290_REG_8BIT(0x344d), 0x00 },
+	{ IMX290_REG_8BIT(0x344e), 0x3f },
+	{ IMX290_REG_8BIT(0x344f), 0x00 },
+	{ IMX290_REG_8BIT(0x3450), 0xff },
+	{ IMX290_REG_8BIT(0x3451), 0x00 },
+	{ IMX290_REG_8BIT(0x3452), 0x3f },
+	{ IMX290_REG_8BIT(0x3453), 0x00 },
+	{ IMX290_REG_8BIT(0x3454), 0x37 },
+	{ IMX290_REG_8BIT(0x3455), 0x00 },
+	{ IMX290_REG_8BIT(0x3472), 0xa0 },
+	{ IMX290_REG_8BIT(0x3473), 0x07 },
+	{ IMX290_REG_8BIT(0x347b), 0x23 },
+	{ IMX290_REG_8BIT(0x3480), 0x49 },
+	{ IMX290_REG_8BIT(0x31a0), 0xb4 },
+	{ IMX290_REG_8BIT(0x31a1), 0x02 },
+	{ IMX290_REG_8BIT(0x3020), 0x02 },
+	{ IMX290_REG_8BIT(0x3021), 0x00 },
+	{ IMX290_REG_8BIT(0x3022), 0x00 },
+	{ IMX290_REG_8BIT(0x3030), 0xe1 },
+	{ IMX290_REG_8BIT(0x3031), 0x00 },
+	{ IMX290_REG_8BIT(0x3032), 0x00 },
+	{ IMX290_REG_8BIT(0x31a0), 0xe8 },
+	{ IMX290_REG_8BIT(0x31a1), 0x01 },
+	{ IMX290_REG_8BIT(0x303c), 0x04 },
+	{ IMX290_REG_8BIT(0x303d), 0x00 },
+	{ IMX290_REG_8BIT(0x303e), 0x41 },
+	{ IMX290_REG_8BIT(0x303f), 0x04 },
+	{ IMX290_REG_8BIT(0x303a), 0x08 },
+	{ IMX290_REG_8BIT(0x3024), 0xc9 },
+	{ IMX290_REG_8BIT(0x3025), 0x06 },
+	{ IMX290_REG_8BIT(0x3026), 0x00 },
+	{ IMX290_REG_8BIT(0x3010), 0x61 },
+	{ IMX290_REG_8BIT(0x3014), 0x00 },
+	{ IMX290_REG_8BIT(0x30f0), 0x64 },
+	{ IMX290_REG_8BIT(0x30f2), 0x00 },
+	{ IMX290_REG_8BIT(0x3002), 0x00 },
 };
 
 static const struct imx290_regval imx290_10bit_settings[] = {
@@ -523,6 +646,7 @@ static const struct imx290_mode imx290_modes_2lanes[] = {
 		.vmax_min = 1125,
 		.link_freq_index = FREQ_INDEX_1080P,
 		.ctrl_07 = IMX290_WINMODE_1080P,
+		.hdr_mode = IMX290_HDR_MODE_LINEAR,
 		.data = imx290_1080p_settings,
 		.data_size = ARRAY_SIZE(imx290_1080p_settings),
 		.clk_cfg = imx290_1080p_clock_config,
@@ -538,9 +662,27 @@ static const struct imx290_mode imx290_modes_2lanes[] = {
 		.vmax_min = 750,
 		.link_freq_index = FREQ_INDEX_720P,
 		.ctrl_07 = IMX290_WINMODE_720P,
+		.hdr_mode = IMX290_HDR_MODE_LINEAR,
 		.data = imx290_720p_settings,
 		.data_size = ARRAY_SIZE(imx290_720p_settings),
 		.clk_cfg = imx290_720p_clock_config,
+		.max_fps = {
+			.numerator = 10000,
+			.denominator = 300000,
+		},
+	},
+	{
+		.width = IMX290_HDR2_WIDTH,
+		.height = IMX290_HDR2_HEIGHT,
+		.hmax_min = IMX290_HDR2_HMAX,
+		/* DOL2 VBLANK is expressed against the full FSC. */
+		.vmax_min = IMX290_HDR2_FSC,
+		.link_freq_index = FREQ_INDEX_1080P,
+		.ctrl_07 = IMX290_WINMODE_CROP,
+		.hdr_mode = IMX290_HDR_MODE_2X,
+		.data = imx290_hdr2_1080p_settings,
+		.data_size = ARRAY_SIZE(imx290_hdr2_1080p_settings),
+		.clk_cfg = imx290_1080p_clock_config,
 		.max_fps = {
 			.numerator = 10000,
 			.denominator = 300000,
@@ -556,6 +698,7 @@ static const struct imx290_mode imx290_modes_4lanes[] = {
 		.vmax_min = 1125,
 		.link_freq_index = FREQ_INDEX_1080P,
 		.ctrl_07 = IMX290_WINMODE_1080P,
+		.hdr_mode = IMX290_HDR_MODE_LINEAR,
 		.data = imx290_1080p_settings,
 		.data_size = ARRAY_SIZE(imx290_1080p_settings),
 		.clk_cfg = imx290_1080p_clock_config,
@@ -571,6 +714,7 @@ static const struct imx290_mode imx290_modes_4lanes[] = {
 		.vmax_min = 750,
 		.link_freq_index = FREQ_INDEX_720P,
 		.ctrl_07 = IMX290_WINMODE_720P,
+		.hdr_mode = IMX290_HDR_MODE_LINEAR,
 		.data = imx290_720p_settings,
 		.data_size = ARRAY_SIZE(imx290_720p_settings),
 		.clk_cfg = imx290_720p_clock_config,
@@ -591,8 +735,12 @@ static inline const struct imx290_mode *imx290_modes_ptr(const struct imx290 *im
 
 static inline int imx290_modes_num(const struct imx290 *imx290)
 {
-	if (imx290->nlanes == 2)
-		return ARRAY_SIZE(imx290_modes_2lanes);
+	if (imx290->nlanes == 2) {
+		if (experimental_hdr2 && imx290->xclk_idx == IMX290_CLK_37_125)
+			return ARRAY_SIZE(imx290_modes_2lanes);
+
+		return ARRAY_SIZE(imx290_modes_2lanes) - 1;
+	}
 	else
 		return ARRAY_SIZE(imx290_modes_4lanes);
 }
@@ -637,6 +785,17 @@ imx290_format_info(const struct imx290 *imx290, u32 code)
 	}
 
 	return NULL;
+}
+
+static bool imx290_mode_supports_code(const struct imx290 *imx290,
+				      const struct imx290_mode *mode, u32 code)
+{
+	const struct imx290_format_info *info = imx290_format_info(imx290, code);
+
+	if (!info)
+		return false;
+
+	return mode->hdr_mode == IMX290_HDR_MODE_LINEAR || info->bpp == 10;
 }
 
 static int imx290_get_mbus_config(struct v4l2_subdev *sd, unsigned int pad, struct v4l2_mbus_config *config) {
@@ -711,6 +870,17 @@ static int imx290_set_register_array(struct imx290 *imx290,
 	usleep_range(10000, 11000);
 
 	return 0;
+}
+
+static int imx290_soft_reset(struct imx290 *imx290)
+{
+	int ret;
+
+	ret = imx290_write(imx290, IMX290_SW_RESET, 0x01, NULL);
+	if (!ret)
+		usleep_range(16000, 17000);
+
+	return ret;
 }
 
 static int imx290_set_clock(struct imx290 *imx290)
@@ -822,12 +992,98 @@ static void imx290_exposure_update(struct imx290 *imx290,
 				 exposure_max);
 }
 
+static int imx290_apply_hdrae(struct imx290 *imx290,
+			      const struct preisp_hdrae_exp_s *ae)
+{
+	struct imx462_hdr2_timing timing;
+	u32 gain_switch;
+	int release_ret;
+	int ret;
+
+	/* Rockchip's HDR2 ABI carries the long exposure in the middle fields. */
+	if (ae->middle_cg_mode > GAIN_MODE_HCG ||
+	    imx462_hdr2_calculate(imx290->hdr_fsc, ae->middle_exp_reg,
+				  ae->short_exp_reg, ae->middle_gain_reg,
+				  ae->short_gain_reg, &timing))
+		return -ERANGE;
+
+	ret = imx290_read(imx290, IMX290_FR_FDG_SEL, &gain_switch);
+	if (ret)
+		return ret;
+
+	if (ae->middle_cg_mode == GAIN_MODE_HCG)
+		gain_switch |= BIT(4);
+	else
+		gain_switch &= ~BIT(4);
+
+	ret = imx290_write(imx290, IMX290_REGHOLD, 0x01, NULL);
+	if (ret)
+		return ret;
+
+	imx290_write(imx290, IMX290_VMAX, imx290->hdr_fsc / 2, &ret);
+	imx290_write(imx290, IMX290_SHS1, timing.shs1, &ret);
+	imx290_write(imx290, IMX290_SHS2, timing.shs2, &ret);
+	imx290_write(imx290, IMX290_GAIN, ae->middle_gain_reg, &ret);
+	imx290_write(imx290, IMX290_GAIN_SHORT, ae->short_gain_reg, &ret);
+	imx290_write(imx290, IMX290_FR_FDG_SEL, gain_switch, &ret);
+
+	/* Always attempt to release a hold after any grouped-write failure. */
+	release_ret = imx290_write(imx290, IMX290_REGHOLD, 0x00, NULL);
+	if (!ret)
+		ret = release_ret;
+
+	return ret;
+}
+
+static int imx290_apply_hdr_vmax(struct imx290 *imx290)
+{
+	int release_ret;
+	int ret;
+
+	ret = imx290_write(imx290, IMX290_REGHOLD, 0x01, NULL);
+	if (ret)
+		return ret;
+	imx290_write(imx290, IMX290_VMAX, imx290->hdr_fsc / 2, &ret);
+	release_ret = imx290_write(imx290, IMX290_REGHOLD, 0x00, NULL);
+	return ret ? ret : release_ret;
+}
+
+static int imx290_set_hdrae(struct imx290 *imx290,
+			    const struct preisp_hdrae_exp_s *ae)
+{
+	struct imx462_hdr2_timing timing;
+	int ret;
+
+	if (imx290->current_mode->hdr_mode != IMX290_HDR_MODE_2X)
+		return -EINVAL;
+	if (ae->middle_cg_mode > GAIN_MODE_HCG ||
+	    imx462_hdr2_calculate(imx290->hdr_fsc, ae->middle_exp_reg,
+				  ae->short_exp_reg, ae->middle_gain_reg,
+				  ae->short_gain_reg, &timing))
+		return -ERANGE;
+
+	if (!imx290->streaming) {
+		imx290->init_hdrae = *ae;
+		imx290->has_init_hdrae = true;
+		return 0;
+	}
+
+	ret = imx290_apply_hdrae(imx290, ae);
+	if (ret)
+		return ret;
+
+	imx290->init_hdrae = *ae;
+	imx290->has_init_hdrae = true;
+	return 0;
+}
+
 static int imx290_set_ctrl(struct v4l2_ctrl *ctrl)
 {
 	struct imx290 *imx290 = container_of(ctrl->handler,
 					     struct imx290, ctrls);
 	const struct v4l2_mbus_framefmt *format;
 	struct v4l2_subdev_state *state;
+	u32 old_hdr_fsc = imx290->hdr_fsc;
 	int ret = 0, vmax;
 
 	/*
@@ -838,9 +1094,38 @@ static int imx290_set_ctrl(struct v4l2_ctrl *ctrl)
 		return 0;
 
 	if (ctrl->id == V4L2_CID_VBLANK) {
+		if (imx290->current_mode->hdr_mode == IMX290_HDR_MODE_2X) {
+			struct imx462_hdr2_timing timing;
+			u32 requested_fsc = ctrl->val +
+					    imx290->current_mode->height;
+			u32 sensor_vmax;
+
+			if (imx462_hdr2_fsc_to_vmax(requested_fsc,
+						       &sensor_vmax))
+				return -ERANGE;
+			if (imx290->has_init_hdrae &&
+			    imx462_hdr2_calculate(sensor_vmax * 2,
+				imx290->init_hdrae.middle_exp_reg,
+				imx290->init_hdrae.short_exp_reg,
+				imx290->init_hdrae.middle_gain_reg,
+				imx290->init_hdrae.short_gain_reg, &timing))
+				return -ERANGE;
+
+			imx290->hdr_fsc = sensor_vmax * 2;
+			ctrl->val = imx290->hdr_fsc -
+				    imx290->current_mode->height;
+		}
 		/* Changing vblank changes the allowed range for exposure. */
 		imx290_exposure_update(imx290, imx290->current_mode);
 	}
+
+	/* HDR shutters and gains are owned atomically by SET_HDRAE_EXP. */
+	if (imx290->current_mode->hdr_mode == IMX290_HDR_MODE_2X &&
+	    (ctrl->id == V4L2_CID_EXPOSURE ||
+	     ctrl->id == V4L2_CID_ANALOGUE_GAIN))
+		return 0;
+	if (imx290->configuring_mode)
+		return 0;
 
 	/* V4L2 controls values will be applied only when power is already up */
 	if (!pm_runtime_get_if_in_use(imx290->dev))
@@ -855,6 +1140,22 @@ static int imx290_set_ctrl(struct v4l2_ctrl *ctrl)
 		break;
 
 	case V4L2_CID_VBLANK:
+		if (imx290->current_mode->hdr_mode == IMX290_HDR_MODE_2X) {
+			if (imx290->streaming && imx290->has_init_hdrae)
+				ret = imx290_apply_hdrae(imx290,
+							 &imx290->init_hdrae);
+			else
+				ret = imx290_apply_hdr_vmax(imx290);
+			if (ret) {
+				imx290->hdr_fsc = old_hdr_fsc;
+				ctrl->val = old_hdr_fsc -
+					    imx290->current_mode->height;
+				imx290_exposure_update(imx290,
+						       imx290->current_mode);
+			}
+			break;
+		}
+
 		ret = imx290_write(imx290, IMX290_VMAX,
 				   ctrl->val + imx290->current_mode->height,
 				   NULL);
@@ -940,9 +1241,17 @@ static void imx290_ctrl_update(struct imx290 *imx290,
 			       const struct imx290_mode *mode)
 {
 	unsigned int hblank_min = mode->hmax_min - mode->width;
-	unsigned int hblank_max = IMX290_HMAX_MAX - mode->width;
+	unsigned int hblank_max = mode->hdr_mode == IMX290_HDR_MODE_2X ?
+				 hblank_min : IMX290_HMAX_MAX - mode->width;
 	unsigned int vblank_min = mode->vmax_min - mode->height;
-	unsigned int vblank_max = IMX290_VMAX_MAX - mode->height;
+	unsigned int vblank_max;
+
+	if (mode->hdr_mode == IMX290_HDR_MODE_2X) {
+		vblank_max = IMX290_VMAX_MAX * 2 - mode->height;
+		imx290->hdr_fsc = mode->vmax_min;
+	} else {
+		vblank_max = IMX290_VMAX_MAX - mode->height;
+	}
 
 	__v4l2_ctrl_s_ctrl(imx290->link_freq, mode->link_freq_index);
 
@@ -950,6 +1259,79 @@ static void imx290_ctrl_update(struct imx290 *imx290,
 				 hblank_min);
 	__v4l2_ctrl_modify_range(imx290->vblank, vblank_min, vblank_max, 1,
 				 vblank_min);
+}
+
+static int imx290_ctrl_reset_timing(struct imx290 *imx290,
+				    const struct imx290_mode *mode)
+{
+	int ret;
+
+	ret = __v4l2_ctrl_s_ctrl(imx290->hblank,
+				   mode->hmax_min - mode->width);
+	if (ret)
+		return ret;
+
+	return __v4l2_ctrl_s_ctrl(imx290->vblank,
+				    mode->vmax_min - mode->height);
+}
+
+static void imx290_fill_mode_format(struct imx290 *imx290,
+				    const struct imx290_mode *mode,
+				    struct v4l2_mbus_framefmt *format)
+{
+	format->width = mode->width;
+	format->height = mode->height;
+	format->code = imx290_formats[0].code[imx290->model->colour_variant];
+	format->field = V4L2_FIELD_NONE;
+	format->colorspace = V4L2_COLORSPACE_RAW;
+	format->ycbcr_enc = V4L2_YCBCR_ENC_601;
+	format->quantization = V4L2_QUANTIZATION_FULL_RANGE;
+	format->xfer_func = V4L2_XFER_FUNC_NONE;
+}
+
+/* Caller holds the active-state/control lock and has checked !streaming. */
+static int imx290_switch_mode(struct imx290 *imx290,
+			      struct v4l2_subdev_state *state,
+			      const struct imx290_mode *mode, u32 code)
+{
+	const struct imx290_mode *old_mode = imx290->current_mode;
+	struct v4l2_mbus_framefmt *format;
+	struct v4l2_mbus_framefmt old_format;
+	u32 old_hblank = imx290->hblank->val;
+	u32 old_vblank = imx290->vblank->val;
+	u32 old_hdr_fsc = imx290->hdr_fsc;
+	int ret;
+
+	if (mode == old_mode)
+		return 0;
+
+	format = v4l2_subdev_get_pad_format(&imx290->sd, state, 0);
+	old_format = *format;
+	imx290->configuring_mode = true;
+	imx290->current_mode = mode;
+	imx290_fill_mode_format(imx290, mode, format);
+	if (mode->hdr_mode == IMX290_HDR_MODE_LINEAR &&
+	    imx290_mode_supports_code(imx290, mode, code))
+		format->code = code;
+	imx290_ctrl_update(imx290, format, mode);
+	imx290_exposure_update(imx290, mode);
+	ret = imx290_ctrl_reset_timing(imx290, mode);
+	if (!ret)
+		goto done;
+
+	/* Restore a coherent software configuration without touching hardware. */
+	imx290->current_mode = old_mode;
+	*format = old_format;
+	imx290_ctrl_update(imx290, format, old_mode);
+	__v4l2_ctrl_s_ctrl(imx290->hblank, old_hblank);
+	__v4l2_ctrl_s_ctrl(imx290->vblank, old_vblank);
+	imx290->hdr_fsc = old_hdr_fsc;
+
+done:
+	imx290->configuring_mode = false;
+	if (!ret && mode->hdr_mode == IMX290_HDR_MODE_LINEAR)
+		imx290->has_init_hdrae = false;
+	return ret;
 }
 
 static int imx290_ctrl_init(struct imx290 *imx290)
@@ -1049,6 +1431,42 @@ static int imx290_start_streaming(struct imx290 *imx290,
 	const struct v4l2_mbus_framefmt *format;
 	int ret;
 
+	if (imx290->current_mode->hdr_mode == IMX290_HDR_MODE_2X) {
+		ret = imx290_soft_reset(imx290);
+		if (ret)
+			return ret;
+
+		/* Any later linear start must reset every DOL-only register. */
+		imx290->hdr_reset_required = true;
+		ret = imx290_set_register_array(imx290,
+						imx290->current_mode->data,
+						imx290->current_mode->data_size);
+		if (ret) {
+			dev_err(imx290->dev, "Could not set HDR2 mode - %d\n", ret);
+			return ret;
+		}
+
+		ret = __v4l2_ctrl_handler_setup(imx290->sd.ctrl_handler);
+		if (ret)
+			return ret;
+
+		if (imx290->has_init_hdrae) {
+			ret = imx290_apply_hdrae(imx290, &imx290->init_hdrae);
+			if (ret)
+				return ret;
+		}
+
+		imx290_write(imx290, IMX290_STANDBY, 0x00, &ret);
+		msleep(30);
+		return imx290_write(imx290, IMX290_XMSTA, 0x00, &ret);
+	}
+
+	if (imx290->hdr_reset_required) {
+		ret = imx290_soft_reset(imx290);
+		if (ret)
+			return ret;
+	}
+
 	/* Set init register settings */
 	ret = imx290_set_register_array(imx290, imx290_global_init_settings,
 					ARRAY_SIZE(imx290_global_init_settings));
@@ -1100,6 +1518,7 @@ static int imx290_start_streaming(struct imx290 *imx290,
 		dev_err(imx290->dev, "Could not set current mode - %d\n", ret);
 		return ret;
 	}
+	imx290->hdr_reset_required = false;
 
 	/* Apply customized values from user */
 	ret = __v4l2_ctrl_handler_setup(imx290->sd.ctrl_handler);
@@ -1135,6 +1554,8 @@ static int imx290_set_stream(struct v4l2_subdev *sd, int enable)
 	int ret = 0;
 
 	state = v4l2_subdev_lock_and_get_active_state(sd);
+	if (!!enable == imx290->streaming)
+		goto unlock;
 
 	if (enable) {
 		ret = pm_runtime_resume_and_get(imx290->dev);
@@ -1147,8 +1568,10 @@ static int imx290_set_stream(struct v4l2_subdev *sd, int enable)
 			pm_runtime_put_sync(imx290->dev);
 			goto unlock;
 		}
+		imx290->streaming = true;
 	} else {
 		imx290_stop_streaming(imx290);
+		imx290->streaming = false;
 		pm_runtime_mark_last_busy(imx290->dev);
 		pm_runtime_put_autosuspend(imx290->dev);
 	}
@@ -1186,10 +1609,10 @@ static int imx290_enum_frame_size(struct v4l2_subdev *sd,
 	const struct imx290 *imx290 = to_imx290(sd);
 	const struct imx290_mode *imx290_modes = imx290_modes_ptr(imx290);
 
-	if (!imx290_format_info(imx290, fse->code))
-		return -EINVAL;
-
 	if (fse->index >= imx290_modes_num(imx290))
+		return -EINVAL;
+	if (!imx290_mode_supports_code(imx290, &imx290_modes[fse->index],
+				       fse->code))
 		return -EINVAL;
 
 	fse->min_width = imx290_modes[fse->index].width;
@@ -1200,13 +1623,40 @@ static int imx290_enum_frame_size(struct v4l2_subdev *sd,
 	return 0;
 }
 
+static int imx290_enum_frame_interval(
+	struct v4l2_subdev *sd, struct v4l2_subdev_state *sd_state,
+	struct v4l2_subdev_frame_interval_enum *fie)
+{
+	const struct imx290 *imx290 = to_imx290(sd);
+	const struct imx290_mode *modes = imx290_modes_ptr(imx290);
+	const struct imx290_mode *mode;
+
+	if (fie->index >= imx290_modes_num(imx290))
+		return -EINVAL;
+
+	mode = &modes[fie->index];
+	if (fie->code && !imx290_mode_supports_code(imx290, mode, fie->code))
+		return -EINVAL;
+
+	if (!fie->code || mode->hdr_mode == IMX290_HDR_MODE_2X)
+		fie->code = imx290_formats[0].code[imx290->model->colour_variant];
+	fie->width = mode->width;
+	fie->height = mode->height;
+	fie->interval = mode->max_fps;
+	fie->reserved[0] = mode->hdr_mode;
+
+	return 0;
+}
+
 static int imx290_set_fmt(struct v4l2_subdev *sd,
 			  struct v4l2_subdev_state *sd_state,
 			  struct v4l2_subdev_format *fmt)
 {
 	struct imx290 *imx290 = to_imx290(sd);
 	const struct imx290_mode *mode;
+	const struct imx290_mode *old_mode = imx290->current_mode;
 	struct v4l2_mbus_framefmt *format;
+	int ret;
 
 	mode = v4l2_find_nearest_size(imx290_modes_ptr(imx290),
 				      imx290_modes_num(imx290), width, height,
@@ -1215,7 +1665,7 @@ static int imx290_set_fmt(struct v4l2_subdev *sd,
 	fmt->format.width = mode->width;
 	fmt->format.height = mode->height;
 
-	if (!imx290_format_info(imx290, fmt->format.code))
+	if (!imx290_mode_supports_code(imx290, mode, fmt->format.code))
 		fmt->format.code = imx290_formats[0].code[imx290->model->colour_variant];
 
 	fmt->format.field = V4L2_FIELD_NONE;
@@ -1227,6 +1677,19 @@ static int imx290_set_fmt(struct v4l2_subdev *sd,
 	format = v4l2_subdev_get_pad_format(sd, sd_state, 0);
 
 	if (fmt->which == V4L2_SUBDEV_FORMAT_ACTIVE) {
+		if (imx290->streaming && mode != imx290->current_mode)
+			return -EBUSY;
+		if (mode != old_mode &&
+		    (mode->hdr_mode != IMX290_HDR_MODE_LINEAR ||
+		     old_mode->hdr_mode != IMX290_HDR_MODE_LINEAR)) {
+			ret = imx290_switch_mode(imx290, sd_state, mode,
+						 fmt->format.code);
+			if (ret)
+				return ret;
+			fmt->format = *format;
+			return 0;
+		}
+
 		imx290->current_mode = mode;
 
 		imx290_ctrl_update(imx290, &fmt->format, mode);
@@ -1244,6 +1707,22 @@ static int imx290_get_selection(struct v4l2_subdev *sd,
 {
 	struct imx290 *imx290 = to_imx290(sd);
 	struct v4l2_mbus_framefmt *format;
+
+	if (imx290->current_mode->hdr_mode == IMX290_HDR_MODE_2X) {
+		switch (sel->target) {
+		case V4L2_SEL_TGT_CROP:
+		case V4L2_SEL_TGT_NATIVE_SIZE:
+		case V4L2_SEL_TGT_CROP_BOUNDS:
+		case V4L2_SEL_TGT_CROP_DEFAULT:
+			sel->r.top = 0;
+			sel->r.left = 0;
+			sel->r.width = IMX290_HDR2_WIDTH;
+			sel->r.height = IMX290_HDR2_HEIGHT;
+			return 0;
+		default:
+			return -EINVAL;
+		}
+	}
 
 	switch (sel->target) {
 	case V4L2_SEL_TGT_CROP: {
@@ -1324,26 +1803,90 @@ static int imx290_g_frame_interval(struct v4l2_subdev *sd,
 	}
 
 	const struct imx290_mode *mode = imx290->current_mode;
+	u32 frame_length;
 
 	mutex_lock(imx290->ctrls.lock);
+	frame_length = mode->hdr_mode == IMX290_HDR_MODE_2X ?
+		       imx290->hdr_fsc : mode->height + imx290->vblank->val;
 	fi->interval.numerator = (mode->width + imx290->hblank->val) *
-		(mode->height + imx290->vblank->val);
+		frame_length;
 	fi->interval.denominator = IMX290_PIXEL_RATE;
 	mutex_unlock(imx290->ctrls.lock);
 
 	return 0;
 }
 
+static int imx290_set_hdr_cfg(struct imx290 *imx290,
+			      const struct rkmodule_hdr_cfg *hdr)
+{
+	const struct imx290_mode *modes = imx290_modes_ptr(imx290);
+	const struct imx290_mode *mode = NULL;
+	struct v4l2_subdev_state *state;
+	unsigned int i;
+	int ret = 0;
+
+	state = v4l2_subdev_lock_and_get_active_state(&imx290->sd);
+	if (imx290->streaming) {
+		ret = -EBUSY;
+		goto unlock;
+	}
+
+	if (hdr->hdr_mode == IMX290_HDR_MODE_LINEAR &&
+	    imx290->current_mode->hdr_mode == IMX290_HDR_MODE_LINEAR)
+		goto unlock;
+	if (hdr->hdr_mode != IMX290_HDR_MODE_LINEAR &&
+	    hdr->hdr_mode != IMX290_HDR_MODE_2X) {
+		ret = -EINVAL;
+		goto unlock;
+	}
+
+	for (i = 0; i < imx290_modes_num(imx290); ++i) {
+		if (modes[i].hdr_mode == hdr->hdr_mode) {
+			mode = &modes[i];
+			break;
+		}
+	}
+	if (!mode) {
+		ret = hdr->hdr_mode == IMX290_HDR_MODE_2X ?
+		      -EOPNOTSUPP : -EINVAL;
+		goto unlock;
+	}
+
+	ret = imx290_switch_mode(imx290, state, mode,
+				 imx290_formats[0].code[imx290->model->colour_variant]);
+
+unlock:
+	v4l2_subdev_unlock_state(state);
+	return ret;
+}
+
 static long imx290_ioctl(struct v4l2_subdev *sd, unsigned int cmd, void *arg)
 {
 	struct imx290 *imx290 = to_imx290(sd);
+	struct rkmodule_hdr_cfg *hdr;
+	struct v4l2_subdev_state *state;
 	long ret = 0;
 
 	switch (cmd) {
 	case RKMODULE_GET_MODULE_INFO:
-		
 		imx290_get_module_inf(imx290, (struct rkmodule_inf *)arg);
-		
+		break;
+	case RKMODULE_GET_HDR_CFG:
+		hdr = arg;
+		memset(hdr, 0, sizeof(*hdr));
+		state = v4l2_subdev_lock_and_get_active_state(sd);
+		hdr->hdr_mode = imx290->current_mode->hdr_mode;
+		hdr->esp.mode = hdr->hdr_mode == IMX290_HDR_MODE_2X ?
+				HDR_ID_CODE : HDR_NORMAL_VC;
+		v4l2_subdev_unlock_state(state);
+		break;
+	case RKMODULE_SET_HDR_CFG:
+		ret = imx290_set_hdr_cfg(imx290, arg);
+		break;
+	case PREISP_CMD_SET_HDRAE_EXP:
+		state = v4l2_subdev_lock_and_get_active_state(sd);
+		ret = imx290_set_hdrae(imx290, arg);
+		v4l2_subdev_unlock_state(state);
 		break;
 	default:
 		ret = -ENOIOCTLCMD;
@@ -1360,6 +1903,8 @@ static long imx290_compat_ioctl32(struct v4l2_subdev *sd,
 	void __user *up = compat_ptr(arg);
 	struct rkmodule_inf *inf;
 	struct rkmodule_awb_cfg *cfg;
+	struct rkmodule_hdr_cfg *hdr;
+	struct preisp_hdrae_exp_s *hdrae;
 	long ret;
 
 	switch (cmd) {
@@ -1371,9 +1916,35 @@ static long imx290_compat_ioctl32(struct v4l2_subdev *sd,
 		}
 
 		ret = imx290_ioctl(sd, cmd, inf);
-		if (!ret)
-			ret = copy_to_user(up, inf, sizeof(*inf));
+		if (!ret && copy_to_user(up, inf, sizeof(*inf)))
+			ret = -EFAULT;
 		kfree(inf);
+		break;
+	case RKMODULE_GET_HDR_CFG:
+		hdr = kzalloc(sizeof(*hdr), GFP_KERNEL);
+		if (!hdr)
+			return -ENOMEM;
+
+		ret = imx290_ioctl(sd, cmd, hdr);
+		if (!ret && copy_to_user(up, hdr, sizeof(*hdr)))
+			ret = -EFAULT;
+		kfree(hdr);
+		break;
+	case RKMODULE_SET_HDR_CFG:
+		hdr = memdup_user(up, sizeof(*hdr));
+		if (IS_ERR(hdr))
+			return PTR_ERR(hdr);
+
+		ret = imx290_ioctl(sd, cmd, hdr);
+		kfree(hdr);
+		break;
+	case PREISP_CMD_SET_HDRAE_EXP:
+		hdrae = memdup_user(up, sizeof(*hdrae));
+		if (IS_ERR(hdrae))
+			return PTR_ERR(hdrae);
+
+		ret = imx290_ioctl(sd, cmd, hdrae);
+		kfree(hdrae);
 		break;
 	case RKMODULE_AWB_CFG:
 		cfg = kzalloc(sizeof(*cfg), GFP_KERNEL);
@@ -1414,6 +1985,7 @@ static const struct v4l2_subdev_pad_ops imx290_pad_ops = {
 	.init_cfg = imx290_entity_init_cfg,
 	.enum_mbus_code = imx290_enum_mbus_code,
 	.enum_frame_size = imx290_enum_frame_size,
+	.enum_frame_interval = imx290_enum_frame_interval,
 	.get_fmt = v4l2_subdev_get_fmt,
 	.set_fmt = imx290_set_fmt,
 	.get_selection = imx290_get_selection,
@@ -1769,6 +2341,13 @@ static int imx290_probe(struct i2c_client *client)
 	ret = imx290_init_clk(imx290);
 	if (ret)
 		return ret;
+	if (experimental_hdr2) {
+		if (imx290->nlanes == 2 &&
+		    imx290->xclk_idx == IMX290_CLK_37_125)
+			dev_warn(dev, "experimental two-lane HDR2 enabled; sensor and ISP validation required\n");
+		else
+			dev_warn(dev, "experimental HDR2 unavailable: requires two lanes and 37.125MHz xclk\n");
+	}
 
 	/*
 	 * Enable power management. The driver supports runtime PM, but needs to

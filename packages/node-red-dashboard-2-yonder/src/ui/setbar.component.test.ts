@@ -80,6 +80,7 @@ function bar(props: {
   reason?: string;
   fine?: string;
   readonly?: boolean;
+  commitOnRelease?: boolean;
 }) {
   return mount(YonderSetBar, { props });
 }
@@ -474,4 +475,31 @@ it("draws the mark where the pointer is while a drag is in flight, not where the
   // The device answers, and its word is the one that counts from then on.
   await w.setProps({ actual: 71 });
   expect(at(w.find("[data-grab]").element)).toBe("71%");
+});
+
+
+describe('native release-commit controls', () => {
+  it('moves locally through many pointer samples and emits only the final changed value once', async () => {
+    const w=bar({actual:50,commitOnRelease:true});const trk=w.find('.y-sb__trk').element;
+    press(trk,110);
+    for(let x=111;x<=198;x++) trk.dispatchEvent(new PointerEvent('pointermove',{clientX:x,bubbles:true}));
+    await w.vm.$nextTick();expect(w.find('.y-sb__val').text()).toBe('90');expect(w.emitted('set')).toBeUndefined();
+    trk.dispatchEvent(new PointerEvent('pointerup',{bubbles:true}));
+    trk.dispatchEvent(new PointerEvent('pointerleave',{bubbles:true}));
+    expect(w.emitted('set')).toEqual([[90]]);w.unmount();
+  });
+  it('does not write on cancellation or when released unchanged', () => {
+    const w=bar({actual:50,commitOnRelease:true});const trk=w.find('.y-sb__trk').element;
+    press(trk,198);trk.dispatchEvent(new PointerEvent('pointercancel',{bubbles:true}));
+    trk.dispatchEvent(new PointerEvent('pointerup',{bubbles:true}));
+    press(trk,110);trk.dispatchEvent(new PointerEvent('pointerup',{bubbles:true}));
+    expect(w.emitted('set')).toBeUndefined();w.unmount();
+  });
+  it('retains the chosen position across a readback during the drag and respects loss of access', async () => {
+    const w=bar({actual:50,commitOnRelease:true});const trk=w.find('.y-sb__trk').element;
+    press(trk,198);await w.setProps({actual:60});
+    expect(w.find('.y-sb__val').text()).toBe('90');
+    await w.setProps({state:'gated'});trk.dispatchEvent(new PointerEvent('pointerup',{bubbles:true}));
+    expect(w.emitted('set')).toBeUndefined();w.unmount();
+  });
 });

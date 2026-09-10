@@ -11,6 +11,7 @@
         >
             <span class="y-shutter__label">{{ label }}</span>
         </button>
+        <span v-if="compact && isRecording" class="y-shutter__elapsed">{{ elapsed }}</span>
         <span v-if="inhibited" class="y-shutter__why">{{ inhibited }}</span>
         <span v-if="destination" class="y-shutter__dest">{{ destination }}</span>
     </div>
@@ -78,6 +79,7 @@ export default {
     name: 'YonderShutter',
     props: {
         mode: { type: String, default: 'video' },
+        compact: { type: Boolean, default: false },
         /** `{ since: <ms epoch> }` while recording; `null` otherwise. */
         recording: { type: Object, default: null },
         destination: { type: String, default: '' },
@@ -119,8 +121,8 @@ export default {
          * that say which way it is.
          */
         label () {
-            if (this.isRecording) return `\u25cf RECORDING ${this.elapsed}`
-            return this.mode === 'photo' ? 'PHOTO' : '\u25cb RECORD'
+            if (this.isRecording) return this.compact ? '\u25a0 STOP RECORDING' : `\u25a0 STOP RECORDING ${this.elapsed}`
+            return this.mode === 'photo' ? 'TAKE PHOTO' : '\u25cb RECORD'
         },
         isRecording () {
             return this.mode === 'video' && Boolean(this.recording) && Number.isFinite(this.recording.since)
@@ -194,6 +196,7 @@ export default {
     color: var(--yonder-value, #ffffff);
 }
 .y-shutter__btn.lit .y-shutter__label { color: var(--yonder-bad, #ff4034); }
+.y-shutter__elapsed { font-size: 12px; font-variant-numeric: tabular-nums; color: var(--yonder-bad, #ff4034); }
 .y-shutter__dest {
     font-size: 10.5px;
     color: var(--yonder-label, #7f8a95);

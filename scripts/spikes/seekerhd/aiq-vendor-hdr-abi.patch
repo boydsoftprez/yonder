@@ -1,0 +1,50 @@
+diff --git a/rkaiq/hwi/isp20/CamHwIsp20.cpp b/rkaiq/hwi/isp20/CamHwIsp20.cpp
+index 9cf96a2..cc142d4 100644
+--- a/rkaiq/hwi/isp20/CamHwIsp20.cpp
++++ b/rkaiq/hwi/isp20/CamHwIsp20.cpp
+@@ -21,6 +21,7 @@
+ #include "Isp20_module_dbg.h"
+ #include "mediactl/mediactl-priv.h"
+ #include <linux/v4l2-subdev.h>
++#include <cstddef>
+ #include <sys/mman.h>
+ #include <dlfcn.h>
+ #include <linux/dma-buf.h>
+@@ -164,6 +165,23 @@ out:
+     return ret;
+ }
+
++// Rockchip's 6.1 sensor ABI stores the HDR mode at byte 32. Newer userspace
++// headers name that word "stream" and move reserved[0] to byte 36.
++struct rkisp_v4l2_subdev_frame_interval_enum {
++    __u32 index;
++    __u32 pad;
++    __u32 code;
++    __u32 width;
++    __u32 height;
++    struct v4l2_fract interval;
++    __u32 which;
++    __u32 reserved[8];
++};
++static_assert(sizeof(rkisp_v4l2_subdev_frame_interval_enum) == 64,
++              "Rockchip frame interval ABI size changed");
++static_assert(offsetof(rkisp_v4l2_subdev_frame_interval_enum, reserved) == 32,
++              "Rockchip HDR mode ABI offset changed");
++
+ static XCamReturn get_sensor_caps(rk_sensor_full_info_t *sensor_info) {
+     struct v4l2_subdev_frame_size_enum fsize_enum;
+     struct v4l2_subdev_mbus_code_enum  code_enum;
+@@ -217,9 +234,11 @@ static XCamReturn get_sensor_caps(rk_sensor_full_info_t *sensor_info) {
+     }
+ #endif
+
+-    struct v4l2_subdev_frame_interval_enum fie;
++    struct rkisp_v4l2_subdev_frame_interval_enum fie;
+     memset(&fie, 0, sizeof(fie));
+-    while(vdev.io_control(VIDIOC_SUBDEV_ENUM_FRAME_INTERVAL, &fie) == 0) {
++    while(vdev.io_control(
++              _IOWR('V', 75, struct rkisp_v4l2_subdev_frame_interval_enum),
++              &fie) == 0) {
+         frameSize.format = (rk_aiq_format_t)fie.code;
+         frameSize.width = fie.width;
+         frameSize.height = fie.height;

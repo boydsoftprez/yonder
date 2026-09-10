@@ -28,7 +28,15 @@ import type { Camera } from "../schema/config.js";
  */
 export interface CameraDraft {
   image?: Partial<Camera['image']>;
-  outputs?: Partial<Record<Camera['outputs'][number]['kind'], boolean>>;
+  /**
+   * Output switches, plus the destination of an RTP push.  The destination
+   * belongs here rather than in a separate request: one Apply changes the
+   * route and its enabled state together, under the normal rollback guard.
+   */
+  outputs?: Partial<Record<Camera['outputs'][number]['kind'], boolean>> & {
+    rtpHost?: string;
+    rtpPort?: number;
+  };
   width?: number;
   height?: number;
   framerate?: number;
@@ -78,6 +86,8 @@ export const DRAFT_PATHS: Record<string, string> = {
   imageBrightness: 'image.brightness', imageContrast: 'image.contrast',
   imageSaturation: 'image.saturation', imageHue: 'image.hue',
   outputRtp: 'outputs.rtp',
+  rtpHost: 'outputs.rtpHost',
+  rtpPort: 'outputs.rtpPort',
   outputRtsp: 'outputs.rtsp',
   outputSrt: 'outputs.srt',
   width: "width",
@@ -184,6 +194,8 @@ export function deckDraft(staged: Record<string, unknown>): DeckDraft {
       case 'imageSaturation': image.saturation = value; break;
       case 'imageHue': image.hue = value; break;
       case 'outputRtp': outputs.rtp = value; break;
+      case 'rtpHost': outputs.rtpHost = value; break;
+      case 'rtpPort': outputs.rtpPort = value; break;
       case 'outputRtsp': outputs.rtsp = value; break;
       case 'outputSrt': outputs.srt = value; break;
       // The four the two conventions already share a name for — the capture

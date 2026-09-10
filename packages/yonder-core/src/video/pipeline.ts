@@ -402,7 +402,14 @@ function sink(output: CameraOutput, rtspBase: string, cameraId: string, codec: C
       return [payloader(codec), "config-interval=-1", `pt=${RTP_PAYLOAD_TYPE}`, LINK,
         "udpsink", `host=${output.host}`, `port=${output.port}`, "sync=false"];
     case "rtsp":
-      return ["rtspclientsink", `location=${rtspBase}/${cameraId}`, "latency=0"];
+      // MediaMTX receives this publisher on loopback. rtspclientsink otherwise
+      // offers UDP before TCP; under two RK3566 H.265 encodes its local UDP
+      // sockets lose RTP fragments, which leaves MediaMTX unable to reassemble
+      // an access unit and freezes the preview. Interleaved TCP keeps RTP and
+      // RTCP on the already-established loopback RTSP connection. This applies
+      // only to Yonder's local RTSP publish path, never configured RTP/UDP
+      // ground-station outputs.
+      return ["rtspclientsink", `location=${rtspBase}/${cameraId}`, "latency=0", "protocols=tcp"];
     case "srt":
       // **Unreachable, and it throws rather than composing.** `refuse()` below
       // rejects an SRT output before anything is composed, and the daemon
@@ -515,7 +522,7 @@ export function compose(opts: ComposeOptions): string[] {
       "capsfilter", `name=${rate.element}`, token(anyMemory(rate)), LINK,
       ...encode(previewEncoder, "preview", camera.preview.bitrate_kbps, previewSize(camera.preview)), LINK,
       parser(previewCodec), LINK,
-      "rtspclientsink", `location=${rtspBase}/${camera.id}-preview`, "latency=0",
+      "rtspclientsink", `location=${rtspBase}/${camera.id}-preview`, "latency=0", "protocols=tcp",
     );
   } else {
     push(
@@ -526,7 +533,7 @@ export function compose(opts: ComposeOptions): string[] {
       "capsfilter", `name=${rate.element}`, token(rate), LINK,
       ...encode(previewEncoder, "preview", camera.preview.bitrate_kbps, null), LINK,
       parser(previewCodec), LINK,
-      "rtspclientsink", `location=${rtspBase}/${camera.id}-preview`, "latency=0",
+      "rtspclientsink", `location=${rtspBase}/${camera.id}-preview`, "latency=0", "protocols=tcp",
     );
   }
 

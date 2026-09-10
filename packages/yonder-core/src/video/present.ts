@@ -808,6 +808,9 @@ export interface DeckOutput {
   /** At IP, like every other rate here. */
   readonly costKbps: number;
   readonly reach: OutputReach;
+  /** Present only for an RTP push; listener outputs have no destination. */
+  readonly host?: string;
+  readonly port?: number;
 }
 
 /**
@@ -895,6 +898,7 @@ export interface DeckCapture {
 
 /** `ui-yonder-deck`'s whole payload — `YonderDeck.vue`'s own documented shape. */
 export interface CameraDeck {
+  readonly isp?: import('./isp.js').IspView;
   /** R-CTL-08: output codecs offered by the probed board encoder. */
   readonly codecs?: readonly Camera["codec"][];
   readonly run?: { state: string; reason?: string };
@@ -1101,6 +1105,7 @@ const OUTPUT_LABEL: Record<OutputKind, string> = {
  * was actually sent — one calculation, two callers, neither of them this one.
  */
 export function cameraDeck(view: {
+  readonly isp?: CameraDeck['isp'];
   readonly run?: CameraDeck["run"];
   readonly identity?: string;
   readonly startBlocked?: string | null;
@@ -1165,6 +1170,7 @@ export function cameraDeck(view: {
     },
     codecs: view.encoder.h265 ? ['h264', 'h265'] : ['h264'],
     accessory: view.accessory,
+    isp: view.isp,
     aim: aimPanel(caps, view.accessory, camera.id, 'control', camera.controls, camera.gimbal_presets),
     // The two the board carries for a camera that has neither of its own.
     // See `deckCapture()` for why this is composed rather than read.
@@ -1183,6 +1189,7 @@ export function cameraDeck(view: {
       enabled: output.enabled,
       costKbps: atIp(camera.bitrate_kbps),
       reach: outputReach(output.kind, view.paths),
+      ...(output.kind === 'rtp' ? { host: output.host, port: output.port } : {}),
     })),
     captures: { count: view.accessory ? null : view.captures ?? 0 },
     recorder: view.recorder ?? null,

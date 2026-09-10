@@ -1,8 +1,8 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
-import { mount, type VueWrapper } from "@vue/test-utils";
-import { beforeEach, describe, expect, it, vi } from "vitest";
+import { mount, enableAutoUnmount, type VueWrapper } from "@vue/test-utils";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { nextTick, reactive } from "vue";
-import YonderDeck, { CAPABILITY_LAYOUT, appliedForDraft } from "./YonderDeck.vue";
+import YonderDeck, { CAPABILITY_LAYOUT, appliedForDraft, ispDisplayToRaw, ispRawToDisplay } from "./YonderDeck.vue";
 import { CAPABILITY_KEYS } from "yonder-core/presentation";
 
 /**
@@ -32,6 +32,8 @@ import { CAPABILITY_KEYS } from "yonder-core/presentation";
  * test below that touches an edit names which of the two it expects and
  * checks the other did not happen.
  */
+
+enableAutoUnmount(afterEach);
 
 function present(value: unknown) {
   return { state: "present", value };
@@ -213,6 +215,7 @@ function legends(wrapper: VueWrapper<any>): string[] {
  * jsdom does not choke on (`PointerEvent`'s own constructor init dict). */
 function press(el: Element, clientX: number) {
   el.dispatchEvent(new PointerEvent("pointerdown", { clientX, bubbles: true, cancelable: true }));
+  el.dispatchEvent(new PointerEvent("pointerup", { clientX, bubbles: true }));
 }
 
 describe("CAPABILITY_LAYOUT", () => {
@@ -260,6 +263,180 @@ describe("appliedForDraft", () => {
   it("carries the camera's own name, for the name draft path", () => {
     expect(appliedForDraft(makeReport({ camera: { name: "Nose" } }))).toMatchObject({ name: "Nose" });
   });
+});
+
+function seekerIsp(overrides: Record<string, unknown> = {}) {
+  return {
+    available: true,
+    running: true,
+    profile: "normal-light",
+    profiles: [
+      { value: "normal-light", label: "Normal Light" },
+      { value: "low-light", label: "Low Light" },
+      { value: "legacy-low-light", label: "Original low-light tuning" },
+    ],
+    values: { brightness: 128, contrast: 128, saturation: 128, hue: 128 },
+    ...overrides,
+  };
+}
+
+describe("SeekerHD ISP image controls", () => {
+  it.each([
+    ["normal-light", "Normal Light"],
+    ["low-light", "Low Light"],
+    ["legacy-low-light", "Original low-light tuning"],
+  ])("offers %s as %s and sends it immediately", async (value, label) => {
+    const { wrapper, emit } = deck(makeStore(makeReport({ isp: seekerIsp() })), "live");
+    const preset = pickerByLabel(wrapper, "Preset");
+    expect(preset.findAll("option").map(option => option.text())).toEqual([
+      "Normal Light", "Low Light", "Original low-light tuning",
+    ]);
+    await preset.find("select").setValue(value);
+    expect(emit).toHaveBeenLastCalledWith("widget-action", "d1", {
+      camera: "elp", payload: { nativeControl: { kind: "isp-profile", value } },
+    });
+    // The selected profile remains the report's readback until the camera
+    // answers; an immediate command is not an optimistic displayed value.
+    expect(preset.find(".y-pick__value").text()).toBe("Normal Light");
+    expect(wrapper.vm.pendingEdits).toEqual([]);
+    expect(wrapper.text()).toContain(label);
+    wrapper.unmount();
+  });
+
+  it("uses friendly ISP values, hides neutral staged Stream color, and posts ISP controls on release", () => {
+    const { wrapper, emit } = deck(makeStore(makeReport({ isp: seekerIsp({ profile: "low-light", values: { brightness: 37, contrast: 128, saturation: 128, hue: 128 } }) })), "live");
+    expect(legends(wrapper)).toContain("Camera image");
+    expect(legends(wrapper)).not.toContain("Stream color");
+    expect(wrapper.text()).toContain("Release a slider to apply its value live. Brightness and hue are centred at 0; contrast and saturation are centred at 100%.");
+    expect(wrapper.text()).toContain("Applies live to both streams without restarting video.");
+    const brightness = barByLabel(wrapper, "Brightness");
+    expect(brightness.text()).toContain("%");
+    expect(brightness.find(".y-sb__val").text()).toBe("-71 %");
+    const preset = pickerByLabel(wrapper, "Preset");
+    expect(preset.find(".y-pick__value").text()).toBe("Low Light");
+    const slots = wrapper.findAll(".y-deck__slot");
+    expect(slots).toHaveLength(3);
+    expect(slots[2].find(".y-col__legend").text()).toBe("Camera image");
+    press(brightness.find(".y-sb__trk").element, 220);
+    expect(emit).toHaveBeenLastCalledWith("widget-action", "d1", {
+      camera: "elp", payload: { nativeControl: { kind: "isp-control", control: "brightness", value: 255 } },
+    });
+    expect(wrapper.vm.pendingEdits).toEqual([]);
+    expect(wrapper.vm.draft).not.toHaveProperty("imageBrightness");
+    wrapper.unmount();
+  });
+
+  it("keeps non-neutral staged Stream color controls reachable beside the ISP panel", () => {
+    const report = makeReport({ isp: seekerIsp() });
+    report.policy.image = { brightness: 12, contrast: 100, saturation: 100, hue: 0 };
+    const { wrapper, emit } = deck(makeStore(report), "live");
+    expect(legends(wrapper)).toEqual(expect.arrayContaining(["Camera image", "Stream color"]));
+    const generic = wrapper.findAll(".y-col").find(column => column.find(".y-col__legend").text() === "Stream color")!;
+    const slots = wrapper.findAll(".y-deck__slot");
+    expect(slots[2].element.contains(generic.element)).toBe(true);
+    expect(generic.text()).toContain("Existing Stream color adjustments also affect the image.");
+    const brightness = generic.findAll(".y-sb").find(bar => bar.find(".y-sb__label").text() === "Brightness")!;
+    press(brightness.find(".y-sb__trk").element, 220);
+    expect(emit).not.toHaveBeenCalled();
+    expect(wrapper.vm.pendingEdits.map((edit: { path: string }) => edit.path)).toContain("imageBrightness");
+    wrapper.unmount();
+  });
+
+  it("disables and explains ISP controls when unavailable, stopped, or signed out", async () => {
+    const unavailable = deck(makeStore(makeReport({ isp: seekerIsp({ available: false, running: false, values: null, reason: "ISP is unavailable." }) })), "live");
+    const preset = pickerByLabel(unavailable.wrapper, "Preset");
+    expect((preset.find("select").element as HTMLSelectElement).disabled).toBe(true);
+    expect(preset.text()).toContain("ISP is unavailable.");
+    const brightness = barByLabel(unavailable.wrapper, "Brightness");
+    expect(brightness.classes()).toContain("is-gated");
+    press(brightness.find(".y-sb__trk").element, 220);
+    expect(unavailable.emit).not.toHaveBeenCalled();
+    unavailable.wrapper.unmount();
+
+    const signedOut = deck(makeStore(makeReport({ isp: seekerIsp() })), "live");
+    signedOut.wrapper.vm.signInRequired = true;
+    await nextTick();
+    expect((pickerByLabel(signedOut.wrapper, "Preset").find("select").element as HTMLSelectElement).disabled).toBe(true);
+    expect(signedOut.wrapper.text()).toContain("Sign in to restore camera controls.");
+    signedOut.wrapper.unmount();
+  });
+
+  it("keeps the staged Stream color panel unchanged for cameras without ISP", () => {
+    const { wrapper, emit } = deck(makeStore(makeReport()), "live");
+    expect(legends(wrapper)).toContain("Stream color");
+    expect(legends(wrapper)).not.toContain("Camera image");
+    press(barByLabel(wrapper, "Brightness").find(".y-sb__trk").element, 220);
+    expect(emit).not.toHaveBeenCalled();
+    expect(wrapper.vm.pendingEdits.map((edit: { path: string }) => edit.path)).toContain("imageBrightness");
+    wrapper.unmount();
+  });
+});
+
+it('sends one native write for a whole ISP drag, never a command per pixel', async () => {
+  const { wrapper, emit } = deck(makeStore(makeReport({ isp: seekerIsp() })), 'live');
+  const group = wrapper.findAll('.y-col').find(c => c.find('.y-col__legend').text() === 'Camera image')!;
+  const track = group.find('.y-sb__trk').element;
+  track.dispatchEvent(new PointerEvent('pointerdown', {clientX:110,bubbles:true}));
+  for (let x=111;x<=180;x++) track.dispatchEvent(new PointerEvent('pointermove',{clientX:x,bubbles:true}));
+  await nextTick();
+  expect(emit).not.toHaveBeenCalled();
+  track.dispatchEvent(new PointerEvent('pointerup',{clientX:180,bubbles:true}));
+  track.dispatchEvent(new PointerEvent('pointerleave',{bubbles:true}));
+  expect(emit).toHaveBeenCalledTimes(1);
+  expect(emit.mock.calls[0]![2]).toMatchObject({payload:{nativeControl:{kind:'isp-control',control:'brightness',value:209}}});
+  wrapper.unmount();
+});
+
+describe("ISP friendly value mapping", () => {
+  it("keeps neutral and both native endpoints exact", () => {
+    expect(ispRawToDisplay("brightness", 0)).toBe(-100);
+    expect(ispRawToDisplay("brightness", 128)).toBe(0);
+    expect(ispRawToDisplay("brightness", 255)).toBe(100);
+    expect(ispRawToDisplay("contrast", 0)).toBe(0);
+    expect(ispRawToDisplay("contrast", 128)).toBe(100);
+    expect(ispRawToDisplay("contrast", 255)).toBe(200);
+    expect(ispDisplayToRaw("hue", -100)).toBe(0);
+    expect(ispDisplayToRaw("hue", 0)).toBe(128);
+    expect(ispDisplayToRaw("hue", 100)).toBe(255);
+    expect(ispDisplayToRaw("saturation", 0)).toBe(0);
+    expect(ispDisplayToRaw("saturation", 100)).toBe(128);
+    expect(ispDisplayToRaw("saturation", 200)).toBe(255);
+  });
+
+  it("rounds display readback and small friendly adjustments at the command boundary", () => {
+    expect(ispRawToDisplay("brightness", 127)).toBe(-1);
+    expect(ispRawToDisplay("brightness", 129)).toBe(1);
+    expect(ispDisplayToRaw("brightness", -1)).toBe(127);
+    expect(ispDisplayToRaw("brightness", 1)).toBe(129);
+    expect(ispDisplayToRaw("contrast", 101)).toBe(129);
+  });
+});
+
+it("keeps camera image and orientation in the third column with capture above settings", () => {
+  const { wrapper } = deck(makeStore(makeReport({
+    isp: seekerIsp(),
+    capabilities: {
+      ...noCapabilities(),
+      recording: present({ medium: "board" }),
+    },
+    recorder: { recording: false, since: null, destination: "board", remainingSeconds: 120, remainingPhotos: null, bytes: null, ended: null },
+    orientation: { turns: [{ key: "rotation", value: 0 }], says: "The camera applies rotation." },
+  })), "live");
+  const slots = wrapper.findAll(".y-deck__slot");
+  expect(slots).toHaveLength(3);
+  expect(slots[0].find(".y-col__legend").text()).toBe("Stream");
+  expect(slots[1].find(".y-col__legend").text()).toBe("Preview");
+  expect(slots[2].findAll(".y-col__legend").map(node => node.text()))
+    .toEqual(["Camera image", "Orientation"]);
+  expect(wrapper.findAll("h2.y-deck__section").map(node => node.text()))
+    .not.toContain("Camera image and capture");
+  wrapper.unmount();
+});
+
+it("does not draw an empty native-controls section for a CSI ISP camera", () => {
+  const { wrapper } = deck(makeStore(makeReport({ isp: seekerIsp() })), "live");
+  expect(wrapper.find(".y-deck__native").exists()).toBe(false);
+  wrapper.unmount();
 });
 
 it("draws a control for present, a fact for not-offered, the marked control for advertised and gated", () => {
@@ -411,7 +588,7 @@ it("an image control posts on press through the socket", () => {
     values: { brightness: 0 },
   });
   const { wrapper, emit } = deck(makeStore(report), "live");
-  const track = barByLabel(wrapper, "Brightness").find(".y-sb__trk");
+  const track = barByLabel(wrapper.find(".y-deck__native"), "Brightness").find(".y-sb__trk");
   press(track.element, 110); // roughly the midpoint of -64..64
 
   expect(emit).toHaveBeenCalledTimes(1);
@@ -798,7 +975,7 @@ describe("the capture column: one key, following the mode", () => {
     const { wrapper } = deck(makeStore(makeReport({ capabilities: both, recorder: recorder() })), "live");
     await mode(wrapper).findAll("button")[1]!.trigger("click");
     expect(wrapper.findAll(".y-shutter")).toHaveLength(1);
-    expect(wrapper.find(".y-shutter__label").text()).toBe("PHOTO");
+    expect(wrapper.find(".y-shutter__label").text()).toBe("TAKE PHOTO");
   });
 
   /**
@@ -818,7 +995,7 @@ describe("the capture column: one key, following the mode", () => {
     const { wrapper } = deck(makeStore(makeReport({ capabilities: onlyStills, recorder: recorder() })), "live");
     // A control whose options are one is a control that cannot be used.
     expect(wrapper.findAll(".y-seg").some((s) => s.find(".y-seg__label").text() === "Mode")).toBe(false);
-    expect(wrapper.find(".y-shutter__label").text()).toBe("PHOTO");
+    expect(wrapper.find(".y-shutter__label").text()).toBe("TAKE PHOTO");
   });
 
   it("says where a capture lands and how much is left, in the unit the mode works in", async () => {
@@ -846,7 +1023,8 @@ describe("the capture column: one key, following the mode", () => {
     // board's own elapsed time. An optimistic local timestamp — which is what
     // this deck used to keep — reads 00:00:00 here.
     // In the key, not beside it: one control saying one thing.
-    expect(wrapper.find(".y-shutter__label").text()).toBe("\u25cf RECORDING 00:01:04");
+    expect(wrapper.find(".y-shutter__label").text()).toBe("\u25a0 STOP RECORDING");
+    expect(wrapper.find(".y-shutter__elapsed").text()).toBe("00:01:04");
     expect(wrapper.find(".y-shutter__btn").classes()).toContain("lit");
   });
 
@@ -1547,4 +1725,48 @@ it('distinguishes a staged Adaptive selection from the applied Fixed mode', asyn
   expect(status.text()).toContain('Press Apply');
   expect(status.text()).not.toContain('Adaptive delivery');
   wrapper.unmount();
+});
+
+
+it('offers an absent RTP destination and stages its address, port and enable together', async () => {
+  const { wrapper, emit } = deck(makeStore(makeReport({ outputs: [{ kind: 'rtsp', enabled: true }] })), 'live');
+  const host = wrapper.find('input[aria-label="Receiver IPv4 address"]');
+  const port = wrapper.find('input[aria-label="Receiver UDP port"]');
+  expect((host.element as HTMLInputElement).value).toBe('');
+  expect((port.element as HTMLInputElement).value).toBe('5600');
+  await host.setValue('192.168.1.50');
+  await port.setValue('5602');
+  const row = wrapper.findAll('.y-deck__out').find(row => row.text().includes('Receiver IPv4 address'))!;
+  await row.findAll('button').find(button => button.text() === 'On')!.trigger('click');
+  expect(emit).not.toHaveBeenCalled();
+  await wrapper.findAll('button').find(button => button.text() === 'Apply')!.trigger('click');
+  expect(emit).toHaveBeenLastCalledWith('widget-action', 'd1', { camera: 'elp', payload: { apply: { rtpHost: '192.168.1.50', rtpPort: 5602, outputRtp: true } } });
+  wrapper.unmount();
+});
+
+it('reads the saved destination of a disabled RTP output', () => {
+  const { wrapper } = deck(makeStore(makeReport({ outputs: [{ kind: 'rtp', enabled: false, host: '192.168.1.60', port: 5610 }] })), 'live');
+  expect((wrapper.find('input[aria-label="Receiver IPv4 address"]').element as HTMLInputElement).value).toBe('192.168.1.60');
+  expect((wrapper.find('input[aria-label="Receiver UDP port"]').element as HTMLInputElement).value).toBe('5610');
+  wrapper.unmount();
+});
+
+
+it('docks one capture toolbar beside the picture without duplicating shutter commands', async () => {
+  const page = document.createElement('div'); page.id = 'nrdb-page-page-camera';
+  const host = document.createElement('div'); host.className = 'y-pic__capture-host';
+  page.append(host); document.body.append(page);
+  const { wrapper, emit } = deck(makeStore(makeReport({
+    capabilities: { recording: present({}), stills: present({}) },
+    recorder: { recording: false, since: null, ended: null, medium: 'board', freeBytes: 1000000000 },
+  })), 'live');
+  try {
+    await nextTick();
+    expect(host.querySelectorAll('.y-deck__capture-toolbar')).toHaveLength(1);
+    expect(wrapper.findAll('.y-shutter')).toHaveLength(0);
+    (host.querySelector('.y-shutter__btn') as HTMLButtonElement).click();
+    await nextTick();
+    expect(emit).toHaveBeenCalledTimes(1);
+    expect(emit.mock.calls[0][2].payload).toEqual({ shutter: 'record' });
+  } finally { wrapper.unmount(); page.remove(); }
 });

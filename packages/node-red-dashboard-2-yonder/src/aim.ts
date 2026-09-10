@@ -11,8 +11,8 @@ import type { RED } from "./red.js";
  * every decision about what to draw lives in `YonderAim.vue`, the same rule
  * every widget in this package follows. There is no static editor field at
  * all beyond the ones every widget in this package already carries (group,
- * name): unlike `ui-yonder-deck`'s own `mode`, nothing about this panel is a
- * flow-time choice — the whole of what it draws arrives on `msg.payload`.
+ * name), except an opt-in Camera-workspace layout choice. The whole of what it
+ * draws still arrives on `msg.payload`.
  */
 export = function register(RED: RED): void {
   registerWidget(RED, {
@@ -21,6 +21,6 @@ export = function register(RED: RED): void {
     // node's output through here. Without this, Dashboard drops every one
     // of them silently, with no error anywhere (widget.ts's own note).
     emitsActions: true,
-    props: () => ({}),
+    props: (_node, config) => ({ collapsible: config.collapsible === true }),
   });
 };

@@ -2,6 +2,33 @@
 
 R-CAM-01, R-CAM-05, R-CAM-14, R-HW-03. Board work on 2026-09-09.
 
+## Live ISP presets and controls — 2026-09-10
+
+R-CTL-04, R-CTL-10, R-CTL-16. The camera page now offers Normal Light,
+Low Light and Original low-light tuning, plus native brightness, contrast,
+saturation and hue. The running RKAIQ service applies these through its local
+[control bridge](../../scripts/spikes/seekerhd/aiq-live-controls.md). These
+changes do not rebuild the encoder pipeline or restart the core or ISP service.
+
+On the same RK3566/ISP21 board, all four controls were changed and read back,
+then all three presets were selected. Native control acknowledgements took
+0.7–1.5 ms; preset updates took 144–161 ms. Core and ISP service PIDs and start
+timestamps stayed unchanged. The ISP advanced 162 frames during the sequence
+with zero additional frame losses and retained its 33 ms period.
+
+A separate 25-second delivered-stream sample spanning a preset selection
+decoded 1080p main and 720p preview at approximately 29.96 fps each. Each had
+one 66.7 ms timestamp gap. Decoder diagnostic lines were also present; this
+is a cadence measurement, not a claim of error-free delivery.
+The signed-in Chrome camera page successfully selected Low Light, changed
+brightness from 128 to 137 immediately, then selected Normal Light and read
+brightness back as 128. No configuration edits were staged by those controls.
+
+Normal Light was left active. Its persisted IQ bytes match the generated
+profile checksum. Individual color adjustments are runtime-only and reset on
+preset load or ISP service restart. No reboot was needed for this validation,
+and no camera images or videos were added to the repository.
+
 ## Hardware and capture path
 
 The camera is the [Divimath SeekerHD](https://www.divimath.com/products/divimath-seekerhd-camera),

@@ -1003,6 +1003,70 @@ function internals(wrapper: VueWrapper): { attempt: number; reportTimer: unknown
  * fake is deliberately the `Map` `RTCStatsReport` really is, not a
  * hand-rolled shape only this suite would recognise.
  */
+describe("recovering a connected decoder that has stopped", () => {
+  async function watching() {
+    const { wrapper } = mountPicture();
+    await settle();
+    vi.spyOn(document, 'hidden', 'get').mockReturnValue(false);
+    const rect = vi.spyOn(wrapper.find('video').element, 'getBoundingClientRect')
+      .mockReturnValue({ top: 10, bottom: 410, left: 10, right: 650, width: 640, height: 400 } as DOMRect);
+    pc().goes('connected'); pc().deliverTrack(); await settle(); frames(wrapper);
+    pc().statsReport = fakeStats({ inbound: { framesDecoded: 30 } });
+    await advance(1000);
+    return { wrapper, rect };
+  }
+  it('reconnects when bytes arrive but decoding stops after playback began', async () => {
+    const { wrapper } = await watching();
+    for (let i = 1; i <= 4; i++) {
+      pc().statsReport = fakeStats({ inbound: { framesDecoded: 30, bytesReceived: 125000 + i * 100000 } });
+      await advance(1000);
+    }
+    expect(FakePeerConnection.made).toHaveLength(1);
+    await advance(2000);
+    expect(pc().closed).toBe(true);
+    expect(FakePeerConnection.made).toHaveLength(2);
+    expect(badge(wrapper)).not.toBe('live · preview');
+    pc(1).goes('connected'); pc(1).deliverTrack(); await settle(); frames(wrapper); await settle();
+    expect(badge(wrapper)).toBe('live · preview');
+  });
+  it('does not mistake absent paint callbacks for decoder failure', async () => {
+    const { wrapper } = await watching();
+    for (let i = 1; i <= 10; i++) {
+      pc().statsReport = fakeStats({ inbound: { framesDecoded: 30 + i * 30 } });
+      await advance(1000);
+    }
+    expect(FakePeerConnection.made).toHaveLength(1);
+    expect(badge(wrapper)).not.toBe('live · preview');
+  });
+  it.each(['hidden', 'offscreen', 'blocked', 'unsupported'])('does not reconnect when %s', async kind => {
+    const { wrapper, rect } = await watching();
+    if (kind === 'hidden') vi.spyOn(document, 'hidden', 'get').mockReturnValue(true);
+    if (kind === 'offscreen') rect.mockReturnValue({ top: -600, bottom: -200, left: 0, right: 640, width: 640, height: 400 } as DOMRect);
+    if (kind === 'blocked') (wrapper.vm as unknown as { playbackBlocked: boolean }).playbackBlocked = true;
+    if (kind === 'unsupported') pc().statsReport = fakeStats();
+    await advance(9000);
+    expect(FakePeerConnection.made).toHaveLength(1);
+  });
+  it('gives a returning visible preview a fresh interval before recovering', async () => {
+    const { rect } = await watching();
+    rect.mockReturnValue({ top: -600, bottom: -200, left: 0, right: 640, width: 640, height: 400 } as DOMRect);
+    await advance(9000);
+    rect.mockReturnValue({ top: 10, bottom: 410, left: 10, right: 650, width: 640, height: 400 } as DOMRect);
+    await advance(5000);
+    expect(FakePeerConnection.made).toHaveLength(1);
+    await advance(2000);
+    expect(FakePeerConnection.made).toHaveLength(2);
+  });
+  it('cancels queued decoder recovery when the operator turns preview off', async () => {
+    const { wrapper } = await watching();
+    await advance(5000);
+    setMode(wrapper, 'off'); await settle();
+    await advance(10000);
+    expect(FakePeerConnection.made).toHaveLength(1);
+    expect(badge(wrapper)).toBe('off');
+  });
+});
+
 describe("reporting what this browser is measuring", () => {
   it("captures no viewer id and reports nothing at all when the console never answers with one", async () => {
     // An older console's handshake: no `VIEWER_HEADER` at all.

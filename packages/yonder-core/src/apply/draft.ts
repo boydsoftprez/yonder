@@ -27,6 +27,9 @@ function rungIndex(size: string): number {
   return (PREVIEW_RUNGS as readonly string[]).indexOf(size);
 }
 
+/** Kept here so draft validation can name the field before the schema runs. */
+const IPV4_PATTERN = /^(?:(?:25[0-5]|2[0-4][0-9]|1?[0-9]{1,2})\.){3}(?:25[0-5]|2[0-4][0-9]|1?[0-9]{1,2})$/;
+
 /**
  * What is wrong with a draft, by path — and never a fix for it (R-CMD-04).
  *
@@ -62,9 +65,13 @@ export function validateDraft(draft: CameraDraft, supportedRungs: readonly strin
   }
   if (draft.outputs !== undefined) {
     if (!draft.outputs || typeof draft.outputs !== 'object' || Array.isArray(draft.outputs)) problems.push({ path: 'outputs', message: 'Output edits must name configured output kinds' });
-    else for (const [kind, enabled] of Object.entries(draft.outputs)) {
-      if (!['rtp', 'rtsp', 'srt'].includes(kind)) problems.push({ path: `outputs.${kind}`, message: 'Unknown output kind' });
-      else if (typeof enabled !== 'boolean') problems.push({ path: `outputs.${kind}`, message: 'Output enablement must be true or false' });
+    else for (const [kind, value] of Object.entries(draft.outputs)) {
+      if (kind === 'rtpHost') {
+        if (typeof value !== 'string' || !IPV4_PATTERN.test(value)) problems.push({ path: 'outputs.rtpHost', message: 'must be an IPv4 address, for example 192.168.1.50' });
+      } else if (kind === 'rtpPort') {
+        if (typeof value !== 'number' || !Number.isInteger(value) || value < 1 || value > 65535) problems.push({ path: 'outputs.rtpPort', message: 'must be a whole port number from 1 to 65535' });
+      } else if (!['rtp', 'rtsp', 'srt'].includes(kind)) problems.push({ path: `outputs.${kind}`, message: 'Unknown output kind' });
+      else if (typeof value !== 'boolean') problems.push({ path: `outputs.${kind}`, message: 'Output enablement must be true or false' });
     }
   }
 
@@ -138,9 +145,40 @@ export function applyCameraDraft(
   const camera = config.cameras[index];
   if (camera === undefined) return { ok: false, error: `no camera is configured with the id "${id}"` };
   if (draft.outputs !== undefined) {
-    for (const [kind, enabled] of Object.entries(draft.outputs)) {
+    const outputDraft = draft.outputs;
+    const invalidDestination = validateDraft({ outputs: outputDraft }, []).find((problem) =>
+      problem.path === 'outputs.rtpHost' || problem.path === 'outputs.rtpPort',
+    );
+    if (invalidDestination !== undefined) return { ok: false, error: invalidDestination.message };
+
+    const rtp = camera.outputs.find((output) => output.kind === 'rtp');
+    const hasRtpDestination = outputDraft.rtpHost !== undefined || outputDraft.rtpPort !== undefined;
+    if (rtp === undefined && hasRtpDestination) {
+      // An RTP output has no safe default peer.  It is created only when the
+      // operator supplied the complete destination in this same draft.
+      if (typeof outputDraft.rtpHost !== 'string' || typeof outputDraft.rtpPort !== 'number') {
+        return { ok: false, error: 'An RTP destination needs both an IPv4 host and a port' };
+      }
+      camera.outputs.push({
+        kind: 'rtp',
+        host: outputDraft.rtpHost,
+        port: outputDraft.rtpPort,
+        // Entering a destination only prepares it.  Traffic starts only when
+        // the operator also chose Enable in this draft.
+        enabled: outputDraft.rtp === true,
+      });
+    } else if (rtp !== undefined && hasRtpDestination) {
+      if (outputDraft.rtpHost !== undefined) rtp.host = outputDraft.rtpHost;
+      if (outputDraft.rtpPort !== undefined) rtp.port = outputDraft.rtpPort;
+    }
+
+    for (const [kind, enabled] of Object.entries(outputDraft)) {
+      if (kind === 'rtpHost' || kind === 'rtpPort') continue;
       if (typeof enabled !== 'boolean') return { ok: false, error: 'Output enablement must be true or false' };
       if (!camera.outputs.some(output => output.kind === kind)) {
+        // There is no RTP stream to stop, and no peer has been supplied to
+        // create one.  Treat an initial default-off switch as unchanged.
+        if (kind === 'rtp' && enabled === false) continue;
         if (kind === 'rtsp') camera.outputs.push({ kind: 'rtsp', enabled, password: { secret: 'rtsp_password' } });
         else return { ok: false, error: `This camera has no configured ${kind} output to change` };
       }

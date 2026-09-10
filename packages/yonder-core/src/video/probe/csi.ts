@@ -23,9 +23,13 @@ export async function probeRockchipCsi(
     return reject("the CSI media graph must have one connected sensor before capture can start");
   }
   const interval = /fmt:[^\s/]+\/(\d+)x(\d+)@(\d+)\/(\d+)/.exec(sensors[0]);
-  const fps = interval ? Number(interval[4]) / Number(interval[3]) : NaN;
-  if (!Number.isInteger(fps) || fps < 1 || fps > 60) {
-    return reject("the CSI sensor did not report a supported integer frame rate");
+  const measuredFps = interval ? Number(interval[4]) / Number(interval[3]) : NaN;
+  // Sensor timing is reported as a rational interval, whose clock granularity can
+  // produce rates such as 29.97 or 29.9856 for the nominal 30 fps configuration.
+  const fps = Math.round(measuredFps);
+  if (!Number.isFinite(measuredFps) || fps < 1 || fps > 60 ||
+      Math.abs(measuredFps - fps) / fps > 0.001) {
+    return reject("the CSI sensor did not report a supported nominal frame rate");
   }
   const format = await runner(["v4l2-ctl", "-d", node, "--get-fmt-video"]);
   const size = /Width\/Height\s*:\s*(\d+)\/(\d+)/.exec(format.stdout);
