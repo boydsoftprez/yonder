@@ -36,7 +36,9 @@ jobs:
           cache: npm
       - run: npm ci
       - run: npm run lint
-      - run: npm test
+      # Several jobs share each host. Bound test workers so parallel runs
+      # cannot saturate it with one worker per advertised CPU.
+      - run: npm run test --workspaces --if-present -- --maxWorkers=4 --minWorkers=1
       # The installer builds the daemon on the board. A compile error that only
       # shows up there is found after the flash, not before it.
       - run: npm run build
@@ -234,7 +236,7 @@ jobs:
       # The workspace root's install resolves every package; only yonder-core
       # is then exercised.
       - run: npm ci
-      - run: npx vitest run --root packages/yonder-core
+      - run: npx vitest run --root packages/yonder-core --maxWorkers=4 --minWorkers=1
 
   # mavlink-router, built for the architecture a board actually runs.
   #
