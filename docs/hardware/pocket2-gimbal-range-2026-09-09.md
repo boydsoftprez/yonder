@@ -49,3 +49,38 @@ Tests cover normal versus probe flags, rate/diagonal refusal, bounded duration,
 queued-write cancellation, native limits, owner/console isolation, and stale raw
 feedback. Hardware range-bit comparison is the next step; the normal-rate
 baseline alone does not establish a production range fix.
+
+## Range-bit comparison and current recovery point
+
+The private probe was installed with the original configuration, USB helpers,
+video pipeline and other service processes preserved. The planned core restart
+used 45.06 seconds of USB absence and restored the camera to a stable run.
+All 3680 core tests and the core build passed before installation.
+
+At the same negative pan stopping point (reported yaw -160.7, pitch 130.2,
+mode 0), standard `0x80` produced 0.0012 degrees of rotation, and the bounded
+`0x84` comparison produced 0.0105 degrees. Both sent ten requests without a
+reported refusal, fault or limit. Neither produced meaningful additional travel.
+The range flag therefore is not established as a solution and remains absent
+from ordinary controls.
+
+A subsequent native mode change to mode 1 was accepted but raised status bit 1.
+Movement testing stopped. The flag persisted after settling, at approximately
+pitch 132, roll 4, yaw -159.5. Hands-on power-cycle recovery was requested;
+no reverse, recenter or further mode command was sent while the flag was set.
+Do not repeat mode comparisons at an already-stalled endpoint.
+
+The existing bit labels need renewed investigation. The mobile SDK's
+`DataGimbalGetPushParams` labels status bit 0 pitch, bit 1 roll and bit 2 yaw.
+Earlier local notes labeled bit 1 yaw after observing world-yaw movement, which
+does not establish the physical joint when the handle is reoriented. The current
+guard blocks all nonzero input for these states, so protection remains, but its
+axis interpretation must not be used as proof of native pan travel.
+
+DJI's SDK also documents the speed command in a world-related reference frame.
+The limited sweep may therefore involve a different physical joint than the
+operator intends in the present placement. Next: record the actual handle
+orientation after recovery, compare from a central pose, and establish the
+appropriate native joystick or coordinate conversion using bounded inputs.
+This is a working hypothesis, not a completed full-range fix or a reason to
+remove the native safeguards.
