@@ -186,6 +186,28 @@ the capture and was checked against `YonderAim.vue` instead.**
 | L-41 | A caution line for an advertised-but-dead axis: `Listed ±180° in 1° steps. Fifteen values sent, every one acknowledged, the frame never moved.` | A `reason` slot exists (`effectiveReason`); this sentence is a property of the report, not the component | present (mechanism) | Unverifiable — no fixture produces it |
 | L-42 | *(Not in the blueprint)* A `● READY` annunciator inside the Aim panel | Present in the capture | drifted | Nothing in the blueprint draws it |
 
+#### Pocket 2 Aim update — native position and six slots
+
+The operator requested compact controls, full usable travel and six saved positions
+(R-CAM-11/R-CAM-23). The current workflow fixture now supplies an active HG211 Aim
+panel, so this surface is no longer verified only against an aim-less camera.
+Day desktop and Night 390-pixel layouts were inspected with production components.
+No real camera image is part of the fixture or evidence.
+
+- The position heading identifies the handle-relative reference. Native pan/tilt
+  values replace misleading fixed world-angle ranges for HG211 (L-33–L-35).
+- Mode help below the selector explains FPV native travel versus level-maintaining
+  behavior. Recenter states its Follow-mode change (L-38–L-40).
+- Six slots sit below mode help in two columns. Each offers Save current position
+  or Recall, with a separate named edit action for Rename, Replace and Clear.
+  Long angle readouts wrap inside the slot. A recalled slot highlights and exposes
+  Stop movement; local status remains inside Aim rather than over the picture.
+- Save/Recall use the live native reference. Unavailable feedback or a different
+  mode leaves the explanation visible and movement disabled. Offline rename/clear
+  remain available when saved metadata is present.
+
+This update does not reclassify unrelated historical manifest rows as complete.
+
 ### 1.6 The Capture column
 
 | # | The blueprint shows | Today | Class | Note |

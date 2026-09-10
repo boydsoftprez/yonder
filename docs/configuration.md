@@ -309,18 +309,32 @@ The console's output resolution, frame rate, bitrate and independent preview set
 configure Yonder's encodes. They do not claim to change the camera's fixed USB format.
 The packaged pipeline host and `avdec_h264` decoder are required for accessory video.
 
-`accessory_mount` is optional and absent or `null` by default, which inhibits motion.
-A measured profile contains `mount`, `envelopes`, `signs`, `limitDirections` and `actions`.
-Each envelope names its `mount`, mode (`0` Free, `1` FPV, `2` Follow) and measured
-ordered yaw/pitch/roll bounds in reported degrees. `signs.pan` and `signs.tilt` map public
-positive rates to reported-position direction (`1`, `-1`, or `null` when unknown).
-`limitDirections` may identify the reported direction farther into a lit yaw/pitch stop.
-Discrete action certificates contain `mount`, `fromMode`, `command` (`recentre`, or
-`mode` with its mode number), and complete `start` and `trajectory` yaw/pitch/roll boxes.
-Unmeasured axes and actions remain unavailable. The guard reserves the 500 ms intent
-allowance plus the measured 800 ms device stopping allowance. No gesture, grant or
-deadline is stored in configuration. Apply a measured profile through the normal
-configuration apply/rollback path; there is no motion-learning wizard.
+Ordinary Pocket 2 rate control uses the camera's native clamps and fresh status,
+with a 500 ms operator-intent lease. A lit pitch, roll or yaw limit pauses movement.
+`accessory_mount` remains an optional measured envelope/action profile for the
+legacy discrete-action path; it is not required for ordinary HG211 speed control.
+Recognized HG211 native mode/recenter actions use the independently verified path.
+Recenter also selects Follow mode. An old world-angle envelope must not be treated
+as a native-joint travel limit after changing the handle's orientation.
+
+Aim reports HG211 pan and tilt **relative to the handle**. FPV provides the measured
+native travel with horizontal mounting; level-maintaining modes can reach another
+joint's limit earlier. The six saved positions use that same handle reference in
+FPV. Position values do not wrap at ±180 degrees. Moving the mount changes the view
+associated with a saved handle-relative position.
+
+`gimbal_presets` is optional camera metadata containing `revision` and up to six
+unique `slots`. Each slot stores `slot` (1–6), `name` (1–32 characters),
+`frame: hg211-joints-v1`, `mode: 1`, native `pan`/`tilt` degrees and `savedAt`.
+Use Save current position in Aim: the daemon captures settled feedback rather
+than accepting browser-provided angles. Rename and Clear update the same record.
+Preset-only saves use the configuration engine without rendering network or video
+settings, so they need no restart or Keep confirmation. Concurrent edits are refused.
+
+Recall requires fresh FPV joint feedback and an explicit operator press. It uses
+the current speed setting, capped at 60 degrees/s, and stops on arrival, Stop,
+manual override, lost browser intent, stale data, mode/source changes, device limits
+or stalled progress. It never switches modes or resumes after reconnection.
 
 Pocket exposure, ISO, EV, rational shutter, focus, white balance and native card-format
 controls use the camera's own measured menu and observed state. Photographs and native

@@ -138,3 +138,21 @@ edits are refused rather than overwriting a newer slot. Tests exercise long
 native paths, arrival, cancellation, stale data, faults, concurrent edits and
 configuration isolation. Hardware preset verification is recorded separately
 when completed; the measured native range above does not by itself prove recall.
+
+## Installed validation
+
+Signed source `500297c` was installed on the development Pi with targeted core,
+console middleware and four widget bundles. The 45.06-second USB pause restored
+video automatically; its new run remained stable for more than 30 seconds.
+Configuration and existing secrets were unchanged by activation; media serving
+and telemetry routing kept their process instances. The full suites passed 3704
+core and 949 widget tests, followed by an additional stale-arrival regression
+and the final core build.
+
+The operator then saved two positions through the page while retaining the same
+video run and zero restarts. A separate scripted recall check detected changed
+position before issuing a command and stopped; operator movement and preset use
+were observed instead. Thus persistence and uninterrupted video were verified
+live, while a controlled hardware arrival/Stop accuracy check remains pending.
+The implementation owner is the Pocket 2 camera task. No test overwrites the
+operator's saved slots.
