@@ -607,7 +607,7 @@ export default {
     padding: 8px 6px;
     border: 1px solid var(--yonder-divider, #2b333c);
     border-radius: 0 3px 3px 0;
-    background: var(--yonder-panel, rgba(12, 18, 24, 0.94));
+    background: var(--yonder-pane, #0c1218);
     color: var(--yonder-value, #fff);
     font: inherit;
     font-size: 10.5px;
