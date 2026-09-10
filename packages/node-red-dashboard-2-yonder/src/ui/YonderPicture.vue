@@ -1653,7 +1653,7 @@ export default {
 
 <style scoped>
 .y-pic__aim-help { color:var(--yonder-label); font-size:11px; line-height:1.4; }
-.y-pic__stick-origin { position:absolute; width:144px; height:144px; border:1px solid rgba(255,255,255,.65); border-radius:50%; transform:translate(-50%,-50%); pointer-events:none; box-shadow:0 0 0 1px rgba(0,0,0,.45); background:radial-gradient(circle,rgba(255,255,255,.8) 0 2px,rgba(0,0,0,.25) 3px 7px,transparent 8px); }
+.y-pic__stick-origin { position:absolute; z-index:3; width:144px; height:144px; border:1px solid rgba(255,255,255,.65); border-radius:50%; transform:translate(-50%,-50%); pointer-events:none; box-shadow:0 0 0 1px rgba(0,0,0,.45); background:radial-gradient(circle,rgba(255,255,255,.8) 0 2px,rgba(0,0,0,.25) 3px 7px,transparent 8px); }
 .y-pic__camera { max-width:24ch; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; font-size:13px; }
 .y-pic__controls { display:flex; flex:1 0 100%; align-items:center; justify-content:space-between; gap:8px; flex-wrap:wrap; }
 .y-pic__view-modes { display:flex; align-items:center; gap:4px; font-size:12px; }

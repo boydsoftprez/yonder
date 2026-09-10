@@ -2236,6 +2236,7 @@ it('keeps a captured video drag active outside the frame and releases capture on
   el.dispatchEvent(dragPoint('pointerdown',100,100));el.dispatchEvent(dragPoint('pointermove',172,100));await nextTick();
   const vm=wrapper.vm as any;const gesture=vm.dragGesture;
   expect(gesture).toBeTruthy();expect(wrapper.find('.y-pic__stick-origin').exists()).toBe(true);
+  expect(z(wrapper,'.y-pic__stick-origin')).toBeGreaterThan(z(wrapper,'.y-pic__video'));
   el.dispatchEvent(dragPoint('pointerleave',900,100));expect(vm.dragGesture).toBe(gesture);
   el.dispatchEvent(dragPoint('pointerup',900,100));await nextTick();
   expect(vm.dragGesture).toBeNull();expect(el.releasePointerCapture).toHaveBeenCalled();
