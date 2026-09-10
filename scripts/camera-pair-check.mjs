@@ -15,7 +15,8 @@ export async function prepareCameraPair(page, selected) {
     return images.length === 2 && [...images, picture].every(img => img?.complete && img.naturalWidth === 1280 && img.naturalHeight === 720);
   }, null, {timeout: 45000});
   await page.waitForFunction(() => /^[1-9]/.test(document.querySelector('.y-strip__dl-v')?.textContent.trim() || ''), null, {timeout: 15000});
-  await page.locator('.y-pic__state').waitFor();
+  await page.locator('.y-pic__state .y-ov__cap').filter({hasText: 'STILLS'}).waitFor();
+  await page.locator('.y-pic__state .y-ov__bitrate').waitFor();
   assert.equal(await page.locator('.y-aimpanel').count(), 1, 'one independent Aim panel');
   assert.equal(await page.locator('.y-aim__dial').count(), 1, 'one aim dial, with none in the deck');
   assert.deepEqual((await page.locator('.y-pg__val').allTextContents()).map(s => s.trim()), ['—', '—'], 'unreported positions must not become zero');
@@ -31,6 +32,8 @@ export async function prepareCameraPair(page, selected) {
       const img = document.querySelector('img.y-pic__video');
       return img?.complete && img.naturalWidth === 1280 && img.getAttribute('src') !== old;
     }, previous, {timeout: 45000});
+    await page.locator('.y-pic__state .y-ov__cap').filter({hasText: 'STILLS'}).waitFor();
+    await page.locator('.y-pic__state .y-ov__bitrate').waitFor();
     await page.locator('.y-aimpanel__fact').waitFor();
     assert.equal(await page.locator('.y-aim__dial').count(), 0, 'switching to a camera without aim retires the dial');
     assert.match(await page.locator('.y-strip__thumb.on').innerText(), /Tail camera/);
