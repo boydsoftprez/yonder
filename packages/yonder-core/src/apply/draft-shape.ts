@@ -96,6 +96,7 @@ export const DRAFT_PATHS: Record<string, string> = {
   previewCeiling: "preview.ceiling_kbps",
   previewBitrate: "preview.bitrate_kbps",
   previewRate: "preview.framerate",
+  previewCodec: "preview.codec",
   /**
    * **The three turns, when the board is doing the turning** (R-CTL-05).
    *
@@ -213,6 +214,7 @@ export function deckDraft(staged: Record<string, unknown>): DeckDraft {
       case "previewCeiling": preview.ceiling_kbps = value; break;
       case "previewBitrate": preview.bitrate_kbps = value; break;
       case "previewRate": preview.framerate = value; break;
+      case "previewCodec": preview.codec = value; break;
       case "rotation": controls.rotation = value; break;
       case "horizontalFlip": controls.horizontalFlip = value; break;
       case "verticalFlip": controls.verticalFlip = value; break;
@@ -261,7 +263,8 @@ export function interruption(draft: CameraDraft, applied: CameraDraft): string[]
     (draft.width !== undefined && draft.width !== applied.width)
     || (draft.height !== undefined && draft.height !== applied.height)
     || (draft.framerate !== undefined && draft.framerate !== applied.framerate)
-    || (draft.codec !== undefined && draft.codec !== applied.codec);
+    || (draft.codec !== undefined && draft.codec !== applied.codec)
+    || (draft.preview?.codec !== undefined && draft.preview.codec !== (applied.preview?.codec ?? 'h264'));
   // **A turn the board performs restarts the picture too**, and for the same
   // reason a size change does: it is an element in the launch line, so the
   // line differs, so `PipelineRenderer` respawns. It reached the operator

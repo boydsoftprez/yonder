@@ -895,6 +895,8 @@ export interface DeckCapture {
 
 /** `ui-yonder-deck`'s whole payload — `YonderDeck.vue`'s own documented shape. */
 export interface CameraDeck {
+  /** R-CTL-08: output codecs offered by the probed board encoder. */
+  readonly codecs?: readonly Camera["codec"][];
   readonly run?: { state: string; reason?: string };
   readonly startBlocked?: string | null;
   readonly runtime?: ReturnType<import("./viewers.js").Viewers["runtime"]>;
@@ -1106,7 +1108,7 @@ export function cameraDeck(view: {
   readonly accessory?: ReturnType<import('./accessory/source.js').AccessorySources['snapshot']>;
   readonly camera: Camera;
   readonly capabilities: CameraCapabilities | null;
-  readonly encoder: { readonly element: string; readonly hardware: boolean };
+  readonly encoder: { readonly element: string; readonly hardware: boolean; readonly h265?: string | null };
   readonly paths: ReachPaths;
   /**
    * What the recorder answered for this camera, and how many captures it is
@@ -1159,8 +1161,9 @@ export function cameraDeck(view: {
       name: camera.name,
       identity: view.identity,
       spec: `${camera.source.toUpperCase()} · ${camera.codec.toUpperCase()} · `
-        + `${camera.width}×${camera.height}p${camera.framerate} · ${view.encoder.element}`,
+        + `${camera.width}×${camera.height}p${camera.framerate} · ${camera.codec === 'h265' ? view.encoder.h265 ?? view.encoder.element : view.encoder.element}`,
     },
+    codecs: view.encoder.h265 ? ['h264', 'h265'] : ['h264'],
     accessory: view.accessory,
     aim: aimPanel(caps, view.accessory, camera.id, 'control', camera.controls),
     // The two the board carries for a camera that has neither of its own.

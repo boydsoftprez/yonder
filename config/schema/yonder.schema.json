@@ -791,6 +791,13 @@
           "preview": {
             "type": "object",
             "properties": {
+              "codec": {
+                "type": "string",
+                "enum": [
+                  "h264",
+                  "h265"
+                ]
+              },
               "mode": {
                 "type": "string",
                 "enum": [

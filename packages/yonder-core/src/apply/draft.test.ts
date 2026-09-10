@@ -6,6 +6,13 @@ import { Camera, ConfigSchema, DEFAULT_CONFIG, PREVIEW_RUNGS, type Config } from
 
 const RUNGS = [...PREVIEW_RUNGS];
 
+it('stages preview codec independently and reports its pipeline restart', () => {
+  const { draft } = deckDraft({ previewCodec: 'h265' });
+  expect(draft).toEqual({ preview: { codec: 'h265' } });
+  expect(interruption(draft, {})).toContain('restarts the picture');
+  expect(interruption(deckDraft({ previewCodec: 'h264' }).draft, {})).toEqual([]);
+});
+
 /** The smallest real document with one camera in it, parsed by the schema so
  * every default is the schema's own rather than a copy of them here. */
 function configWithCamera(): Config {

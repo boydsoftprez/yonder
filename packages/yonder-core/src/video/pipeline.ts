@@ -454,6 +454,9 @@ function color(opts: ComposeOptions): string[] {
 export function compose(opts: ComposeOptions): string[] {
   const { camera, encoder, rtspBase } = opts;
   const main = encoderFor(encoder, camera.codec);
+  const previewCodec = camera.preview.codec ?? 'h264';
+  const previewEncoder = encoderFor(encoder, previewCodec);
+  if (previewEncoder === null) throw new Error('This board has no H.265 preview encoder');
   if (main === null) {
     throw new Error(
       `${camera.id} asks for ${camera.codec} and this board's encoder offers none; refuse() answers this before compose() is reached`,
@@ -503,15 +506,14 @@ export function compose(opts: ComposeOptions): string[] {
   const [scale, rate] = previewCaps({
     size: heldRung(camera.preview), fps: camera.preview.framerate,
   });
-  // The interface's copy is always H.264, whatever the main stream carries:
-  // a browser reaches it over WebRTC (R-VID-20).
+  // Preview codec is independent of the ground-station codec (R-VID-20).
   if (encoderScales(encoder)) {
     push(
       "raw.", LINK, ...QUEUE, LINK,
       "videorate", LINK,
       "capsfilter", `name=${rate.element}`, token(anyMemory(rate)), LINK,
-      ...encode(encoder.element, "preview", camera.preview.bitrate_kbps, previewSize(camera.preview)), LINK,
-      "h264parse", LINK,
+      ...encode(previewEncoder, "preview", camera.preview.bitrate_kbps, previewSize(camera.preview)), LINK,
+      parser(previewCodec), LINK,
       "rtspclientsink", `location=${rtspBase}/${camera.id}-preview`, "latency=0",
     );
   } else {
@@ -521,8 +523,8 @@ export function compose(opts: ComposeOptions): string[] {
       "capsfilter", `name=${scale.element}`, token(scale), LINK,
       "videorate", LINK,
       "capsfilter", `name=${rate.element}`, token(rate), LINK,
-      ...encode(encoder.element, "preview", camera.preview.bitrate_kbps, null), LINK,
-      "h264parse", LINK,
+      ...encode(previewEncoder, "preview", camera.preview.bitrate_kbps, null), LINK,
+      parser(previewCodec), LINK,
       "rtspclientsink", `location=${rtspBase}/${camera.id}-preview`, "latency=0",
     );
   }
@@ -698,6 +700,9 @@ export function refuse(opts: ComposeOptions): string | null {
 
   if (encoderFor(encoder, camera.codec) === null) {
     return `this board has no H.265 encoder — its encoder is ${encoder.detail}; set codec to h264, or run this camera on a board that encodes H.265 (R-CAM-08)`;
+  }
+  if (encoderFor(encoder, camera.preview.codec ?? 'h264') === null) {
+    return 'This board has no H.265 preview encoder; select H.264 for preview';
   }
 
   if (camera.source === 'accessory') {

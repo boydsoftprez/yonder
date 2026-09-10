@@ -954,6 +954,16 @@ describe("cameraDeck", () => {
     expect(deck.applied.capture).toEqual(deck.policy.capture);
   });
 
+  it("offers H.265 only when the board encoder provides it and labels the selected encoder", () => {
+    const common = { camera: camera(), capabilities: null, encoder, paths };
+    expect(cameraDeck(common).codecs).toEqual(['h264']);
+    const capable = { ...encoder, h265: 'mpph265enc' };
+    const deck = cameraDeck({ ...common, camera: camera({ codec: 'h265' }), encoder: capable });
+    expect(deck.codecs).toEqual(['h264', 'h265']);
+    expect(deck.applied.capture.codec).toBe('h265');
+    expect(deck.camera.spec).toContain('mpph265enc');
+  });
+
   /**
    * The values, not a restatement of the schema's defaults — a mutant that
    * wrote `1280`/`720`/`30` in this function would pass the test above and

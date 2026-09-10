@@ -400,6 +400,7 @@ export type PreviewRung = (typeof PREVIEW_RUNGS)[number];
  * alike rather than three copies of the same bound that could drift apart.
  */
 const PreviewShape = z.object({
+  codec: z.enum(["h264", "h265"]).optional(),
   mode: z.enum(["adaptive", "fixed"]).default("adaptive"),
   size: z.enum(["auto", ...PREVIEW_RUNGS]).default("auto"),
   ladder_top: z.enum(PREVIEW_RUNGS).default("1280x720"),

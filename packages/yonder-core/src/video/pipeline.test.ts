@@ -86,6 +86,14 @@ describe('accessory input', () => {
 });
 
 describe("compose", () => {
+  it("encodes an independently selected H.265 preview and preserves the main codec", () => {
+    const selected = { ...CAMERA, preview: { ...CAMERA.preview, codec: 'h265' as const } };
+    const line = compose({ ...mppOpts, camera: selected });
+    expect(line[line.indexOf('name=enc-stream') - 1]).toBe('mpph264enc');
+    expect(line[line.indexOf('name=enc-preview') - 1]).toBe('mpph265enc');
+    expect(line.slice(line.indexOf('name=enc-preview'))).toContain('h265parse');
+    expect(refuse({ ...opts, camera: selected })).toContain('no H.265 preview encoder');
+  });
   it("feeds CSI NV12 frames directly to both hardware encoders", () => {
     const line = compose({ ...mppOpts, camera: { ...CAMERA, source: "csi" } });
     expect(line).toContain("video/x-raw,format=NV12,width=1280,height=720,framerate=30/1");

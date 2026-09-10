@@ -118,7 +118,7 @@ const OUTPUT_PATH = { rtp: 'outputRtp', rtsp: 'outputRtsp', srt: 'outputSrt' }
 const DRAFT_LABELS = {
   name:'Camera name', width:'Output width', height:'Output height', framerate:'Output frame rate', codec:'Output codec',
   streamMode:'Stream bitrate mode', streamBitrate:'Stream bitrate', streamFloor:'Stream minimum bitrate', streamCeiling:'Stream maximum bitrate',
-  previewMode:'Preview bitrate mode', previewSize:'Preview size', previewLadderBottom:'Smallest preview size', previewLadderTop:'Largest preview size',
+  previewMode:'Preview bitrate mode', previewCodec:'Preview codec', previewSize:'Preview size', previewLadderBottom:'Smallest preview size', previewLadderTop:'Largest preview size',
   previewFloor:'Preview minimum bitrate', previewCeiling:'Preview maximum bitrate', previewBitrate:'Preview bitrate', previewRate:'Preview frame rate',
   rotation:'Rotation', horizontalFlip:'Mirror', verticalFlip:'Flip', outputRtp:'RTP output', outputRtsp:'RTSP output', outputSrt:'SRT output',
   imageBrightness:'Stream brightness', imageContrast:'Stream contrast', imageSaturation:'Stream saturation', imageHue:'Stream hue',
@@ -248,6 +248,7 @@ export function appliedForDraft (payload) {
     flat.previewCeiling = preview.ceiling_kbps
     flat.previewBitrate = preview.bitrate_kbps
     flat.previewRate = preview.framerate
+    flat.previewCodec = preview.codec || 'h264'
   }
   if (payload && payload.camera && typeof payload.camera.name === 'string') {
     flat.name = payload.camera.name
@@ -1100,6 +1101,16 @@ export default {
       // Beneath the bitrate bar, which is where spec §7 lists Resolution and
       // where the blueprint draws it — in this column and not in Capture,
       // because it is what leaves for the ground station.
+      const codecs = r.codecs || ['h264']
+      children.push(this.field(YonderPicker, {
+        key: 'codec', label: 'Codec',
+        value: this.draftValue('codec', r.policy?.capture?.codec || 'h264'),
+        options: codecs.map(value => ({ value, label: value === 'h265' ? 'H.265' : 'H.264' })),
+        state: this.signInRequired ? 'gated' : 'present',
+        onChange: value => { if (codecs.includes(value)) this.stage('codec', value) },
+      }))
+      children.push(h('p', { class: 'y-deck__connection-note' },
+        'This codec is for the ground-station stream. Changing codec restarts video.'))
       for (const child of this.buildCaptureShape()) children.push(child)
       return h(YonderColumn, { legend: GROUP_LEGEND.stream, qualifier: 'to the ground station', key: 'stream' }, () => children)
     },
@@ -1217,6 +1228,20 @@ export default {
       const size = this.draftValue('previewSize', policy.size || 'auto')
       const auto = size === 'auto'
       const children = []
+      const hevc = typeof RTCRtpReceiver !== 'undefined' &&
+        RTCRtpReceiver.getCapabilities?.('video')?.codecs?.some(c => c.mimeType.toLowerCase() === 'video/h265')
+      const codecs = (r.codecs || ['h264']).filter(codec => codec !== 'h265' || hevc)
+      const previewCodec = this.draftValue('previewCodec', policy.codec || 'h264')
+      children.push(this.field(YonderPicker, {
+        key: 'previewCodec', label: 'Preview codec', value: previewCodec,
+        currentLabel: previewCodec === 'h265' ? 'H.265' : 'H.264',
+        options: codecs.map(value => ({ value, label: value === 'h265' ? 'H.265' : 'H.264' })),
+        state: this.signInRequired ? 'gated' : 'present',
+        onChange: value => { if (codecs.includes(value)) this.stage('previewCodec', value) },
+      }))
+      children.push(h('p', { class: 'y-deck__connection-note' }, hevc
+        ? 'This browser supports H.265. H.264 is available for compatibility; changing codec restarts video.'
+        : 'This browser does not advertise H.265 for WebRTC. Select H.264 for browser playback.'))
       children.push(this.field(YonderSegmented, {
         key: 'previewMode',
         reason: this.stagedReason('previewMode'),
