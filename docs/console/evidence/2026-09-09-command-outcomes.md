@@ -32,3 +32,20 @@ mission result namespaces, absent/stale/mismatched reasons, accepted versus
 confirmed outcomes, late reason arrival, technical-detail access and no command
 submission from opening results. Production build passed; these are presentation
 changes only. No autopilot request was issued to reproduce the refusal.
+
+## Installed verification
+
+Signed UI commit `2046822`, combined with the Adaptive acceptance documentation
+in `996f72a`, was installed by atomic replacement of the cockpit UMD only.
+Installed SHA-256:
+`d363ba36e3dbfc70996e18f079a3d23fc04bc7c2190730c1cabe9afc21b4451e`.
+The previous bundle is retained under
+`/opt/yonder/backups/command-outcomes-2046822/`.
+
+A separate authenticated Flight tab showed the actual failed arm attempt as
+**Arming failed — Waiting for radio-control input. Aircraft remains disarmed.**
+The PFD result opened Aircraft status, whose latest-first history also showed
+the successful mission upload and Home change. The code was absent from the
+closed disclosure and visible as COMMAND_ACK / command 400 / result 4 after
+opening Technical details. No flight action was pressed; the original draft
+tab was not reloaded. Core PID 62420 and console PID 777 stayed unchanged.
