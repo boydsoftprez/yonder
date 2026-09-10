@@ -374,3 +374,29 @@ describe('intent-bound gimbal dispatcher', () => {
     f.writes[0].reject(new Error('revoked')); expect(await p).toMatchObject({ accepted: false }); f.controller.close();
   });
 });
+
+describe('bounded extended-range bench probe', () => {
+  it('changes only the range bit for a probe and restores normal flags for a fresh ordinary gesture', async () => {
+    const f=fixture();const g=f.controller.issueRangeProbe('alice','probe');if(!g.accepted)throw new Error('issue refused');
+    expect(f.admit(g.grant,3,0)).toMatchObject({accepted:true});
+    expect(Buffer.from(f.writes[0].command.payload!)).toEqual(Buffer.from([30,0,0,0,0,0,0x84]));
+    f.controller.end('alice',g.grant.gesture);f.writes[0].resolve();await settle();f.freshAdvance(100);
+    expect(f.admit(f.issue(),3,0)).toMatchObject({accepted:true});expect(Buffer.from(f.writes[1].command.payload!)[6]).toBe(0x80);f.controller.close();
+  });
+  it.each([[3.1,0],[0,-3.1],[1,1]])('refuses unsafe probe rate %s/%s before writing', (pan,tilt) => {
+    const f=fixture();const g=f.controller.issueRangeProbe('alice','probe');if(!g.accepted)throw new Error('issue refused');
+    expect(f.admit(g.grant,pan,tilt)).toMatchObject({accepted:false,reason:'rate-cap'});expect(f.writes).toHaveLength(0);f.controller.close();
+  });
+  it('expires after two seconds even with continuously renewed credentials',async()=>{
+    const f=fixture();const issued=f.controller.issueRangeProbe('alice','probe');if(!issued.accepted)throw new Error('issue refused');let g=issued.grant;
+    for(let seq=0;seq<20;seq++){
+      const r=f.admit(g,3,0,seq);expect(r.accepted).toBe(true);if(r.accepted&&r.next)g=r.next;
+      for(const w of f.writes) {expect(w.options.deadline).toBeLessThanOrEqual(3000);w.resolve();}await settle();f.freshAdvance(100);
+    }
+    const count=f.writes.length;expect(f.admit(g,3,0,20).accepted).toBe(false);f.freshAdvance(1000);expect(f.writes).toHaveLength(count);f.controller.close();
+  });
+  it('retains native limit admission and cancellation of queued probe writes',()=>{
+    const f=fixture();const g=f.controller.issueRangeProbe('alice','probe');if(!g.accepted)throw new Error('issue refused');f.admit(g.grant,3,0);
+    f.context.attitude!.yawLimit=true;expect(f.writes[0].options.admission!()).toBe(false);expect(f.writes[0].options.signal!.aborted).toBe(true);f.controller.close();
+  });
+});

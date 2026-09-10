@@ -302,3 +302,25 @@ it('revokes outstanding native grants when the applied image direction changes w
   expect(h.device.close).not.toHaveBeenCalled();
   await h.source.close();
 });
+
+it('admits the bounded range probe only for the private bench owner; browser grammar still rejects it',async()=>{
+  const {validAimRequest}=await import('./requests.js');const h=harness();await h.source.discover();h.live();
+  const payload=Buffer.alloc(11);payload[10]=0x80;h.callbacks().onCommand!(decodeDuml(encodeDuml({sender:4,receiver:2,commandSet:4,commandId:5,payload}))!);
+  const request={op:'probe-issue',clientGesture:'bench'};
+  expect(validAimRequest(request)).toBe(false);
+  expect(await h.source.aim(h.camera.device,'browser-owner',request)).toMatchObject({accepted:false});
+  const g=await h.source.aim(h.camera.device,'bench-range-test',request) as any;expect(g.accepted).toBe(true);
+  expect(await h.source.aim(h.camera.device,'bench-range-test',{op:'slew',...g.grant,seq:1,pan:3,tilt:0})).toMatchObject({accepted:true});
+  expect(Buffer.from((h.device.sendCommand.mock.calls[0][0] as any).payload)[6]).toBe(0x84);await h.source.close();
+});
+
+it('keeps raw attitude inspection read-only and withdraws it on stale or disconnected feedback',async()=>{
+  const {validAimRequest}=await import('./requests.js');const h=harness();await h.source.discover();h.live();
+  const payload=Buffer.alloc(11);payload[10]=0x80;h.callbacks().onCommand!(decodeDuml(encodeDuml({sender:4,receiver:2,commandSet:4,commandId:5,payload}))!);
+  const request={op:'probe-state'};expect(validAimRequest(request)).toBe(false);
+  expect(await h.source.aim(h.camera.device,'ordinary-owner',request)).toMatchObject({accepted:false});
+  expect(await h.source.aim(h.camera.device,'bench-range-test',request)).toMatchObject({accepted:true,raw:payload.toString('hex')});
+  h.now.value+=501;expect(await h.source.aim(h.camera.device,'bench-range-test',request)).toMatchObject({raw:null});
+  h.stale();expect(await h.source.aim(h.camera.device,'bench-range-test',request)).toMatchObject({raw:null});
+  expect(h.device.sendCommand).not.toHaveBeenCalled();await h.source.close();
+});

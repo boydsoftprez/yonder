@@ -43,6 +43,7 @@ export class GimbalController {
   private rateEpoch?: Readonly<{ gesture: string; owner: string; generation: number; mode: number }>;
   private generation = 0;
   private notice: string | null = null;
+  private rangeProbe?: { owner: string; gesture: string; until: number };
   get motionNotice(): string | null { return this.notice; }
 
   constructor(private readonly options: GimbalControllerOptions) {
@@ -53,7 +54,15 @@ export class GimbalController {
     if (!this.available || this.closed) return { accepted: false, reason: 'unavailable' };
     if (this.discrete) return { accepted: false, reason: 'busy' };
     const reply = this.intent.issue(owner, clientGesture);
-    if (reply.accepted) { this.rateEpoch = undefined; this.progress.reset(); this.setNotice(null); }
+    if (reply.accepted) { this.rangeProbe = undefined; this.rateEpoch = undefined; this.progress.reset(); this.setNotice(null); }
+    return reply;
+  }
+  /** Unix-socket bench operation, not a saved policy or a browser control.
+   * DJI OSDK bit 2 is under investigation on HG211. A probe is single-axis,
+   * <=3 degrees/s and <=2 seconds; ordinary issues always retain flags 0x80. */
+  issueRangeProbe(owner: string, clientGesture: string): IntentIssued | MotionRefusal {
+    const reply = this.issue(owner, clientGesture);
+    if (reply.accepted) this.rangeProbe = { owner, gesture: reply.grant.gesture, until: this.options.clock.now() + 2000 };
     return reply;
   }
   admit(owner: string, request: unknown): IntentAdmitted | MotionRefusal {
@@ -63,6 +72,9 @@ export class GimbalController {
     if (!result.accepted) return result;
     const live = this.intent.live();
     if (!live) { this.clearTimer(); return result; }
+    if (this.rangeProbe && (Math.hypot(live.rate.pan, live.rate.tilt) > 3 || (live.rate.pan !== 0 && live.rate.tilt !== 0))) {
+      this.reset(); return { accepted: false, reason: 'rate-cap' };
+    }
     const effective = quantizedRate(live.rate);
     if (!effective.pan && !effective.tilt) { this.reset(); return { accepted: true, next: null }; }
     const verdict = this.check({ kind: 'rate', ...live.rate });
@@ -76,9 +88,13 @@ export class GimbalController {
     if (!this.intent.live()) return { accepted: false, reason: 'revoked' };
     return result;
   }
-  end(owner: string, gesture: string): void { this.intent.end(owner, gesture); }
+  end(owner: string, gesture: string): void {
+    this.intent.end(owner, gesture);
+    if (this.rangeProbe?.owner === owner && this.rangeProbe.gesture === gesture) this.rangeProbe = undefined;
+  }
   /** Call on every attitude/configuration update, including a malformed attitude push. */
   refresh(): void {
+    if (this.rangeProbe && this.options.clock.now() >= this.rangeProbe.until) { this.reset(); return; }
     if (this.discrete) this.discreteAdmission(this.discrete);
     const live = this.intent.live();
     if (live) this.rateAdmission(live);
@@ -92,6 +108,7 @@ export class GimbalController {
   }
   reset(): void {
     this.clearTimer(); this.intent.reset();
+    this.rangeProbe = undefined;
     this.rateEpoch = undefined; this.progress.reset(); this.generation++;
     this.discrete?.controller.abort(); this.discrete = undefined;
   }
@@ -156,6 +173,8 @@ export class GimbalController {
   }
   private rateAdmission(live: LiveIntent): boolean {
     if (!this.available || this.closed || !live.isValid() || this.intent.live() !== live) return false;
+    if (this.rangeProbe && (this.rangeProbe.owner !== live.owner || this.rangeProbe.gesture !== live.gesture
+      || this.options.clock.now() >= this.rangeProbe.until)) { this.reset(); return false; }
     if (!this.check({ kind: 'rate', ...live.rate }).allowed) { this.intent.reset(); this.clearTimer(); return false; }
     const epoch = this.rateEpoch, context = this.options.context();
     if (!epoch || epoch.generation !== this.generation) return false;
@@ -199,8 +218,9 @@ export class GimbalController {
     const epoch = this.rateEpoch;
     let budgetRefused = false;
     try {
-      await this.options.write(this.wire({ kind: 'rate', ...live.rate }), {
-        signal: live.signal, deadline: live.expiresAt, admission: () => {
+      const probe = this.rangeProbe;
+      await this.options.write(this.wire({ kind: 'rate', ...live.rate }, probe ? 0x84 : 0x80), {
+        signal: live.signal, deadline: Math.min(live.expiresAt, probe?.until ?? Infinity), admission: () => {
           // Recheck after any writer queue delay. Keep this local flag apart
           // from arbitrary endpoint errors, which still disconnect below.
           if (!live.isValid() || this.intent.live() !== live) return false;
@@ -225,7 +245,7 @@ export class GimbalController {
     }
   }
   private hasDispatchBudget(live: LiveIntent): boolean {
-    return live.expiresAt - this.options.clock.now() >= Math.min(MIN_RATE_DISPATCH_MS, this.leaseMs);
+    return Math.min(live.expiresAt, this.rangeProbe?.until ?? Infinity) - this.options.clock.now() >= Math.min(MIN_RATE_DISPATCH_MS, this.leaseMs);
   }
   private watchAction(action: NonNullable<GimbalController['discrete']>): void {
     this.clearTimer();
@@ -241,7 +261,7 @@ export class GimbalController {
     if (this.timer !== undefined) this.options.clock.clearTimer(this.timer);
     this.timer = undefined;
   }
-  private wire(command: MotionCommand): Omit<DumlCommand, 'sequence'> {
+  private wire(command: MotionCommand, rateFlags: 0x80 | 0x84 = 0x80): Omit<DumlCommand, 'sequence'> {
     const common = { receiver: 4, commandSet: 4, ack: 0 };
     if (command.kind === 'recentre') return { ...common, commandId: 0x4c, payload: Buffer.from([2, 1]) };
     if (command.kind === 'mode') return { ...common, commandId: 0x44, payload: Buffer.from([command.mode]) };
@@ -249,7 +269,7 @@ export class GimbalController {
     // Truncate toward zero so quantization cannot exceed the guarded speed.
     payload.writeInt16LE(Math.trunc(command.pan * 10), 0);
     payload.writeInt16LE(Math.trunc(command.tilt * 10), 4);
-    payload[6] = 0x80;
+    payload[6] = rateFlags;
     return { ...common, commandId: 0x0c, payload };
   }
 }

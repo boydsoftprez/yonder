@@ -46,7 +46,7 @@ const HG211_NATIVE_ACTIONS = Object.freeze([
 ]);
 type Owned = { device: ReturnType<NonNullable<AccessorySourceOptions['deviceFactory']>>; media: AccessoryMedia;
   camera: CameraController; gimbal: GimbalController; attitude: GimbalAttitude | null; generation: number | null; error: string | null;
-  streamGeneration: number; admitted?: { owner: string; gesture: string; pan: number; tilt: number; until: number } };
+  streamGeneration: number; rawAttitude?: string; admitted?: { owner: string; gesture: string; pan: number; tilt: number; until: number } };
 
 /** R-CAM-15: exactly one asynchronous USB owner shared by all daemon consumers. */
 export class AccessorySources {
@@ -112,7 +112,9 @@ export class AccessorySources {
       onCommand: frame => {
         source.camera.update(frame);
         if (frame.commandSet === 4 && frame.commandId === 5) {
-          source.attitude = decodeGimbalAttitude(frame, this.clock); source.gimbal.refresh();
+          source.attitude = decodeGimbalAttitude(frame, this.clock);
+          source.rawAttitude = source.attitude ? Buffer.from(frame.payload).toString('hex') : undefined;
+          source.gimbal.refresh();
         }
       },
       onVideo: unit => {
@@ -134,11 +136,11 @@ export class AccessorySources {
   private status(source: Owned, status: Pocket2Status): void {
     if (status.state === 'live') {
       if (source.generation !== status.generation) {
-        source.admitted = undefined; source.attitude = null; source.gimbal.disconnect(); source.media.reset();
+        source.admitted = undefined; source.attitude = null; source.rawAttitude = undefined; source.gimbal.disconnect(); source.media.reset();
         source.generation = status.generation; source.camera.connect(); source.gimbal.connect();
       }
     } else {
-      source.generation = null; source.admitted = undefined; source.attitude = null; source.camera.disconnect(); source.gimbal.disconnect(); source.media.reset();
+      source.generation = null; source.admitted = undefined; source.attitude = null; source.rawAttitude = undefined; source.camera.disconnect(); source.gimbal.disconnect(); source.media.reset();
     }
   }
   private context(source: Owned): GuardContext {
@@ -194,6 +196,23 @@ export class AccessorySources {
   }
   async aim(identity: string, owner: string, body: unknown): Promise<unknown> {
     const source = this.owned.get(identity); if (!source) return { accepted: false, reason: 'unavailable' };
+    // Only the privileged Unix API can name this owner/op. Console middleware
+    // rejects probe-issue via validAimRequest before deriving its session owner.
+    const probe = body as { op?: unknown; clientGesture?: unknown } | null;
+    if (probe?.op === 'probe-state' && /^bench-range-[a-z0-9-]{1,64}$/.test(owner) && Object.keys(probe).length === 1) {
+      const snapshot = this.snapshot(identity);
+      return { accepted: true, attitude: snapshot?.attitude, raw: snapshot?.attitude ? source.rawAttitude ?? null : null,
+        generation: snapshot?.generation, notice: source.gimbal.motionNotice, inhibition: snapshot?.inhibition };
+    }
+    if (probe?.op === 'probe-issue' && /^bench-range-[a-z0-9-]{1,64}$/.test(owner)
+      && Object.keys(probe).length === 2 && typeof probe.clientGesture === 'string'
+      && /^[A-Za-z0-9_.:-]{1,128}$/.test(probe.clientGesture)) {
+      const status = source.device.snapshot();
+      if (status.state !== 'live' || status.manufacturer !== 'DJI' || status.model !== 'HG211') return { accepted: false, reason: 'unavailable' };
+      const reply = source.gimbal.issueRangeProbe(owner, probe.clientGesture);
+      if (reply.accepted) source.admitted = undefined;
+      return reply;
+    }
     if (!validAimRequest(body)) return { accepted: false, reason: 'malformed' };
     const b = body as Record<string, unknown>;
     switch (b.op) {
