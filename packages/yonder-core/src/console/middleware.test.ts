@@ -1177,6 +1177,15 @@ describe('private accessory aim proxy', () => {
     expect((await call('POST', '/video/cam1/aim', { cookie: f.cookie, headers: f.headers, raw: '{', type: 'application/json' })).status).toBe(400);
     expect(f.transport.calls).toEqual([]);
   });
+  it('protects preset saves with the same session/origin boundary and never accepts a browser-supplied position',async()=>{
+    const f=await fixture(),request={op:'save',slot:1,name:'Front',revision:0};
+    expect((await call('POST','/video/cam1/presets',{cookie:f.cookie,headers:f.headers,json:request})).status).toBe(200);
+    expect(f.transport.calls[0]).toMatchObject({path:'/cameras/cam1/presets',body:{owner:viewerFor(f.token),request}});
+    expect((await call('POST','/video/cam1/presets',{cookie:f.cookie,headers:{...f.headers,origin:'http://attacker.invalid'},json:request})).status).toBe(403);
+    expect((await call('POST','/video/cam1/presets',{cookie:f.cookie,headers:f.headers,json:{...request,pan:100,tilt:100}})).status).toBe(400);
+    expect((await call('POST','/video/cam1/presets',{headers:f.headers,json:request})).status).toBe(401);
+    expect(f.transport.calls).toHaveLength(1);
+  });
   it.each([[2, -1], [60, 0], [0, -120], [72, 96]])('forwards the exact one-use grant and deadline at %s/%s degrees per second', async (pan, tilt) => {
     const f = await fixture();
     const request = { op: 'slew', gesture: 'g', credential: 'c', deadline: 12, seq: 2, pan, tilt };

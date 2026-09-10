@@ -14,6 +14,7 @@ import { cockpitProxy } from "./cockpit.js";
 import { maintenanceProxy } from "./maintenance.js";
 import { cameraFor } from "../video/media-path.js";
 import { validAimRequest } from '../video/accessory/requests.js';
+import { validPresetRequest } from '../video/accessory/presets.js';
 
 /**
  * The gate on the front of the console.
@@ -580,7 +581,7 @@ export function consoleMiddleware(deps: ConsoleMiddlewareDeps): Middleware {
           .catch(() => sendJson(res, 503, { error: 'Connection details unavailable' }));
         return;
       }
-      const aim = /^\/video\/([^/]+)\/aim$/.exec(path);
+      const aim = /^\/video\/([^/]+)\/(aim|presets)$/.exec(path);
       if (aim) {
         const token = sessionOf(req, deps.sessions);
         if (!token) { sendJson(res, 401, { error: 'Log in to aim this camera' }); return; }
@@ -598,10 +599,10 @@ export function consoleMiddleware(deps: ConsoleMiddlewareDeps): Middleware {
           if (submission.tooLarge) { tooLarge(res); return; }
           let request: unknown;
           try { request = JSON.parse(submission.text); } catch { sendJson(res, 400, { error: 'Malformed aim JSON' }); return; }
-          if (!validAimRequest(request)) { sendJson(res, 400, { error: 'Malformed aim request' }); return; }
+          if (!(aim[2]==='presets'?validPresetRequest(request):validAimRequest(request))) { sendJson(res, 400, { error: 'Malformed camera control request' }); return; }
           // Resolve authentication again after reading a body: logout invalidates renewal too.
           if (sessionOf(req, deps.sessions) !== token) { sendJson(res, 401, { error: 'Aim session expired' }); return; }
-          const reply = await deps.client.request({ method: 'POST', path: `/cameras/${aim[1]}/aim`, body: { owner: viewerFor(token), request } });
+          const reply = await deps.client.request({ method: 'POST', path: `/cameras/${aim[1]}/${aim[2]}`, body: { owner: viewerFor(token), request } });
           sendJson(res, reply.ok ? reply.status : 503, reply.ok ? reply.body : { error: 'Camera service unavailable' });
         })().catch(() => sendJson(res, 503, { error: 'Camera aim request failed' }));
         return;

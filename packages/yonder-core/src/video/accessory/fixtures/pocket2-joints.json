@@ -1,0 +1,77 @@
+{
+  "note": "HG211 controlled single-axis captures; joints persist after Stop. Pan byte8 follows DJI SDK yaw-with-aircraft field. Tilt20/roll22 separated using horizontal/upright controlled motion.",
+  "cases": [
+    {
+      "name": "horizontal-fpv-pan-before",
+      "payloadHex": "8e037dff9e044200cbf88001b1660900000000000000fcffa4b4da3e254426bf8520973ec1350e3f5a7cb33f00",
+      "joints": {
+        "pan": -184.5,
+        "tilt": 0,
+        "roll": -0.4
+      }
+    },
+    {
+      "name": "horizontal-fpv-pan-after",
+      "payloadHex": "940325fea40442006ef7800179e40900000000000000fafff6c2123fb83d35bf6378bb3d93e8cd3ea592ab3f00",
+      "joints": {
+        "pan": -219.4,
+        "tilt": 0,
+        "roll": -0.6
+      }
+    },
+    {
+      "name": "horizontal-fpv-tilt-before",
+      "payloadHex": "a8ff0500980442005ff9a0019efc15000000000019fcfcff1a1e043f59178d3d3aa511bda65f5a3f7d42ad3f00",
+      "joints": {
+        "pan": -169.7,
+        "tilt": -99.9,
+        "roll": -0.4
+      }
+    },
+    {
+      "name": "horizontal-fpv-tilt-after",
+      "payloadHex": "d5ff0600990442005ef9a0012a0716000000000048fcfdff925d043f592c103d37e677bc8ce75a3f0053a63f00",
+      "joints": {
+        "pan": -169.8,
+        "tilt": -95.2,
+        "roll": -0.3
+      }
+    },
+    {
+      "name": "horizontal-up-yaw-positive-1-0",
+      "payloadHex": "81030000c5fb8200f5f8a0014e373a00a9d50000000000002332d4beb28812bff763d3be1b17133f7a30a73f00",
+      "joints": {
+        "pan": -180.3,
+        "tilt": 0,
+        "roll": 0
+      }
+    },
+    {
+      "name": "horizontal-up-yaw-positive-1-1",
+      "payloadHex": "81030000f5fb8200f5f8a0012a3d3a008bd700000000d1ff875ce0be4bf70dbfe283dfbe07810e3f9178af3f00",
+      "joints": {
+        "pan": -180.3,
+        "tilt": 0,
+        "roll": -4.7
+      }
+    },
+    {
+      "name": "upright-yaw-positive-1-0",
+      "payloadHex": "fc060000f7f98200f9f80001dc933d00a4c300000100fbff00b10dbb01b079bf13c661beba691c3c8dccab3f00",
+      "joints": {
+        "pan": -179.9,
+        "tilt": 0.1,
+        "roll": -0.5
+      }
+    },
+    {
+      "name": "upright-yaw-positive-1-1",
+      "payloadHex": "fc06000027fa8200c9f80001b8993d0086c500000100faff375f27bba41877bf77c385beedbe1a3ce15caa3f00",
+      "joints": {
+        "pan": -184.7,
+        "tilt": 0.1,
+        "roll": -0.6
+      }
+    }
+  ]
+}

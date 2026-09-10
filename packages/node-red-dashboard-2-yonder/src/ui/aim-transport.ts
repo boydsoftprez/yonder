@@ -8,7 +8,10 @@ function withinRate(target: AimTarget, rate: { pan: number; tilt: number }): boo
     && Math.hypot(rate.pan, rate.tilt) <= Math.min(limit, 120);
 }
 type Grant = { gesture: string; credential: string; deadline: number };
-type Held = { client: string; pan: number; tilt: number; target: string; generation?: number; imageDirection: string; grant?: Grant; seq: number };
+type Held = { client: string; pan: number; tilt: number; target: string; generation?: number; imageDirection: string; grant?: Grant; seq: number;
+  preset?: {slot:number;revision:number;maxRate:number} };
+export type RecallState = {slot:number;state:'moving'|'reached';name?:string}|null;
+let recallSerial=0;
 /** Current held gesture only. No retry, backlog, wall-clock deadline, or reconnect resume. */
 export class AimTransport {
   private held?: Held;
@@ -22,7 +25,8 @@ export class AimTransport {
   private readonly blur = () => this.stop();
   constructor(private readonly target: () => AimTarget | null | undefined,
     private readonly changed: (rate: { pan: number; tilt: number }, reason: string | null) => void = () => {},
-    private readonly fetcher: typeof fetch = (...args) => fetch(...args)) {
+    private readonly fetcher: typeof fetch = (...args) => fetch(...args),
+    private readonly recallChanged: (state:RecallState)=>void = () => {}) {
     if (typeof window !== 'undefined') { window.addEventListener('blur', this.blur); window.addEventListener('offline', this.blur); document.addEventListener('visibilitychange', this.lost); }
   }
   update(rate: { gesture: string; pan: number; tilt: number }): void {
@@ -36,6 +40,15 @@ export class AimTransport {
       this.held = { client: rate.gesture, pan: mapped.pan, tilt: mapped.tilt, target: target.url, generation: target.generation, imageDirection: target.imageDirection ?? 'identity', seq: 0 };
     } else { this.held.pan = mapped.pan; this.held.tilt = mapped.tilt; }
     if (!this.pending && !this.timer) void this.tick();
+  }
+  recall(slot:number,revision:number,maxRate:number):void {
+    this.stop();const target=this.target();
+    if(this.disposed || !target?.url || target.inhibited || !Number.isInteger(slot) || slot<1 || slot>6
+      || !Number.isSafeInteger(revision) || revision<0 || !Number.isFinite(maxRate) || maxRate<1)return;
+    this.held={client:`preset-${Date.now().toString(36)}-${++recallSerial}`,pan:0,tilt:0,target:target.url,
+      generation:target.generation,imageDirection:target.imageDirection??'identity',seq:0,preset:{slot,revision,maxRate:Math.min(60,maxRate)}};
+    this.recallChanged({slot,state:'moving'});
+    if(!this.pending && !this.timer)void this.tick();
   }
   refresh(): void { if (this.held && !this.current(this.held)) this.stop(); }
   private current(held: Held): boolean {
@@ -62,7 +75,7 @@ export class AimTransport {
     this.pending = true;
     try {
       if (!held.grant) {
-        const reply = await this.request(held.target, { op: 'issue', clientGesture: held.client });
+        const reply = await this.request(held.target, held.preset ? {op:'issue-recall',clientGesture:held.client,...held.preset} : { op: 'issue', clientGesture: held.client });
         if (!this.current(held)) { if (reply.grant?.gesture) this.endRemote(held.target, reply.grant.gesture); return; }
         held.grant = reply.grant;
         if (!held.grant) throw new Error('Aim grant missing');
@@ -71,11 +84,13 @@ export class AimTransport {
         // Sample after the preceding response, never retain an old queued rate.
         const sent = { pan: held.pan, tilt: held.tilt };
         this.nextRequestAt = performance.now() + 100;
-        const reply = await this.request(held.target, { op: 'slew', ...held.grant, seq: ++held.seq, ...sent });
+        const reply = await this.request(held.target, held.preset ? {op:'recall',...held.grant,seq:++held.seq} : { op: 'slew', ...held.grant, seq: ++held.seq, ...sent });
         if (!this.current(held)) return;
+        if(held.preset && reply.arrived){this.stop();this.recallChanged({slot:held.preset.slot,state:'reached',name:reply.name});return;}
+        if(held.preset)this.recallChanged({slot:held.preset.slot,state:'moving',name:reply.name});
         held.grant = reply.next;
         if (!held.grant) { this.stop(); return; }
-        this.changed(sent, null);
+        this.changed(held.preset && reply.rate ? reply.rate : sent, null);
       }
     } catch (error) {
       if (this.held === held) { this.stop(); this.changed({ pan: 0, tilt: 0 }, error instanceof Error ? error.message : 'Aim transport failed'); }
@@ -101,6 +116,7 @@ export class AimTransport {
     const held = this.held; this.held = undefined;
     if (held) { this.blocked = held.client; if (send && held.grant) this.endRemote(held.target, held.grant.gesture); }
     this.changed({ pan: 0, tilt: 0 }, null);
+    this.recallChanged(null);
   }
   async action(command: { op: 'recentre' } | { op: 'mode'; mode: number }): Promise<void> {
     if (this.pending) { this.stop(); this.changed({ pan: 0, tilt: 0 }, 'Aim request still pending; press again after it settles'); return; }

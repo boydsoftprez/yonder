@@ -185,13 +185,13 @@ describe("camera leaves", () => {
   it("forces a decision when the camera schema grows a field", () => {
     expect([...CAMERA_LEAVES].sort()).toEqual([
       "accessory_mount", "autostart", "bitrate_kbps", "codec", "controls", "device", "enabled",
-      "framerate", "height", "id", "image", "name", "outputs", "preview", "source", "stream", "width",
+      "framerate", "gimbal_presets", "height", "id", "image", "name", "outputs", "preview", "source", "stream", "width",
     ]);
     // Mount geometry is optional, absent for existing USB configurations, and
     // load-bearing: changing a physical safety certificate must never be exempted.
-    expect(Object.keys(withCamera().cameras[0]).sort()).toEqual([...CAMERA_LEAVES].filter(key => key !== 'accessory_mount').sort());
+    expect(Object.keys(withCamera().cameras[0]).sort()).toEqual([...CAMERA_LEAVES].filter(key => !['accessory_mount','gimbal_presets'].includes(key)).sort());
     expect([...CAMERA_EXEMPT_LEAVES].sort()).toEqual([
-      "codec", "controls", "framerate", "height", "image", "width",
+      "codec", "controls", "framerate", "gimbal_presets", "height", "image", "width",
     ]);
   });
 
@@ -210,7 +210,7 @@ describe("camera leaves", () => {
  * schema, not from a copy of `CAMERA_LEAVES` that could itself go stale.
  */
 describe("camera leaf enumeration", () => {
-  const realLeaves = Object.keys(withCamera().cameras[0]).sort();
+  const realLeaves = Object.keys(withCamera({gimbal_presets:{revision:0,slots:[]}}).cameras[0]).sort();
 
   /**
    * The leaves this file affirmatively calls load-bearing — not "whatever

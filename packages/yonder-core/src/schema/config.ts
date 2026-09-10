@@ -625,12 +625,26 @@ export const AccessoryMount = z.object({
   }).strict()).max(32),
 }).strict();
 
+export const GimbalPreset = z.object({
+  slot: z.number().int().min(1).max(6),
+  name: z.string().trim().min(1).max(32).regex(/^[^\x00-\x1f\x7f]+$/),
+  frame: z.literal('hg211-joints-v1'),
+  mode: z.literal(1),
+  pan: z.number().min(-250).max(90),
+  tilt: z.number().min(-180).max(70),
+  savedAt: z.number().int().nonnegative(),
+}).strict();
+export type GimbalPreset = z.infer<typeof GimbalPreset>;
 export const CameraShape = z.object({
   id: CameraId,
   name: z.string().min(1).max(48),
   /** M6 adds `csi` and `hdmi`; M5 adds the accessory camera. One today. */
   source: z.enum(["usb", "accessory"]),
   accessory_mount: AccessoryMount.nullable().optional(),
+  gimbal_presets: z.object({
+    revision: z.number().int().nonnegative(),
+    slots: z.array(GimbalPreset).max(6).refine(rows => new Set(rows.map(r => r.slot)).size === rows.length, 'Preset slots must be unique'),
+  }).strict().optional(),
   /** A `by-path` name, without the `/dev/v4l/by-path/` prefix. See above. */
   device: z.string().min(1).max(128),
   enabled: z.boolean().default(true),
@@ -680,6 +694,8 @@ export const Camera = CameraShape.superRefine((camera, ctx) => {
     ctx.addIssue({ code: z.ZodIssueCode.custom, path: ['device'], message: 'accessory identity must name a Pocket 2 USB controller' });
   if (camera.source !== 'accessory' && camera.accessory_mount != null)
     ctx.addIssue({ code: z.ZodIssueCode.custom, path: ['accessory_mount'], message: 'mount geometry belongs to an accessory camera' });
+  if (camera.source !== 'accessory' && camera.gimbal_presets?.slots.length)
+    ctx.addIssue({ code: z.ZodIssueCode.custom, path: ['gimbal_presets'], message: 'Gimbal presets require an accessory camera' });
 }).transform((camera) => ({
   ...camera,
   stream: {

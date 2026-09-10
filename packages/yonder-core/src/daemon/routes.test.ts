@@ -3776,6 +3776,20 @@ describe('accessory route dispatch', () => {
     expect(probed).toEqual([]);
     expect((await route('POST', '/cameras/cam0/aim', request)).status).toBe(400);
   });
+  it('captures and persists six-slot metadata without probing video or moving the camera',async()=>{
+    const accessory=source();(accessory as any).capturePosition=vi.fn(async()=>({pan:-220,tilt:-100}));
+    const route=provisioned({cameras:{found:[detected],rejected:[]},camera:{source:'accessory',device:detected.byPath},accessory});
+    const save=await route('POST','/cameras/cam0/presets',{owner:'session-derived',request:{op:'save',slot:1,name:'Front',revision:0}});
+    expect(save.status).toBe(200);expect((save.body as any).applied.expiresAt).toBeNull();
+    expect(loadConfig(configPath).cameras[0].gimbal_presets?.slots[0]).toMatchObject({pan:-220,tilt:-100,name:'Front'});
+    expect(probed).toEqual([]);expect(spawned).toEqual([]);expect(accessory.aim).not.toHaveBeenCalled();
+    expect((await route('POST','/cameras/cam0/presets',{owner:'session-derived',request:{op:'save',slot:1,name:'Stale',revision:0}})).status).toBe(409);
+    expect((accessory as any).capturePosition).toHaveBeenCalledOnce();
+    expect((await route('POST','/cameras/cam0/presets',{owner:'session-derived',request:{op:'rename',slot:1,name:'Side',revision:1}})).status).toBe(200);
+    const list=await route('GET','/cameras/cam0/presets',undefined);expect((list.body as any).presets.slots[0].name).toBe('Side');
+    expect((await route('POST','/cameras/cam0/presets',{owner:'session-derived',request:{op:'delete',slot:1,revision:2}})).status).toBe(200);
+    expect(loadConfig(configPath).cameras[0].gimbal_presets).toEqual({revision:3,slots:[]});
+  });
   it('adopts the detected source despite an untrusted source field', async () => {
     const accessory = source();
     const route = provisioned({ cameras: { found: [detected], rejected: [] }, accessory });

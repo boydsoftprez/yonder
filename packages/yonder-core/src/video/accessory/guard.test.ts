@@ -142,3 +142,10 @@ describe('physical motion guard (synthetic measured context)', () => {
     expect(guard({ kind: 'mode', mode: 3 } as any, context()).allowed).toBe(false);
   });
 });
+
+it('preserves the global stop for a native roll limit while refusing a malformed limit value',()=>{
+  const c=context();c.attitude!.rollLimit=true;
+  expect(guard(rate,c)).toEqual({allowed:false,reason:'limit-direction-unknown'});
+  expect(guard({kind:'recentre'},c)).toEqual({allowed:false,reason:'at-limit'});
+  c.attitude!.rollLimit='unknown' as any;expect(guard(rate,c)).toEqual({allowed:false,reason:'attitude-malformed'});
+});

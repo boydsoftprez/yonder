@@ -140,3 +140,11 @@ it('maps flipped input once and stops the held gesture when the applied transfor
   expect(calls.map(c => c.op)).toEqual(['issue','slew','stop']);
   t.close();
 });
+
+it('renews a selected preset until arrival and does not restart it after release or a late reply',async()=>{
+ vi.useFakeTimers({toFake:['setTimeout','clearTimeout','Date','performance']});const calls:any[]=[],status=vi.fn();let count=0;
+ const fetcher=vi.fn(async(_url,options:any)=>{const b=JSON.parse(options.body);calls.push(b);return {ok:true,json:async()=>b.op==='issue-recall'?{accepted:true,grant:{gesture:'g',credential:'c',deadline:500}}:b.op==='recall'?{accepted:true,next:++count<3?{gesture:'g',credential:'next'+count,deadline:800}:null,arrived:count===3,name:'Front',rate:{pan:2,tilt:0}}:{accepted:true}}});
+ const t=new AimTransport(()=>({url:'/video/cam3/aim',generation:1}),()=>{},fetcher as any,status);t.recall(1,4,120);await vi.advanceTimersByTimeAsync(500);
+ expect(calls[0]).toEqual({op:'issue-recall',clientGesture:expect.any(String),slot:1,revision:4,maxRate:60});expect(calls.filter(c=>c.op==='recall')).toHaveLength(3);
+ expect(status).toHaveBeenCalledWith({slot:1,state:'reached',name:'Front'});expect(calls.at(-1).op).toBe('stop');await vi.advanceTimersByTimeAsync(1000);expect(calls.filter(c=>c.op==='recall')).toHaveLength(3);t.close();
+});

@@ -1162,7 +1162,7 @@ export function cameraDeck(view: {
         + `${camera.width}×${camera.height}p${camera.framerate} · ${view.encoder.element}`,
     },
     accessory: view.accessory,
-    aim: aimPanel(caps, view.accessory, camera.id, 'control', camera.controls),
+    aim: aimPanel(caps, view.accessory, camera.id, 'control', camera.controls, camera.gimbal_presets),
     // The two the board carries for a camera that has neither of its own.
     // See `deckCapture()` for why this is composed rather than read.
     capabilities: { ...caps, ...deckCapture(caps, view.recorder ?? null) },
@@ -1335,6 +1335,10 @@ export function thumbStrip(view: {
 
 /** `ui-yonder-aim`'s whole payload — `YonderAim.vue`'s own documented shape. */
 export interface AimPanel {
+  readonly positionFrame?: 'handle' | 'world';
+  readonly modeHelp?: string;
+  readonly presets?: NonNullable<Camera['gimbal_presets']>;
+  readonly recentreLabel?: string;
   readonly imageDirection?: VideoDirection;
   readonly maxRate?: number;
   readonly admitted?: { pan: number; tilt: number };
@@ -1350,7 +1354,7 @@ export interface AimPanel {
   readonly pan: number | null;
   readonly tilt: number | null;
   readonly bounds: { readonly pan: readonly [number, number]; readonly tilt: readonly [number, number] } | null;
-  readonly atLimit: { readonly pitch: boolean; readonly yaw: boolean };
+  readonly atLimit: { readonly pitch: boolean; readonly yaw: boolean; readonly roll?: boolean };
   readonly mode: string | null;
   readonly modes: readonly string[];
   readonly inhibited: string | null;
@@ -1373,20 +1377,29 @@ export interface AimPanel {
  * defect as an unmeasured rate one field over.
  */
 export function aimPanel(caps: CameraCapabilities | null, source?: ReturnType<import('./accessory/source.js').AccessorySources['snapshot']>, camera?: string,
-  scope: 'control' | 'picture' = 'control', imageControls: Partial<Camera['controls']> = {}): AimPanel {
+  scope: 'control' | 'picture' = 'control', imageControls: Partial<Camera['controls']> = {}, presets?: Camera['gimbal_presets']): AimPanel {
   if (source) {
     const names = ['Free', 'FPV', 'Follow'];
     // Standalone Aim depends on USB/DUML continuity. A drag on the Picture
     // additionally depends on that picture's media epoch and retires with it.
     const generation = scope === 'picture' ? source.input?.generation ?? source.generation : source.controlGeneration;
     return { camera, url: camera ? `/video/${camera}/aim` : undefined, generation, imageDirection: imageDirection(imageControls), maxRate: HG211_MAX_RATE_DEG_S, admitted: source.admitted,
-      state: 'present', reason: null, pan: source.attitude?.yaw ?? null, tilt: source.attitude?.pitch ?? null,
+      state: 'present', reason: null,
+      positionFrame: source.attitude?.joints ? 'handle' : 'world',
+      presets: source.model === 'HG211' ? presets??{revision:0,slots:[]} : undefined,
+      recentreLabel: source.model === 'HG211' ? 'Recenter in Follow' : undefined,
+      modeHelp: source.model === 'HG211' ? source.attitude?.mode === 1
+        ? 'FPV follows the handle on all axes and provides native pan travel with horizontal mounting.'
+        : 'Level hold can restrict heading travel with a horizontal handle. Use FPV for native pan travel.' : undefined,
+      pan: source.attitude?.joints?.pan ?? source.attitude?.yaw ?? null,
+      tilt: source.attitude?.joints?.tilt ?? source.attitude?.pitch ?? null,
       modeInhibited: source.modes.some(mode => mode.allowed) ? null : source.modes.find(mode => !mode.allowed)?.reason ?? 'trajectory-unverified',
       recentreInhibited: source.recentre.allowed ? null : source.recentre.reason,
       motionNotice: source.motionNotice,
       directionalRefusals: Object.entries(source.directions ?? {}).flatMap(([label, result]) => result.allowed ? [] : [`${label}: ${result.reason.replaceAll('-', ' ')}`]),
       bounds: source.envelope?.yaw && source.envelope?.pitch ? { pan: source.envelope.yaw, tilt: source.envelope.pitch } : null,
-      atLimit: { pitch: source.attitude?.pitchLimit ?? false, yaw: source.attitude?.yawLimit ?? false },
+      atLimit: { pitch: source.attitude?.pitchLimit ?? false, yaw: source.attitude?.yawLimit ?? false,
+        ...(source.attitude?.rollLimit ? { roll: true } : {}) },
       mode: source.attitude ? names[source.attitude.mode] ?? null : null, modes: names, inhibited: source.inhibition };
   }
   const aim = (caps ?? noCapabilities()).aim;

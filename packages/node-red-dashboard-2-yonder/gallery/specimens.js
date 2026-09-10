@@ -6,6 +6,7 @@ import YonderSettings from "../src/ui/YonderSettings.vue";
 import {fixture as cockpitFixture} from "../cockpit/fixture.mjs";
 import YonderAim from "../src/ui/YonderAim.vue";
 import YonderAimPad from "../src/ui/YonderAimPad.vue";
+import YonderAimPresets from "../src/ui/YonderAimPresets.vue";
 import YonderAnnunciator from "../src/ui/YonderAnnunciator.vue";
 import YonderBudget from "../src/ui/YonderBudget.vue";
 import YonderCaptures from "../src/ui/YonderCaptures.vue";
@@ -291,6 +292,18 @@ const BELLY_CAPABILITIES = {
 };
 
 export const SPECIMENS = [
+  {
+    title: "Aim — six saved positions",
+    note: "Handle-relative positions, with explicit recall and Stop. Fixture data only; no camera connection.",
+    component: YonderAimPresets,
+    part: true,
+    props: { endpoint: "/fixture/presets", canMove: true, activeSlot: 2, movementMessage: "Moving to Left.",
+      presets: { revision: 1, slots: [
+        { slot: 1, name: "Forward", pan: 0, tilt: 0 },
+        { slot: 2, name: "Left", pan: -60, tilt: 0 },
+        { slot: 3, name: "Inspection", pan: -180, tilt: -40 },
+      ] } },
+  },
   {
     title: "Current network interfaces",
     note: "R-NET-17. Explicit gallery observation: Ethernet holds IPv4 and IPv6, with a gateway and metric. Production polls current kernel observations and clears unavailable data.",

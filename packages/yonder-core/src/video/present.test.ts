@@ -1346,3 +1346,12 @@ describe("thumbStrip", () => {
     }).downlink).toMatch(/^166 kb\/s of stills/);
   });
 });
+
+it('shows native pan and tilt relative to the handle while retaining world attitude as a separate fact',()=>{
+  const source={generation:1,controlGeneration:1,admitted:{pan:0,tilt:0},modes:[{allowed:true}],recentre:{allowed:true},directions:{},envelope:null,inhibition:null,motionNotice:null,
+    attitude:{yaw:118.8,pitch:91.6,roll:-47.5,mode:1,pitchLimit:false,yawLimit:false,joints:{pan:-219.4,tilt:0,roll:-.6}}};
+  expect(aimPanel(null,source as never,'cam3')).toMatchObject({pan:-219.4,tilt:0,positionFrame:'handle'});
+  const world={...source,attitude:{...source.attitude,joints:undefined}};
+  expect(aimPanel(null,world as never,'cam3')).toMatchObject({pan:118.8,tilt:91.6,positionFrame:'world'});
+  expect(source.attitude.yaw).toBe(118.8);
+});

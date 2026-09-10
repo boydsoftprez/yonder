@@ -215,7 +215,7 @@ export default {
             return this.axes?.roll === 'advertised' || this.axes?.roll === 'gated'
         },
         limited () {
-            return Boolean(this.atLimit?.pitch || this.atLimit?.yaw)
+            return Boolean(this.atLimit?.pitch || this.atLimit?.yaw || this.atLimit?.roll)
         }
     },
     watch: {

@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 import type { DumlCommand, DumlFrame } from './duml.js';
 import type { AccessoryCommandOptions } from './aoa.js';
-import { Intent, type IntentAdmitted, type IntentClock, type IntentIssued, type LiveIntent } from './intent.js';
+import { Intent, type IntentAdmitted, type IntentClock, type IntentIssued, type IntentGrant, type IntentRate, type IntentRejected, type LiveIntent } from './intent.js';
 import { guard, type GimbalAttitude, type GuardContext, type GuardReason, type GuardResult, type MotionCommand } from './guard.js';
 import { normalizedQuaternion, RotationProgress } from './rotation-progress.js';
 
@@ -9,17 +9,24 @@ import { normalizedQuaternion, RotationProgress } from './rotation-progress.js';
 const MIN_RATE_DISPATCH_MS = 200;
 
 /** Caller supplies only CRC-validated DUML frames, and the transport's monotonic clock. */
-export function decodeGimbalAttitude(frame: DumlFrame, clock: Pick<IntentClock, 'now'>): GimbalAttitude | null {
+export function decodeGimbalAttitude(frame: DumlFrame, clock: Pick<IntentClock, 'now'>, nativeJoints = false): GimbalAttitude | null {
   if (frame.commandSet !== 4 || frame.commandId !== 5 || frame.sender !== 4 || frame.response
     || frame.payload.length < 11) return null;
   const p = Buffer.from(frame.payload);
-  // HG211 captures carry normal status bits 5/7 (0x20/0x80) during proven
-  // motion. Preserve faults for unclassified bit 2 and unproven bits 3/4/6.
+  // Native joint bits are pitch/roll/yaw. A world-yaw sweep on a horizontal
+  // handle had previously mislabeled the roll bit as yaw. All three still stop
+  // motion; bits 3/4/6 remain inhibiting until independently classified.
+  const quaternion = p.length >= 40 ? normalizedQuaternion([24,28,32,36].map(offset => p.readFloatLE(offset))) : null;
+  const joints = nativeJoints && p.length >= 40 && quaternion
+    ? { pan: p.readInt16LE(8) / 10, tilt: p.readInt16LE(20) / 10, roll: p.readInt16LE(22) / 10 } : undefined;
+  const validJoints = joints && Math.abs(joints.pan) <= 360 && Math.abs(joints.tilt) <= 180 && Math.abs(joints.roll) <= 90;
   return { pitch: p.readInt16LE(0) / 10, roll: p.readInt16LE(2) / 10, yaw: p.readInt16LE(4) / 10,
-    mode: (p[6] >> 6) & 3, at: clock.now(), pitchLimit: !!(p[10] & 1), yawLimit: !!(p[10] & 2), fault: !!(p[10] & 0x5c),
-    quaternion: p.length >= 40 ? normalizedQuaternion([24,28,32,36].map(offset => p.readFloatLE(offset))) : null };
+    mode: (p[6] >> 6) & 3, at: clock.now(), pitchLimit: !!(p[10] & 1), yawLimit: !!(p[10] & 4),
+    ...(p[10] & 2 ? { rollLimit: true } : {}), fault: !!(p[10] & 0x58), quaternion,
+    ...(validJoints ? { joints } : {}) };
 }
-export type MotionRefusal = { accepted: false; reason: GuardReason | 'busy' | 'unavailable' | 'revoked' | 'write-failed' };
+export type MotionRefusal = { accepted: false; reason: GuardReason | 'busy' | 'unavailable' | 'revoked' | 'write-failed' | 'preset-mode' | 'preset-position' | 'preset-timeout' | 'preset-stalled' };
+export type RecallReply = { accepted: true; next: IntentGrant | null; arrived: boolean; rate: IntentRate; name: string } | MotionRefusal | IntentRejected;
 export interface GimbalControllerOptions {
   clock: IntentClock;
   context(): GuardContext;
@@ -44,7 +51,13 @@ export class GimbalController {
   private generation = 0;
   private notice: string | null = null;
   private rangeProbe?: { owner: string; gesture: string; until: number };
+  private recall?: { owner:string; gesture:string; name:string; target:{pan:number;tilt:number}; maxRate:number; until:number; best:number; progressAt:number };
   get motionNotice(): string | null { return this.notice; }
+  get recalling(): boolean {
+    if(this.recall && !this.intent.retains(this.recall.owner,this.recall.gesture))this.recall=undefined;
+    return this.recall !== undefined;
+  }
+  get lastMotionAt(): number { return this.lastCompletedAt; }
 
   constructor(private readonly options: GimbalControllerOptions) {
     this.leaseMs = options.leaseMs ?? 500;
@@ -54,8 +67,43 @@ export class GimbalController {
     if (!this.available || this.closed) return { accepted: false, reason: 'unavailable' };
     if (this.discrete) return { accepted: false, reason: 'busy' };
     const reply = this.intent.issue(owner, clientGesture);
-    if (reply.accepted) { this.rangeProbe = undefined; this.rateEpoch = undefined; this.progress.reset(); this.setNotice(null); }
+    if (reply.accepted) { this.recall = undefined; this.rangeProbe = undefined; this.rateEpoch = undefined; this.progress.reset(); this.setNotice(null); }
     return reply;
+  }
+  startRecall(owner:string,clientGesture:string,target:{pan:number;tilt:number},name:string,maxRate:number):IntentIssued|MotionRefusal {
+    const c=this.options.context(),a=c.attitude;
+    if(![target.pan,target.tilt,maxRate].every(Number.isFinite) || target.pan < -250 || target.pan > 90 || target.tilt < -180 || target.tilt > 70 || maxRate<1 || maxRate>60) return {accepted:false,reason:'malformed-command'};
+    if(a?.mode!==1)return {accepted:false,reason:'preset-mode'};
+    if(!a.joints)return {accepted:false,reason:'preset-position'};
+    const verdict=this.check({kind:'rate',pan:.1,tilt:0});if(!verdict.allowed)return {accepted:false,reason:verdict.reason};
+    const result=this.issue(owner,clientGesture);
+    if(result.accepted){
+      const distance=Math.hypot(target.pan-a.joints.pan,target.tilt-a.joints.tilt),now=this.options.clock.now();
+      this.recall={owner,gesture:result.grant.gesture,name,target:{...target},maxRate,
+        until:now+Math.min(600_000,Math.max(15_000,distance/maxRate*1000+15_000)),best:distance,progressAt:now};
+    }
+    return result;
+  }
+  renewRecall(owner:string,request:{gesture:string;credential:string;deadline:number;seq:number}):RecallReply {
+    const recall=this.recall;
+    if(!recall || recall.owner!==owner || recall.gesture!==request.gesture)return {accepted:false,reason:'inactive'};
+    const a=this.options.context().attitude,now=this.options.clock.now();
+    if(a?.mode!==1 || !a.joints){this.reset();return {accepted:false,reason:a?.mode!==1?'preset-mode':'preset-position'};}
+    const verdict=this.check({kind:'rate',pan:.1,tilt:0});
+    if(!verdict.allowed){this.reset();return {accepted:false,reason:verdict.reason};}
+    // Native joints have an asymmetric bounded range. Never wrap the long
+    // route into a shorter angular route through a physical end stop.
+    const error={pan:recall.target.pan-a.joints.pan,tilt:recall.target.tilt-a.joints.tilt};
+    const score=Math.hypot(error.pan,error.tilt),arrived=Math.max(Math.abs(error.pan),Math.abs(error.tilt))<=.4;
+    const failure=now>=recall.until?'preset-timeout':now-recall.progressAt>3000 && score>=recall.best-.15?'preset-stalled':null;
+    let rate={pan:-error.pan/1.5,tilt:-error.tilt/1.5};
+    const scale=Math.min(1,recall.maxRate/Math.max(.001,Math.hypot(rate.pan,rate.tilt)));rate={pan:rate.pan*scale,tilt:rate.tilt*scale};
+    if(arrived || failure)rate={pan:0,tilt:0};
+    const admitted=this.admit(owner,{...request,rate});if(!admitted.accepted)return admitted;
+    if(failure){this.reset();return {accepted:false,reason:failure};}
+    if(arrived){this.reset();return {accepted:true,next:null,arrived:true,rate,name:recall.name};}
+    if(score<recall.best-.15){recall.best=score;recall.progressAt=now;}
+    return {accepted:true,next:admitted.next,arrived:false,rate,name:recall.name};
   }
   /** Unix-socket bench operation, not a saved policy or a browser control.
    * DJI OSDK bit 2 is under investigation on HG211. A probe is single-axis,
@@ -91,9 +139,11 @@ export class GimbalController {
   end(owner: string, gesture: string): void {
     this.intent.end(owner, gesture);
     if (this.rangeProbe?.owner === owner && this.rangeProbe.gesture === gesture) this.rangeProbe = undefined;
+    if (this.recall?.owner === owner && this.recall.gesture === gesture) this.recall = undefined;
   }
   /** Call on every attitude/configuration update, including a malformed attitude push. */
   refresh(): void {
+    if(this.recall && (!this.intent.retains(this.recall.owner,this.recall.gesture) || this.options.clock.now()>=this.recall.until || this.options.context().attitude?.mode!==1 || !this.options.context().attitude?.joints)){this.reset();return;}
     if (this.rangeProbe && this.options.clock.now() >= this.rangeProbe.until) { this.reset(); return; }
     if (this.discrete) this.discreteAdmission(this.discrete);
     const live = this.intent.live();
@@ -109,6 +159,7 @@ export class GimbalController {
   reset(): void {
     this.clearTimer(); this.intent.reset();
     this.rangeProbe = undefined;
+    this.recall = undefined;
     this.rateEpoch = undefined; this.progress.reset(); this.generation++;
     this.discrete?.controller.abort(); this.discrete = undefined;
   }
@@ -173,6 +224,7 @@ export class GimbalController {
   }
   private rateAdmission(live: LiveIntent): boolean {
     if (!this.available || this.closed || !live.isValid() || this.intent.live() !== live) return false;
+    if(this.recall && (this.options.clock.now()>=this.recall.until || this.options.context().attitude?.mode!==1 || !this.options.context().attitude?.joints)){this.reset();return false;}
     if (this.rangeProbe && (this.rangeProbe.owner !== live.owner || this.rangeProbe.gesture !== live.gesture
       || this.options.clock.now() >= this.rangeProbe.until)) { this.reset(); return false; }
     if (!this.check({ kind: 'rate', ...live.rate }).allowed) { this.intent.reset(); this.clearTimer(); return false; }
@@ -220,7 +272,7 @@ export class GimbalController {
     try {
       const probe = this.rangeProbe;
       await this.options.write(this.wire({ kind: 'rate', ...live.rate }, probe ? 0x84 : 0x80), {
-        signal: live.signal, deadline: Math.min(live.expiresAt, probe?.until ?? Infinity), admission: () => {
+        signal: live.signal, deadline: Math.min(live.expiresAt, probe?.until ?? Infinity, this.recall?.until ?? Infinity), admission: () => {
           // Recheck after any writer queue delay. Keep this local flag apart
           // from arbitrary endpoint errors, which still disconnect below.
           if (!live.isValid() || this.intent.live() !== live) return false;
@@ -245,7 +297,7 @@ export class GimbalController {
     }
   }
   private hasDispatchBudget(live: LiveIntent): boolean {
-    return Math.min(live.expiresAt, this.rangeProbe?.until ?? Infinity) - this.options.clock.now() >= Math.min(MIN_RATE_DISPATCH_MS, this.leaseMs);
+    return Math.min(live.expiresAt, this.rangeProbe?.until ?? Infinity, this.recall?.until ?? Infinity) - this.options.clock.now() >= Math.min(MIN_RATE_DISPATCH_MS, this.leaseMs);
   }
   private watchAction(action: NonNullable<GimbalController['discrete']>): void {
     this.clearTimer();

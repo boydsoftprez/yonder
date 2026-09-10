@@ -30,8 +30,8 @@ function fixture() {
 const settle = async () => { await Promise.resolve(); await Promise.resolve(); await Promise.resolve(); };
 describe('gimbal attitude', () => {
   it('decodes signed tenths, mode high bits and pitch/yaw limit bits using injected monotonic time', () => {
-    expect(decodeGimbalAttitude(frame(), { now: () => 1234 })).toEqual({ pitch: -12.3, roll: 4.5, yaw: 98.7, mode: 1, at: 1234, pitchLimit: true, yawLimit: true, fault: false, quaternion: null });
-    for (const [byte, pitchLimit, yawLimit, fault] of [[1,true,false,false],[2,false,true,false],[4,false,false,true]] as const) {
+    expect(decodeGimbalAttitude(frame(), { now: () => 1234 })).toEqual({ pitch: -12.3, roll: 4.5, yaw: 98.7, mode: 1, at: 1234, pitchLimit: true, yawLimit: false, rollLimit: true, fault: false, quaternion: null });
+    for (const [byte, pitchLimit, yawLimit, fault] of [[1,true,false,false],[2,false,false,false],[4,false,true,false]] as const) {
       const f = frame(); f.payload[10] = byte;
       expect(decodeGimbalAttitude(f, { now: () => 1 })).toMatchObject({ pitchLimit, yawLimit, fault });
     }
@@ -48,19 +48,19 @@ describe('gimbal attitude', () => {
   });
   it.each([
     [0x80, false, false], [0xa0, false, false],
-    [0x81, true, false], [0x82, false, true], [0x83, true, true],
-    [0xa1, true, false], [0xa2, false, true], [0xa3, true, true],
+    [0x81, true, false], [0x82, false, false], [0x83, true, false], [0x84, false, true],
+    [0xa1, true, false], [0xa2, false, false], [0xa3, true, false], [0xa4, false, true],
   ] as const)('normal status flags %s preserve pitch/yaw limits without becoming a fault', (flags, pitchLimit, yawLimit) => {
     // The 0x80 and 0xa0 base flags are also independently retained throughout
     // production yaw/pitch/recentre JSON observations. Limit combinations are synthetic.
     const f = frame(); f.payload[10] = flags;
     expect(decodeGimbalAttitude(f, { now: () => 1 })).toMatchObject({ pitchLimit, yawLimit, fault: false });
   });
-  it.each([0x04, 0x08, 0x10, 0x40])('retains unclassified or unproven flag %s as a fault', faultBit => {
+  it.each([0x08, 0x10, 0x40])('retains unclassified or unproven flag %s as a fault', faultBit => {
     for (const base of [0, 0x80, 0xa0]) {
       const f = frame(); f.payload[10] = base | faultBit;
       expect(decodeGimbalAttitude(f, { now: () => 1 })).toMatchObject({ pitchLimit: false, yawLimit: false, fault: true });
-      f.payload[10] |= 3;
+      f.payload[10] |= 7;
       expect(decodeGimbalAttitude(f, { now: () => 1 })).toMatchObject({ pitchLimit: true, yawLimit: true, fault: true });
     }
   });
@@ -399,4 +399,29 @@ describe('bounded extended-range bench probe', () => {
     const f=fixture();const g=f.controller.issueRangeProbe('alice','probe');if(!g.accepted)throw new Error('issue refused');f.admit(g.grant,3,0);
     f.context.attitude!.yawLimit=true;expect(f.writes[0].options.admission!()).toBe(false);expect(f.writes[0].options.signal!.aborted).toBe(true);f.controller.close();
   });
+});
+
+it('decodes native joint limit bits independently from world attitude axes',()=>{
+  const f=frame();f.payload[10]=0x82;const roll=decodeGimbalAttitude(f,{now:()=>1})!;
+  expect(roll).toMatchObject({rollLimit:true,yawLimit:false,pitchLimit:false,fault:false});
+  f.payload[10]=0x84;expect(decodeGimbalAttitude(f,{now:()=>1})).toMatchObject({yawLimit:true,pitchLimit:false,fault:false});
+});
+
+it('decodes independently captured HG211 joint positions without substituting world yaw or pitch',async()=>{
+  const {readFileSync}=await import('node:fs');const {encodeDuml}=await import('./duml.js');
+  const captures=JSON.parse(readFileSync(new URL('./fixtures/pocket2-joints.json',import.meta.url),'utf8'));
+  for(const sample of captures.cases){
+    const wire=decodeDuml(encodeDuml({sender:4,receiver:2,commandSet:4,commandId:5,payload:Buffer.from(sample.payloadHex,'hex')}))!;
+    expect(decodeGimbalAttitude(wire,{now:()=>123},true)?.joints,sample.name).toEqual(sample.joints);
+    expect(decodeGimbalAttitude(wire,{now:()=>123})?.joints).toBeUndefined();
+  }
+});
+
+it('does not invent HG211 joint positions from truncated, invalid-rotation or impossible joint fields',async()=>{
+  const {encodeDuml}=await import('./duml.js');const p=Buffer.alloc(40);p[10]=0x80;p.writeFloatLE(1,24);
+  const read=(b:Buffer)=>decodeGimbalAttitude(decodeDuml(encodeDuml({sender:4,receiver:2,commandSet:4,commandId:5,payload:b}))!,{now:()=>1},true);
+  expect(read(p)?.joints).toEqual({pan:0,tilt:0,roll:0});
+  expect(read(p.subarray(0,24))?.joints).toBeUndefined();
+  p.writeInt16LE(4000,8);expect(read(p)?.joints).toBeUndefined();p.writeInt16LE(0,8);
+  p.writeFloatLE(0,24);expect(read(p)?.joints).toBeUndefined();
 });

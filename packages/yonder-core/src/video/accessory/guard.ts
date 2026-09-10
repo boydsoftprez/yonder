@@ -7,7 +7,10 @@ export interface GimbalAttitude {
   /** Camera attitude in the world frame, not body-relative joint travel. */
   quaternion?: import('./rotation-progress.js').WorldQuaternion | null;
   pitchLimit: boolean; yawLimit: boolean;
-  /** Unclassified limit bits (including bit 2), never a verified roll limit. */
+  rollLimit?: boolean;
+  /** HG211's native joint angles, independent of the world attitude above. */
+  joints?: { pan: number; tilt: number; roll: number };
+  /** Unclassified or unproven status bits remain inhibiting. */
   fault: boolean;
 }
 export type GimbalMode = 0 | 1 | 2;
@@ -68,7 +71,8 @@ export function guard(cmd: MotionCommand, c: GuardContext): GuardResult {
   if (![c.now, a.at, c.attitudeMaxAgeMs].every(Number.isFinite) || c.attitudeMaxAgeMs <= 0
     || c.now < a.at || c.now - a.at >= c.attitudeMaxAgeMs) return refuse('attitude-stale');
   if (!axes.every(axis => Number.isFinite(a[axis]))
-    || [a.pitchLimit, a.yawLimit, a.fault].some(value => typeof value !== 'boolean')) return refuse('attitude-malformed');
+    || [a.pitchLimit, a.yawLimit, a.fault].some(value => typeof value !== 'boolean')
+    || (a.rollLimit !== undefined && typeof a.rollLimit !== 'boolean')) return refuse('attitude-malformed');
   if (![0, 1, 2].includes(a.mode)) return refuse('mode-unknown');
   if (a.fault) return refuse('fault');
   if (cmd.kind === 'rate') {
@@ -78,10 +82,10 @@ export function guard(cmd: MotionCommand, c: GuardContext): GuardResult {
     // body reorientation. Neither the flagged joint's command-axis mapping nor
     // an escape direction is verified across orientations, so any lit flag
     // inhibits all nonzero motion, including a proposed other-axis escape.
-    if ((cmd.pan !== 0 || cmd.tilt !== 0) && (a.yawLimit || a.pitchLimit)) return refuse('limit-direction-unknown');
+    if ((cmd.pan !== 0 || cmd.tilt !== 0) && (a.yawLimit || a.pitchLimit || a.rollLimit)) return refuse('limit-direction-unknown');
     return { allowed: true };
   }
-  if (a.pitchLimit || a.yawLimit) return refuse('at-limit');
+  if (a.pitchLimit || a.yawLimit || a.rollLimit) return refuse('at-limit');
   if (c.nativeActions?.some(action => action.kind === cmd.kind
     && (cmd.kind === 'recentre' || (action.kind === 'mode' && action.mode === cmd.mode)))) return { allowed: true };
   if (c.discreteApplicable !== true) return refuse('discrete-mount-unverified');

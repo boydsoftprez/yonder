@@ -41,7 +41,7 @@
                 <span class="y-aimpanel__rate-v">{{ rateShown }}<i>°/s</i></span>
             </div>
 
-            <div class="y-aimpanel__reported">Reported position</div>
+            <div class="y-aimpanel__reported">{{ report.positionFrame === 'handle' ? 'Position relative to handle' : report.positionFrame === 'world' ? 'Camera attitude in the world' : 'Reported position' }}</div>
             <dl v-if="!hasBounds" class="y-aimpanel__position">
                 <div><dt>Pan</dt><dd>{{ pan === null ? '—' : pan.toFixed(1) + '°' }}</dd></div>
                 <div><dt>Tilt</dt><dd>{{ tilt === null ? '—' : tilt.toFixed(1) + '°' }}</dd></div>
@@ -61,8 +61,11 @@
                 @change="onModeChange"
             />
 
-            <button type="button" class="y-aimpanel__recentre" :disabled="recentreDisabled" :title="report.recentreInhibited || ''" @click="pressRecentre">Recenter gimbal</button>
+            <button type="button" class="y-aimpanel__recentre" :disabled="recentreDisabled" :title="report.recentreInhibited || ''" @click="pressRecentre">{{ report.recentreLabel || 'Recenter gimbal' }}</button>
+            <p v-if="report.modeHelp" class="y-aimpanel__mode-help">{{ report.modeHelp }}</p>
             <div v-if="report.recentreInhibited" class="y-aimpanel__reason">{{ report.recentreInhibited }}</div>
+            <YonderAimPresets v-if="report.presets && report.url" :presets="report.presets" :endpoint="presetEndpoint" :can-move="presetReady"
+                :move-reason="presetBlockReason" :active-slot="activePreset" :movement-message="presetMessage" @recall="recallPreset" @stop="aimDisconnect" />
         </YonderColumn>
     </div>
 </template>
@@ -70,10 +73,12 @@
 <script>
 import { cameraSessionMixin } from './camera-session.ts'
 import YonderAimPad from './YonderAimPad.vue'
+import YonderAimPresets from './YonderAimPresets.vue'
 import YonderPositionGauge from './YonderPositionGauge.vue'
 import YonderSegmented from './YonderSegmented.vue'
 import YonderColumn from './YonderColumn.vue'
 import { AimTransport } from './aim-transport.ts'
+import { SPEED_KEY, savedNumber } from './aim-response.ts'
 
 /**
  * `ui-yonder-aim` — the gimbal panel as a node of its own (R-UI-28,
@@ -226,7 +231,7 @@ export default {
     name: 'YonderAim',
     mixins: [cameraSessionMixin],
     inject: ['$socket', '$dataTracker'],
-    components: { YonderAimPad, YonderPositionGauge, YonderSegmented, YonderColumn },
+    components: { YonderAimPad, YonderAimPresets, YonderPositionGauge, YonderSegmented, YonderColumn },
     props: {
         id: { type: String, required: true },
         props: { type: Object, default: () => ({}) },
@@ -242,9 +247,19 @@ export default {
         /** See this component's own doc comment on `Recentre`. */
         aimTransport: null,
         aimError: null,
+        activePreset: null,
+        presetMessage: '',
         recentrePending: false
     }),
     computed: {
+        presetEndpoint () { return this.report?.url?.replace(/\/aim$/, '/presets') || '' },
+        presetBlockReason () {
+            if (this.signInRequired) return 'Sign in to use saved positions.'
+            if (this.report?.positionFrame !== 'handle') return 'Waiting for position feedback relative to the handle.'
+            if (this.report?.mode !== 'FPV') return 'Choose FPV mode to save and recall positions.'
+            return this.inhibited || (this.aimState !== 'present' ? 'The gimbal is not responding.' : '')
+        },
+        presetReady () { return !this.presetBlockReason },
         /** The whole report, live in preference to configured — the same
          * rule every other widget in this package states for its own
          * narrower slice (`YonderFacts`'s own comment on `facts` says it
@@ -377,7 +392,7 @@ export default {
         modeControlState () {
             if (!this.modes.length) return 'not-offered'
             if (this.aimState !== 'present') return this.aimState
-            if (this.signInRequired || this.inhibited || this.report?.modeInhibited) return 'gated'
+            if (this.signInRequired || this.inhibited || this.report?.modeInhibited || this.activePreset !== null) return 'gated'
             return 'present'
         },
         /** A full sentence, not a bare label — see this component's own
@@ -396,7 +411,7 @@ export default {
          * mode), or `recentrePending` (this press has not yet been
          * followed by a fresh report). */
         recentreDisabled () {
-            return this.signInRequired || this.aimState !== 'present' || Boolean(this.inhibited) || Boolean(this.report?.recentreInhibited) || this.recentrePending
+            return this.signInRequired || this.aimState !== 'present' || Boolean(this.inhibited) || Boolean(this.report?.recentreInhibited) || this.recentrePending || this.activePreset !== null
         }
     },
     watch: {
@@ -414,11 +429,19 @@ export default {
     },
     created () {
         this.$dataTracker(this.id)
-        this.aimTransport = new AimTransport(() => this.report, (rate, reason) => { this.commandedPan = rate.pan; this.commandedTilt = rate.tilt; this.aimError = reason })
+        this.aimTransport = new AimTransport(() => this.report, (rate, reason) => { this.commandedPan = rate.pan; this.commandedTilt = rate.tilt; this.aimError = reason }, undefined, state => {
+            this.activePreset = state?.state === 'moving' ? state.slot : null
+            this.presetMessage = state ? `${state.state === 'moving' ? 'Moving to' : 'Reached'} ${state.name || `preset ${state.slot}`}.` : ''
+        })
         this.$socket.on?.('disconnect', this.aimDisconnect)
     },
     beforeUnmount () { this.aimTransport?.close(); this.$socket.off?.('disconnect', this.aimDisconnect) },
     methods: {
+        recallPreset ({slot,revision}) {
+            if (!this.presetReady) return
+            this.$refs.aimPad?.onEnd()
+            this.aimTransport.recall(slot,revision,Math.min(60,savedNumber(SPEED_KEY,60,1,120)))
+        },
         onCameraSessionExpired () { this.aimDisconnect() },
         aimDisconnect () { this.aimTransport?.stop(); this.$refs.aimPad?.onEnd() },
         /** Every message this node posts leaves through here — one seam,
@@ -448,6 +471,7 @@ export default {
             this.post({ stop: { gesture: e.gesture } })
         },
         onModeChange (m) {
+            if (this.activePreset !== null) return
             if (this.report?.url) { void this.aimTransport.action({ op: 'mode', mode: this.modes.indexOf(m) }); return }
             this.post({ mode: m })
         },
@@ -466,6 +490,7 @@ export default {
 </script>
 
 <style scoped>
+.y-aimpanel__mode-help { margin:8px 0 0; font-size:11px; line-height:1.45; color:var(--yonder-label, #7f8a95); }
 .y-aimpanel__position { display: grid; grid-template-columns: 1fr 1fr; gap: 12px; margin: 0 0 10px; }
 .y-aimpanel__position div { display: flex; justify-content: space-between; gap: 8px; }
 .y-aimpanel__position dt { color: var(--yonder-label, #7f8a95); font-size: 11px; }

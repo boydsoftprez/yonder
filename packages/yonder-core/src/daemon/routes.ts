@@ -4,6 +4,7 @@ import { cockpitCameras } from "../cockpit/camera.js";
 import { cockpitRoute, type CockpitServices } from "../cockpit/routes.js";
 import { CockpitInstruments, HostInstruments, type HostInstrumentOptions } from '../cockpit/host-instruments.js';
 import { ApplyEngine } from "../apply/engine.js";
+import { PresetRequest, updatePresets } from '../video/accessory/presets.js';
 import { loadConfig } from "../config/load.js";
 import { ConfigError } from "../config/errors.js";
 import { warn } from "../log.js";
@@ -684,7 +685,7 @@ const VIEWER_ID = /^[a-z0-9][a-z0-9-]{0,63}$/;
  * matching at all. The difference is not cosmetic: a guard nothing can reach
  * is a guard no test can prove.
  */
-const CAMERA_ROUTE = /^\/cameras\/(.+?)(?:\/(run|probe|stream-address|controls|aim|settings|apply|record|photo|still|captures(?:\/[^/]+)?|outputs\/(?:rtp|rtsp|srt)|viewers\/[^/]+))?$/;
+const CAMERA_ROUTE = /^\/cameras\/(.+?)(?:\/(run|probe|stream-address|controls|aim|presets|settings|apply|record|photo|still|captures(?:\/[^/]+)?|outputs\/(?:rtp|rtsp|srt)|viewers\/[^/]+))?$/;
 
 const WANTS: readonly Want[] = ["video", "stills", "off"];
 
@@ -1133,6 +1134,24 @@ export function createRouter(deps: RouterDeps): Router {
     query: string,
     say: (line: string) => void,
   ): Promise<RouteResult> => {
+    if(verb==='presets'){
+      const config=loadConfig(deps.configPath),camera=config.cameras.find(c=>c.id===id);
+      if(!camera)return {status:404,body:{error:'Camera not configured'}};
+      if(camera.source!=='accessory')return {status:409,body:{error:'This camera has no gimbal presets'}};
+      if(method==='GET')return {status:200,body:{presets:camera.gimbal_presets??{revision:0,slots:[]}}};
+      const input=body as {owner?:unknown;request?:unknown}|null;
+      if(method!=='POST' || !input || typeof input.owner!=='string' || !/^[A-Za-z0-9_.:-]{1,128}$/.test(input.owner))return {status:400,body:{error:'Authenticated preset owner required'}};
+      const parsed=PresetRequest.safeParse(input.request);if(!parsed.success)return {status:400,body:{error:'Invalid preset name, slot, or revision'}};
+      if(parsed.data.revision!==(camera.gimbal_presets?.revision??0))return {status:409,body:{error:'Presets changed in another session. Try again with the current list.'}};
+      try {
+        const position=parsed.data.op==='save'?await deps.accessory?.capturePosition(camera.device):undefined;
+        const latest=loadConfig(deps.configPath),current=latest.cameras.find(c=>c.id===id);
+        if(current?.device!==camera.device || current.source!=='accessory')return {status:409,body:{error:'Camera changed while saving the preset; try again'}};
+        const next=updatePresets(latest,id,parsed.data,position,(deps.clock??systemClock).now());
+        const applied=await deps.engine.apply(next,{gimbalPresetsOnly:true});
+        return {status:200,body:{presets:next.cameras.find(c=>c.id===id)!.gimbal_presets,applied}};
+      } catch(error){return {status:409,body:{error:error instanceof Error?error.message:'Preset could not be saved'}};}
+    }
     if (verb === 'aim') {
       const camera = loadConfig(deps.configPath).cameras.find(c => c.id === id);
       if (!camera) return { status: 404, body: { error: 'Camera not configured' } };
@@ -1327,7 +1346,7 @@ export function createRouter(deps: RouterDeps): Router {
         encoder,
         display,
         picture: { path: id, cost: display.pictureCost, runState: run.state, runReason: run.reason ?? null, startBlocked: display.startBlocked, running: run.state === 'running' ? true : run.state === 'stopped' ? false : null, recording: recorderState,
-          aim: aimPanel(capabilities, accessorySnapshot, id, 'picture', camera.controls),
+          aim: aimPanel(capabilities, accessorySnapshot, id, 'picture', camera.controls, camera.gimbal_presets),
           cameras: thumbnails.cameras.map((row) => {
             const configured = config.cameras.find((c) => c.id === row.id)!;
             return {
@@ -1358,7 +1377,7 @@ export function createRouter(deps: RouterDeps): Router {
           recorder: recorderState,
           captures: heldCaptures.length,
         }),
-        aim: aimPanel(capabilities, accessorySnapshot, id, 'control', camera.controls),
+        aim: aimPanel(capabilities, accessorySnapshot, id, 'control', camera.controls, camera.gimbal_presets),
         // From the recorder that holds the recording, never from a count of
         // files on the disk: a file is there whether or not anything is still
         // writing to it, and a page drawing a REC pill off the second would

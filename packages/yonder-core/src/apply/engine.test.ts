@@ -1218,3 +1218,19 @@ describe("an apply that cannot cost reachability", () => {
     expect(e.status().state).toBe("pending");
   });
 });
+
+it('persists preset-only edits immediately without invoking hardware renderers',async()=>{
+  const {Camera}=await import('../schema/config.js');const original=structuredClone(DEFAULT_CONFIG);
+  original.cameras=[Camera.parse({id:'cam1',name:'Pocket',source:'accessory',device:'pocket2:test'})];saveConfig(configPath,original);
+  const hardware=renderer('hardware'),e=new ApplyEngine({configPath,journalPath,renderers:[hardware]});
+  const next=structuredClone(original);next.cameras[0].gimbal_presets={revision:1,slots:[{slot:1,name:'Front',frame:'hg211-joints-v1',mode:1,pan:0,tilt:0,savedAt:1}]};
+  expect(await e.apply(next,{gimbalPresetsOnly:true})).toMatchObject({expiresAt:null});expect(e.status().state).toBe('confirmed');expect(hardware.calls).toHaveLength(0);
+  expect(loadConfig(configPath).cameras[0].gimbal_presets).toEqual(next.cameras[0].gimbal_presets);
+});
+
+it('refuses a preset-only hint if any other setting changed and releases the reservation',async()=>{
+  const hardware=renderer('hardware'),e=new ApplyEngine({configPath,journalPath,renderers:[hardware]});const before=e.status().state;
+  await expect(e.apply(changed(),{gimbalPresetsOnly:true})).rejects.toThrow('Configuration changed');
+  expect(e.status().state).toBe(before);expect(hardware.calls).toHaveLength(0);expect(loadConfig(configPath)).toEqual(DEFAULT_CONFIG);
+  expect(await e.apply(DEFAULT_CONFIG,{gimbalPresetsOnly:true})).toMatchObject({expiresAt:null});
+});

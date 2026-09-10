@@ -112,7 +112,8 @@ export class AccessorySources {
       onCommand: frame => {
         source.camera.update(frame);
         if (frame.commandSet === 4 && frame.commandId === 5) {
-          source.attitude = decodeGimbalAttitude(frame, this.clock);
+          const status = source.device.snapshot();
+          source.attitude = decodeGimbalAttitude(frame, this.clock, status.manufacturer === 'DJI' && status.model === 'HG211');
           source.rawAttitude = source.attitude ? Buffer.from(frame.payload).toString('hex') : undefined;
           source.gimbal.refresh();
         }
@@ -168,6 +169,7 @@ export class AccessorySources {
     // A directional stopping margin is not a global interlock. Zero tests
     // shared prerequisites; every actual rate is still guarded at dispatch.
     const verdict = guard({ kind: 'rate', pan: 0, tilt: 0 }, context);
+    const nativeLimits = attitude ? [attitude.pitchLimit ? 'Tilt' : '', attitude.rollLimit ? 'Roll' : '', attitude.yawLimit ? 'Pan' : ''].filter(Boolean) : [];
     const directions = {
       'Pan +': guard({ kind: 'rate', pan: 0.1, tilt: 0 }, context), 'Pan −': guard({ kind: 'rate', pan: -0.1, tilt: 0 }, context),
       'Tilt +': guard({ kind: 'rate', pan: 0, tilt: 0.1 }, context), 'Tilt −': guard({ kind: 'rate', pan: 0, tilt: -0.1 }, context),
@@ -179,7 +181,7 @@ export class AccessorySources {
       input: this.input(identity), state: source.camera.readState(), attitude, admitted: rate, directions,
       mount: context.mount, envelope: null as import('./guard.js').MeasuredEnvelope | null, motionNotice: source.gimbal.motionNotice,
       recentre: guard({ kind: 'recentre' }, context), modes: ([0,1,2] as const).map(mode => guard({ kind: 'mode', mode }, context)),
-      inhibition: verdict.allowed ? null : verdict.reason, controls: accessoryControls(source.camera.readState()), descriptors: cameraControlDescriptors().map(d => d.kind === 'menu'
+      inhibition: verdict.allowed ? nativeLimits.length ? `${nativeLimits.join(' / ')} travel limit reported. Movement is paused.` : null : verdict.reason, controls: accessoryControls(source.camera.readState()), descriptors: cameraControlDescriptors().map(d => d.kind === 'menu'
         ? { ...d, options: d.values.map(value => ({ value, label: String(d.toDisplay(value)) })) } : d) };
   }
   private detection(identity: string, source: Owned): Detection {
@@ -193,6 +195,25 @@ export class AccessorySources {
   async controls(identity: string, request: unknown) {
     const source = this.owned.get(identity); if (!source) throw new Error('Accessory camera unavailable');
     return source.camera.execute(request);
+  }
+  async capturePosition(identity:string):Promise<{pan:number;tilt:number}> {
+    const source=this.owned.get(identity);if(!source)throw new Error('Camera position is unavailable');
+    let previous:{pan:number;tilt:number;at:number}|undefined,quietSince:number|undefined;
+    for(let attempt=0;attempt<20;attempt++){
+      const s=this.snapshot(identity),a=s?.attitude,now=this.clock.now();
+      if(s?.model!=='HG211' || !a?.joints)throw new Error('Fresh position relative to the handle is unavailable');
+      if(a.mode!==1)throw new Error('Choose FPV mode before saving a position');
+      if(a.fault || a.pitchLimit || a.rollLimit || a.yawLimit || s.inhibition)throw new Error('Resolve the gimbal limit or fault before saving a position');
+      if(source.gimbal.recalling || s.admitted.pan || s.admitted.tilt)throw new Error('Stop movement before saving a position');
+      if(now-source.gimbal.lastMotionAt>=800 && previous && a.at>previous.at){
+        if(Math.max(Math.abs(a.joints.pan-previous.pan),Math.abs(a.joints.tilt-previous.tilt))<=.2)quietSince??=previous.at;
+        else quietSince=undefined;
+        if(quietSince!==undefined && a.at-quietSince>=300)return {pan:a.joints.pan,tilt:a.joints.tilt};
+      } else quietSince=undefined;
+      previous={pan:a.joints.pan,tilt:a.joints.tilt,at:a.at};
+      await new Promise<void>(resolve=>this.clock.setTimer(100,resolve));
+    }
+    throw new Error('The gimbal is still moving; release the control and save again');
   }
   async aim(identity: string, owner: string, body: unknown): Promise<unknown> {
     const source = this.owned.get(identity); if (!source) return { accepted: false, reason: 'unavailable' };
@@ -216,6 +237,20 @@ export class AccessorySources {
     if (!validAimRequest(body)) return { accepted: false, reason: 'malformed' };
     const b = body as Record<string, unknown>;
     switch (b.op) {
+      case 'issue-recall': {
+        const state=this.options.cameras().find(c=>c.device===identity)?.gimbal_presets;
+        if(b.revision!==(state?.revision??0))return {accepted:false,reason:'Presets changed. Select the position again.'};
+        const preset=state?.slots.find(p=>p.slot===b.slot);
+        if(!preset)return {accepted:false,reason:'That preset is empty'};
+        const status=source.device.snapshot();if(status.model!=='HG211')return {accepted:false,reason:'preset-position'};
+        const reply=source.gimbal.startRecall(owner,b.clientGesture as string,preset,preset.name,b.maxRate as number);
+        if(reply.accepted)source.admitted=undefined;return reply;
+      }
+      case 'recall': {
+        const reply=source.gimbal.renewRecall(owner,b as unknown as {gesture:string;credential:string;deadline:number;seq:number});
+        if(reply.accepted)source.admitted=reply.next?{owner,gesture:b.gesture as string,...reply.rate,until:Math.min(b.deadline as number,this.clock.now()+500)}:undefined;
+        return !reply.accepted && source.gimbal.motionNotice ? {...reply,reason:source.gimbal.motionNotice}:reply;
+      }
       case 'issue': { const reply = source.gimbal.issue(owner, typeof b.clientGesture === 'string' ? b.clientGesture : undefined); if (reply.accepted) source.admitted = undefined; return reply; }
       case 'slew': {
         const { gesture, credential, deadline, seq, pan, tilt } = b;

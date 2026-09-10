@@ -19,7 +19,8 @@ let report={camera:{id:'cam3',name:'Pocket 2 · fixture',spec:'1280×720 · 30 f
  {key:'ev',group:'exposure',label:'Brightness',state:'present',value:'16',options:Array.from({length:13},(_,i)=>({value:String(i+10),label:String((i-6)/3),command:{kind:'ev',value:i+10}}))},
  {key:'white-balance',group:'exposure',label:'White balance',state:'present',value:'0',options:[{value:'0',label:'Auto',command:{kind:'white-balance',value:0}},{value:'40',label:'4000 K',command:{kind:'white-balance',value:40}}]},
  ]}}
-let previous=null,id=0,auth=true
+let previous=null,id=0,auth=true,recallCount=0,fixtureMode='FPV'
+let fixturePresets={revision:1,slots:[{slot:1,name:'Forward',pan:0,tilt:0,frame:'hg211-joints-v1',mode:1,savedAt:1},{slot:2,name:'Inspection',pan:-180,tilt:-40,frame:'hg211-joints-v1',mode:1,savedAt:1}]}
 const canvas=document.createElement('canvas');canvas.width=1280;canvas.height=720
 const ctx=canvas.getContext('2d');let count=0
 setInterval(()=>{ctx.fillStyle='#203c4b';ctx.fillRect(0,0,1280,720);ctx.strokeStyle='#78949e';for(let x=0;x<1280;x+=80){ctx.beginPath();ctx.moveTo(x,0);ctx.lineTo(x,720);ctx.stroke()}ctx.fillStyle='#f4f0df';ctx.font='30px sans-serif';ctx.fillText('Component fixture — no camera connection',60,95);ctx.fillText(`Frame ${++count}`,60,145)},100)
@@ -31,9 +32,11 @@ class Peer {
  async getStats(){return new Map([['in',{type:'inbound-rtp',kind:'video',packetsLost:0,packetsReceived:count*10,bytesReceived:count*14000,frameWidth:1280,frameHeight:720,framesPerSecond:10}],['pair',{type:'candidate-pair',state:'succeeded',currentRoundTripTime:.025}]])}
 }
 window.RTCPeerConnection=Peer
-window.fetch=async(url)=>{
+window.fetch=async(url,options={})=>{
  if(url==='/session')return new Response(JSON.stringify({authenticated:auth}),{status:auth?200:401})
  if(!auth)return new Response('',{status:401})
+ if(String(url).endsWith('/presets')){const b=JSON.parse(options.body);if(b.revision!==fixturePresets.revision)return new Response(JSON.stringify({error:'Presets changed'}),{status:409});let rows=fixturePresets.slots.filter(p=>p.slot!==b.slot);const old=fixturePresets.slots.find(p=>p.slot===b.slot);if(b.op!=='delete')rows.push(b.op==='rename'?{...old,name:b.name}:{slot:b.slot,name:b.name,pan:12.4,tilt:-5.2,frame:'hg211-joints-v1',mode:1,savedAt:Date.now()});fixturePresets={revision:fixturePresets.revision+1,slots:rows.sort((a,b)=>a.slot-b.slot)};hydrate();return new Response(JSON.stringify({presets:fixturePresets}),{status:200})}
+ if(String(url).endsWith('/aim')){const b=JSON.parse(options.body);if(b.op==='issue-recall')recallCount=0;if(b.op==='mode'){fixtureMode=['Free','FPV','Follow'][b.mode];hydrate()}return new Response(JSON.stringify({accepted:true,grant:{gesture:'fixture',credential:'fixture',deadline:Date.now()+500},next:{gesture:'fixture',credential:'fixture',deadline:Date.now()+500},arrived:b.op==='recall'&&++recallCount>=5,name:'Fixture position',rate:{pan:0,tilt:0}}),{status:200})}
  if(String(url).endsWith('/connection'))return new Response(JSON.stringify({renderings:[{kind:'url',title:'RTSP URL',body:'',usable:false,note:'Enable RTSP in Outputs and Apply to create a player address.'},{kind:'gstreamer',title:'GStreamer',body:'gst-launch-1.0 fixture',usable:false,note:'No RTP destination configured.'}]}),{status:200})
  if(String(url).endsWith('/whep'))return new Response('fixture',{status:scenario.value==='Unavailable'?503:['stopped','failed','starting'].includes(report.run.state)?404:201,headers:{'x-yonder-viewer':'fixture'}})
  return new Response(JSON.stringify({camera:'cam3',viewer:'fixture',shared:{mode:report.policy.preview.mode},mine:{receiverBufferMs:25,decodeMs:2},overlay:{head:report.policy.preview.mode==='fixed'?'fixed':'held',size:'1280×720',rate:'30 fps',bitrate:'1.19 Mb/s',step:report.runtime.decision.reason}}))
@@ -43,7 +46,7 @@ function hydrate(){
  report.applied=structuredClone(report.policy)
  send({workspaceKind:'report',camera:'cam3',payload:structuredClone(report)})
  store.state.data.messages.picture={payload:{path:scenario.value==='No camera'?'':'cam3',runState:report.run.state,running:report.run.state==='running'?true:report.run.state==='stopped'?false:null,startBlocked:report.startBlocked,cameras:[{id:'cam3',name:report.camera.name,active:true,caption:report.run.state,thumbSrc:canvas.toDataURL('image/jpeg'),ageSeconds:0}],state:null}}
- store.state.data.messages.aim={payload:{state:'present',pan:12.4,tilt:-5.2,bounds:null,maxRate:120,mode:'Follow',modes:['Free','FPV','Follow'],inhibited:null,imageDirection:'identity'}}
+ store.state.data.messages.aim={payload:{state:'present',url:'/video/fixture/aim',generation:1,positionFrame:'handle',presets:fixturePresets,modeHelp:'FPV follows the handle on all axes.',recentreLabel:'Recenter in Follow',pan:12.4,tilt:-5.2,bounds:null,maxRate:120,mode:fixtureMode,modes:['Free','FPV','Follow'],inhibited:null,imageDirection:'identity'}}
 }
 function phase(state){send({workspaceKind:'pending',payload:{pending:state==='pending',id:`fixture-${id}`,engineState:state,observedAt:Date.now(),what:'Changes are active.',keys:[{label:'Keep',action:'confirm'},{label:'Revert',action:'revert'}]},yonder:{state:state==='pending'?'pending':'idle',expiresAt:state==='pending'?Date.now()+120000:null,at:Date.now()}})}
 function result(operation,state,message){send({workspaceKind:'result',camera:'cam3',operation,yonder:{operation,state,message,at:Date.now(),id:`fixture-${id}`}})}

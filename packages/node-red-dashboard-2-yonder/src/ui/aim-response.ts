@@ -54,6 +54,10 @@ export function aimFailure(reason: string): string {
     'attitude-stale': 'Camera position feedback is delayed. Release and try again.',
     'limit-direction-unknown': 'The gimbal reached a travel limit. Release the control.',
     revoked: 'Movement stopped because the camera control state changed. Release and try again.',
+    'preset-mode': 'Choose FPV mode before recalling a saved position.',
+    'preset-position': 'Fresh position relative to the handle is unavailable.',
+    'preset-timeout': 'The preset move timed out and stopped.',
+    'preset-stalled': 'The saved position could not be reached. Movement stopped.',
   };
   return messages[reason] ?? reason;
 }

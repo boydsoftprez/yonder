@@ -196,7 +196,7 @@ export class ApplyEngine {
    * the loadConfig call below — and `previousIsDefault` is set on both the
    * journal entry and the return value so that substitution is never silent.
    */
-  async apply(next: unknown, options: { appearanceOnly?: boolean } = {}): Promise<{
+  async apply(next: unknown, options: { appearanceOnly?: boolean; gimbalPresetsOnly?: boolean } = {}): Promise<{
     id: string;
     /**
      * When the change reverts unless confirmed, or **null when there is
@@ -261,6 +261,7 @@ export class ApplyEngine {
     // — M1's network apply takes seconds — and a second apply arriving inside
     // that window would journal the first apply's unconfirmed configuration as
     // its rollback target and orphan its timer.
+    const stateBeforeApply = this.state;
     this.state = "applying";
 
     let previous: Config;
@@ -306,7 +307,14 @@ export class ApplyEngine {
     // an unloadable configuration without running its normal renderers.
     const sameExceptTheme = JSON.stringify({ ...previous, ui: { ...previous.ui, theme: parsed.data.ui.theme } })
       === JSON.stringify(parsed.data);
-    const renderers = options.appearanceOnly && !previousIsDefault && sameExceptTheme && this.appearanceRenderer
+    const withoutPresets = (config: Config) => ({...config,cameras:config.cameras.map(({gimbal_presets,...camera})=>camera)});
+    const onlyPresets = options.gimbalPresetsOnly === true && !previousIsDefault
+      && JSON.stringify(withoutPresets(previous)) === JSON.stringify(withoutPresets(parsed.data));
+    if(options.gimbalPresetsOnly && !onlyPresets){
+      this.state=stateBeforeApply;
+      throw new ConfigError('Configuration changed while saving the preset; try again');
+    }
+    const renderers = onlyPresets ? [] : options.appearanceOnly && !previousIsDefault && sameExceptTheme && this.appearanceRenderer
       ? [this.appearanceRenderer] : this.renderers;
 
     const id = randomUUID();
@@ -396,7 +404,7 @@ export class ApplyEngine {
      * field added to the schema later is safe by default rather than silently
      * exempt.
      */
-    if (!affectsReachability(previous, parsed.data)) {
+    if (onlyPresets || !affectsReachability(previous, parsed.data)) {
       // Same order as confirm(): the journal is cleared first, because that
       // is what makes the change permanent.
       this.journal.clear();

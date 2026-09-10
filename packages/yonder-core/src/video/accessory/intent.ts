@@ -153,6 +153,11 @@ export class Intent {
     return this.active?.command?.view ?? null;
   }
 
+  retains(owner: string, gesture: string): boolean {
+    this.expire(this.clock.now());
+    return this.active?.owner === owner && this.active.grant.gesture === gesture;
+  }
+
   /** Stops need no live credential; an older owner/generation cannot stop a newer one. */
   end(owner: string, gesture: string): void {
     if (this.active?.owner === owner && this.active.grant.gesture === gesture) this.reset();

@@ -84,3 +84,57 @@ orientation after recovery, compare from a central pose, and establish the
 appropriate native joystick or coordinate conversion using bounded inputs.
 This is a working hypothesis, not a completed full-range fix or a reason to
 remove the native safeguards.
+
+## Recovered native-joint measurements and resolution
+
+After the operator power-cycled the camera, status limits cleared and mode 1
+(FPV) was observed. The handle was horizontal, screen facing up. Isolated normal
+`0x80` pan and tilt bursts established the physical-joint fields in HG211's
+`gimbal/0x05` payload: signed tenths at offsets 8 (pan), 20 (tilt) and 22 (roll).
+These measurements differ from the world Euler angles at offsets 0, 2 and 4.
+The decoder exposes native joints only for a recognized HG211 with a complete,
+plausible payload and valid quaternion. Retained numeric payload fixtures cover
+horizontal, upright and FPV positions; they contain no camera images.
+
+With ordinary control flags and FPV, native pan reached approximately -227.2 to
++70.9 degrees: 298.1 degrees of travel. Tilt reached -100 to +49.9 degrees,
+approximately 150 degrees. Endpoint commands settled without a native fault,
+and reversing away from the stops worked. One earlier tilt sample included
+operator control input and was excluded from the commanded-motion comparison.
+The completed sequences preserved the video run and USB generation.
+
+The original 80-degree world-yaw sweep was therefore not the native pan span.
+When the horizontal handle is held in a level-maintaining mode, another joint
+can limit a world-referenced move. FPV allows the measured native travel. The UI
+now states that mode distinction and reports position relative to the handle;
+it does not infer a fixed mapping from world Euler angles. Native limit bits
+are labeled pitch, roll and yaw in that order, and every limit still inhibits
+motion. Recenter is labeled "Recenter in Follow" because the camera changes mode.
+The experimental range-extension flag remains absent from normal input.
+
+## Six saved positions (R-CAM-23)
+
+Aim includes six named slots with Save current position, Recall, Rename, Clear
+and a visible Stop during recall. Save obtains fresh, settled joint feedback
+from the device; the browser cannot supply substitute angles. Presets belong
+to the configured accessory camera and use the handle-relative HG211 reference
+in FPV mode. They are not geographic or compass targets. Recall does not switch
+modes automatically. Moving the camera mount changes the view associated with
+its saved handle-relative positions.
+
+Recall approaches the saved joint values using ordinary speed commands, capped
+by the operator's speed setting and 60 degrees/s. It never wraps an asymmetric
+pan target through an end stop. Fresh one-use browser grants retain the existing
+500 ms expiry, transport deadlines, mode/source cancellation and native fault
+safeguards. Stop, manual input or lost browser intent retires the recall; it does
+not resume automatically. Missing progress and a bounded timeout stop a target
+that cannot be reached. This is an explicitly requested camera move, not an
+independent aircraft control action.
+
+Preset edits are revision-checked and saved through the configuration engine.
+The metadata-only path verifies every other configuration field is unchanged,
+then journals and saves without invoking network or video renderers. Concurrent
+edits are refused rather than overwriting a newer slot. Tests exercise long
+native paths, arrival, cancellation, stale data, faults, concurrent edits and
+configuration isolation. Hardware preset verification is recorded separately
+when completed; the measured native range above does not by itself prove recall.

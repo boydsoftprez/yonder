@@ -624,3 +624,10 @@ it('stops an active pad when selection retires the prior camera report', async (
     expect(wrapper.text()).toContain('Waiting for the selected camera report.');
     wrapper.unmount();
 });
+
+it('labels the position reference explicitly without putting it over the video',()=>{
+  const native=mountAim({...makeReport({bounds:null}),positionFrame:'handle'});
+  expect(native.wrapper.get('.y-aimpanel__reported').text()).toBe('Position relative to handle');native.wrapper.unmount();
+  const world=mountAim({...makeReport({bounds:null}),positionFrame:'world'});
+  expect(world.wrapper.get('.y-aimpanel__reported').text()).toBe('Camera attitude in the world');world.wrapper.unmount();
+});

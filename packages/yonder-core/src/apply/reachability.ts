@@ -67,7 +67,7 @@ export const CAMERA_LEAVES = Object.keys(CameraShape.shape) as readonly (keyof C
  * the aircraft is doing or which hardware it is doing it with.
  */
 export const CAMERA_EXEMPT_LEAVES = [
-  "width", "height", "framerate", "codec", "controls", "image",
+  "width", "height", "framerate", "codec", "controls", "image", "gimbal_presets",
 ] as const;
 
 /** The document with the fields that cannot affect reachability removed. */

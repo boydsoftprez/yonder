@@ -324,3 +324,12 @@ it('keeps raw attitude inspection read-only and withdraws it on stale or disconn
   h.stale();expect(await h.source.aim(h.camera.device,'bench-range-test',request)).toMatchObject({raw:null});
   expect(h.device.sendCommand).not.toHaveBeenCalled();await h.source.close();
 });
+
+it('captures fresh stationary native positions without issuing a motion command',async()=>{
+ vi.useFakeTimers();const h=harness();await h.source.discover();h.live();
+ const push=()=>{const p=Buffer.alloc(40);p[6]=0x40;p[10]=0x80;p.writeFloatLE(1,24);p.writeInt16LE(-2200,8);p.writeInt16LE(-1000,20);h.callbacks().onCommand!(decodeDuml(encodeDuml({sender:4,receiver:2,commandSet:4,commandId:5,payload:p}))!)};
+ try {push();const position=h.source.capturePosition(h.camera.device);
+  for(let i=0;i<5;i++){h.now.value+=100;push();await vi.advanceTimersByTimeAsync(100)}
+  await expect(position).resolves.toEqual({pan:-220,tilt:-100});expect(h.device.sendCommand).not.toHaveBeenCalled();
+ }finally{await h.source.close();vi.useRealTimers()}
+});
