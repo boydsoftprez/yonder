@@ -635,7 +635,11 @@ for (const page of pages) {
   // actually doing.
   await tab.screenshot({ path: join(artifacts, `${stem}.png`), fullPage: true });
 
-  const shape = await tab.evaluate(measure, [LIVE, FIXED, specimens.fields, specimens.masked, ABOVE_THE_FOLD, DECK]);
+  // R-UI-29 supersedes the Live/Setup split: picture and Aim remain bounded;
+  // capture and transaction controls stay on the single scrolling workspace.
+  const workspace = await tab.locator('.y-deck--workspace').count() > 0;
+  const foldParts = workspace ? ABOVE_THE_FOLD.filter(([name]) => name !== 'the shutter key') : ABOVE_THE_FOLD;
+  const shape = await tab.evaluate(measure, [LIVE, FIXED, specimens.fields, specimens.masked, foldParts, DECK]);
   for (const reading of shape.readings) fieldsSeen.add(reading.key);
 
   // The committed picture: every reading at its widest honest specimen, and a
@@ -806,7 +810,23 @@ for (const page of pages) {
         "one vertical page scroll, and no scroller of its own inside it (spec §5)",
       );
     }
-    if (rail === null || !rail.present) {
+    if (workspace) {
+      for (const [name, selector] of [['transaction area', '.y-deck__transaction'], ['capture control', '.y-shutter']]) {
+        const control = tab.locator(selector);
+        if (await control.count() !== 1) {
+          note(`  FAIL  ${page.title} (${palette}) must have one ${name}`);
+          failures += 1;
+          continue;
+        }
+        await control.scrollIntoViewIfNeeded();
+        const box = await control.boundingBox();
+        if (!box || box.x < 0 || box.y < 0 || box.x + box.width > shape.viewport.w + 1 || box.y + box.height > shape.viewport.h + 1) {
+          note(`  FAIL  ${page.title} (${palette}) cannot reach the complete ${name} by scrolling`);
+          failures += 1;
+        } else note(`  ok    ${page.title} (${palette}) keeps the ${name} reachable on its single workspace`);
+      }
+      await tab.evaluate(() => { window.scrollTo(0, 0); });
+    } else if (rail === null || !rail.present) {
       note(`  FAIL  ${page.title} (${palette}) has no rail to keep reachable`);
       failures += 1;
     } else if (!rail.inside) {
@@ -926,7 +946,8 @@ if (press) {
     const tab = await context.newPage();
     await tab.goto(baseUrl + page.url, { waitUntil: "load" });
     await tab.waitForTimeout(500);
-    const key = tab.locator("button", { hasText: press }).first();
+    const key = tab.getByRole("button", { name: press, exact: true }).first();
+    await key.waitFor({ state: "visible", timeout: 5000 }).catch(() => {});
     if (await key.count()) {
       await key.click();
       note(`  ok    pressed "${press}" on ${page.title}`);

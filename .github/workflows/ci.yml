@@ -2,6 +2,10 @@ name: CI
 on:
   push: { branches: [main] }
   pull_request:
+# Keep the newest PR checks moving on the shared runners.
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
 # Where these jobs run is a repository variable, not a line in this file.
 #
 # CI_RUNNER unset — a fresh clone, and this repository once it is public —

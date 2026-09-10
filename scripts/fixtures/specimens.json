@@ -168,49 +168,9 @@
       "value": "network: cellular is reaching the internet again at 2026-09-06T23:59:59.999Z; ethernet goes on carrying traffic and cellular is back in the running behind it",
       "why": "the same journal line in the Activity table's second column, whose title is deliberately empty."
     },
-    "nrdb-ui-yonder-databar \u00b7 RUNNING": {
-      "value": "failed \u2014 the pipeline could not be started: Error: spawn gst-launch-1.0 ENOENT; gave up after 5 restarts",
-      "why": "runWords (video/present.ts:309) over the wider of the supervisor's two producers: supervisor.ts:206's `the pipeline could not be started: ${String(e)}` \u2014 not :205's exit code \u2014 plus the `; gave up after 5 restarts` suffix :191 adds at MAX_RESTARTS. `String(e)` is a Node error and is unbounded, so this is a floor."
-    },
-    "nrdb-ui-yonder-databar \u00b7 IDENTITY": {
-      "value": "platform-fd500000.pcie-pci-0000:01:00.0-usb-0:1.3:1.0-video-index0 \u2014 an enumeration number; it may mean a different camera after a reboot",
-      "why": "identityWords' longer branch (video/present.ts) on the by-path name the bench board really answered \u2014 R-CAM-05's own sentence, drawn as a note cell on the readout strip. schema/config.ts caps `device` at 128 characters, so this is the widest observed rather than the widest permitted."
-    },
-    "nrdb-ui-yonder-databar \u00b7 CAMERA": {
-      "value": "Nose mast, forward of the airspeed probe",
-      "why": "the camera's own name out of config.yaml (R-UI-27). `schema/config.ts` caps it at 48 characters and the Setup deck's field at 24; a hand-written configuration can carry the schema's, so that is the one a page has to hold. 40 characters of a name somebody would plausibly type, rather than 48 of filler."
-    },
-    "nrdb-ui-yonder-databar \u00b7 PICTURE": {
-      "value": "3840 \u00d7 2160",
-      "why": "cameraStrip's `width \u00d7 height` at the schema's ceilings (width max 3840, height max 2160)."
-    },
-    "nrdb-ui-yonder-databar \u00b7 RATE": {
-      "value": "60 fps",
-      "why": "cameraStrip's `framerate fps` at the schema's ceiling of 60."
-    },
-    "nrdb-ui-yonder-databar \u00b7 BITRATE": {
-      "value": "20000 kb/s",
-      "why": "cameraStrip's `bitrate_kbps kb/s` at the schema's ceiling of 20000. This is the defect spec \u00a710 lists second: 2000 fits and 20000 does not."
-    },
-    "nrdb-ui-yonder-databar \u00b7 UPLINK": {
-      "value": "169.49 Mb/s at IP",
-      "why": "cameraStrip's uplink: atIp(20000) \u00d7 8 outputs + atIp(4000) preview, at the schema's ceilings (outputs max 8, preview bitrate max 4000), in Mb/s to two places."
-    },
-    "nrdb-ui-yonder-databar \u00b7 BEFORE YOU PRESS START": {
-      "value": "this board has no /dev/v4l/by-path/platform-fd500000.pcie-pci-0000:01:00.0-usb-0:1.3:1.0-video-index0; the cameras it can see are platform-fd500000.pcie-pci-0000:01:00.0-usb-0:1.3:1.0-video-index0",
-      "why": "cameraStrip's startCheck at refuse()'s widest branch, video/pipeline.ts:305 \u2014 not the SRT branch, which is 182 characters. This is its narrowest honest form: one camera, the bench's own 66-character by-path in both positions, 196 characters. It is unbounded above \u2014 schema/config.ts:562 caps `device` at 128 and `offered` joins every by-path name the board can see \u2014 so this is a floor for this field, not a ceiling."
-    },
     "nrdb-ui-yonder-budget": {
       "value": "1356.0 of 5.0 Mb/s",
       "why": "YonderBudget's head line at the configuration schema/config.ts permits most of: eight cameras, eight outputs each, every one at the 20000 kb/s ceiling with a 4000 kb/s preview. Derived by calling the built uplinkBudget() on that configuration; the capacity is ASSUMED_UPLINK_KBPS (video/present.ts:46)."
-    },
-    "nrdb-ui-yonder-databar \u00b7 UDP \u00b7 RTP": {
-      "value": "an outbound push to the configured ground station; it leaves over whichever path is active, cellular included",
-      "why": "the widest of the four notes `video/receive.ts` gives an RTP output, derived by calling renderReceive() over every combination of paths, output states and credential it can be asked about (109 characters). The reachable one is the widest, which is worth knowing: the unusable sentences are not the hard case."
-    },
-    "nrdb-ui-yonder-databar \u00b7 RTSP": {
-      "value": "unusable \u2014 nothing can dial in to this RTSP listener over cellular; it is reachable on the mesh or a LAN",
-      "why": "the widest of the five notes `video/receive.ts` gives an RTSP output, derived the same way (104 characters). This is the one an aircraft in flight actually draws, and R-UI-24 is the requirement it exists for."
     },
     "nrdb-ui-yonder-databar \u00b7 At boot": {
       "value": "Automatic",

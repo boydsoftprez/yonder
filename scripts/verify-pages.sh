@@ -629,7 +629,7 @@ expect_missing "a bitrate change arms the confirmation window" '"expiresAt":null
 # Confirmed, and then put back and confirmed again — an apply left pending
 # blocks every apply behind it, including the theme change the capture gate
 # makes to reach the second palette. That is not hypothetical: it is how this
-# script first reported "pressing NIGHT did nothing: the control is wired but
+# script first reported "pressing Night did nothing: the control is wired but
 # dead", and the control was fine.
 confirm_apply() {
     id=$(printf '%s' "$1" | sed -n 's/.*"id":"\([^"]*\)".*/\1/p')
@@ -1009,12 +1009,12 @@ if node -e 'import("playwright")' >/dev/null 2>&1; then
     node "$REPO/scripts/capture-pages.mjs" \
         --base-url "http://127.0.0.1:$PORT" --password "$PASSWORD" \
         --palette day --artifacts "$REPO/vendor/capture" \
-        --press NIGHT >/dev/null 2>&1 || true
+        --only settings --press Night >/dev/null 2>&1 || true
 
     if wait_for_theme night; then
-        ok "pressing NIGHT on the rail actually reached the device"
+        ok "pressing Night in Settings actually reached the device"
     else
-        bad "pressing NIGHT did nothing: the control is wired but dead"
+        bad "pressing Night did nothing: the control is wired but dead"
     fi
 
     # One page, in one state, under a name of its own.
@@ -1197,8 +1197,8 @@ if node -e 'import("playwright")' >/dev/null 2>&1; then
                 --base-url "http://127.0.0.1:$PORT" \
                 --password "$PASSWORD" \
                 --palette "$1" \
-                --only camera-live \
-                --as camera-live-sensor-turns \
+                --only camera \
+                --as camera-sensor-turns \
                 --artifacts "$REPO/vendor/capture" \
                 --synthetic-cameras "$CAMERAS_SENSOR" \
                 --secrets "$ETC/secrets.yaml" \
@@ -1218,7 +1218,7 @@ if node -e 'import("playwright")' >/dev/null 2>&1; then
     # Status's third shape, and the one the confirmation timer exists for
     # (R-UI-15, R-CFG-03). A change is applied and deliberately *not*
     # confirmed, so the banner is up with a real countdown on it — then the
-    # gate presses `REVERT NOW` and asserts the device put the previous
+    # gate presses `REVERT` and asserts the device put the previous
     # configuration back.
     #
     # `system.hostname` is the change: it affects reachability, so the apply
@@ -1257,7 +1257,7 @@ if node -e 'import("playwright")' >/dev/null 2>&1; then
         rail=$(body "/dashboard/_debug/datastore/keys-pending")
         expect_contains "the rail is offered CONFIRM for a change the operator can confirm" \
             '"action":"confirm"' "$rail"
-        expect_contains "and REVERT NOW beside it" '"action":"revert"' "$rail"
+        expect_contains "and REVERT beside it" '"action":"revert"' "$rail"
         # **And the message stopped there.** The rail's output goes to the node
         # that re-reads `/status` and feeds the rail, so a widget that
         # forwarded its input would turn one poll into an endless loop of
@@ -1295,9 +1295,9 @@ if node -e 'import("playwright")' >/dev/null 2>&1; then
                 --only status \
                 --as status-pending \
                 --artifacts "$REPO/vendor/capture" \
-                --press "REVERT NOW" \
+                --press "REVERT" \
                 ${ACCEPT_SHAPE:+--accept}; then
-            ok "the $1 palette: Status with a change pending, and REVERT NOW to press"
+            ok "the $1 palette: Status with a change pending, and REVERT to press"
         else
             bad "the $1 palette: Status with a change pending, see above"
         fi
@@ -1306,7 +1306,7 @@ if node -e 'import("playwright")' >/dev/null 2>&1; then
             case "$(sock /status)" in *'"state":"idle"'*) break ;; esac
             sleep "$POLL"; i=$((i + 1))
         done
-        expect_contains "pressing REVERT NOW rolled the change back" \
+        expect_contains "pressing REVERT rolled the change back" \
             '"outcome":"reverted"' "$(sock /status)"
         expect_contains "and the device is running the previous configuration" \
             '"hostname":"yonder"' "$(sock /config)"
@@ -1324,14 +1324,14 @@ if node -e 'import("playwright")' >/dev/null 2>&1; then
     # a press either does nothing useful or is made by somebody who cannot see
     # that the device is already fine — and it ends the device's own check
     # early. The countdown is still there, the prose says who is confirming,
-    # and `REVERT NOW` is still there because deciding you do not want the
+    # and `REVERT` is still there because deciding you do not want the
     # change is still a real thing to want.
     #
     # Two things make this capturable at all. The join never lands on this
     # board — nothing here issues an address — so `$JOIN_DELAY` holds the
     # verifier's first poll open rather than letting its 20-second grace run
     # out mid-screenshot. And the press at the end is the proof that matters:
-    # `REVERT NOW` is the operator's only remaining control over this apply,
+    # `REVERT` is the operator's only remaining control over this apply,
     # so a picture of it that nobody pressed would be a picture of a key that
     # might be dead.
     capture_pending_radio() {
@@ -1357,7 +1357,7 @@ if node -e 'import("playwright")' >/dev/null 2>&1; then
         # the widget. A picture shows one key rather than two — this says
         # *which* key, and that the other one is not merely off screen.
         rail=$(body "/dashboard/_debug/datastore/keys-pending")
-        expect_contains "the rail still offers REVERT NOW for a radio move" \
+        expect_contains "the rail still offers REVERT for a radio move" \
             '"action":"revert"' "$rail"
         expect_missing "and offers no CONFIRM, because the device is confirming" \
             '"action":"confirm"' "$rail"
@@ -1371,9 +1371,9 @@ if node -e 'import("playwright")' >/dev/null 2>&1; then
                 --only status \
                 --as status-pending-radio \
                 --artifacts "$REPO/vendor/capture" \
-                --press "REVERT NOW" \
+                --press "REVERT" \
                 ${ACCEPT_SHAPE:+--accept}; then
-            ok "the $1 palette: Status with a radio move pending, and only REVERT NOW to press"
+            ok "the $1 palette: Status with a radio move pending, and only REVERT to press"
         else
             bad "the $1 palette: Status with a radio move pending, see above"
         fi
@@ -1382,10 +1382,10 @@ if node -e 'import("playwright")' >/dev/null 2>&1; then
             case "$(sock /status)" in *'"state":"idle"'*) break ;; esac
             sleep "$POLL"; i=$((i + 1))
         done
-        # **The point of the press.** `REVERT NOW` is the only control this
+        # **The point of the press.** `REVERT` is the only control this
         # banner still offers, so a rail that drew it and could not act on it
         # would be worse than the confirm control it replaced.
-        expect_contains "pressing REVERT NOW undid the radio move" \
+        expect_contains "pressing REVERT undid the radio move" \
             '"outcome":"reverted"' "$(sock /status)"
         expect_contains "and the device is back on its access point" \
             '"ssid":null' "$(sock /config)"
@@ -1636,7 +1636,7 @@ if node -e 'import("playwright")' >/dev/null 2>&1; then
     # rather than pass quietly, and the pair is what the base capture uses.
     capture_fold() {
         # $1 palette, $2 surface name, $3 viewport
-        for camera_page in camera-live camera-setup; do
+        camera_page=camera
             if node "$REPO/scripts/capture-pages.mjs" \
                     --base-url "http://127.0.0.1:$PORT" \
                     --password "$PASSWORD" \
@@ -1653,7 +1653,6 @@ if node -e 'import("playwright")' >/dev/null 2>&1; then
             else
                 bad "the $1 palette: $camera_page on a $2 at $3, see above"
             fi
-        done
     }
 
     if reach_theme night; then

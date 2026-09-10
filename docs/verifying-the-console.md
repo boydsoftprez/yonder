@@ -482,3 +482,20 @@ debt list nobody prunes stops being a list of debts and becomes a list of excuse
 **What it still does not prove.** That a reading is legible in sunlight, that a target is
 comfortable to hit, or that any of it works on a board. A headless browser at 1280×900 is
 one viewport on one machine, and no substitute for the screen somebody is holding.
+
+
+## Combined camera workspace gate (R-UI-29)
+
+The operator-approved [camera workspace revision](superpowers/specs/2026-09-08-camera-workspace.md)
+supersedes the Live/Setup split. The capture gate now photographs `camera`, including
+its sensor-turns state, at notebook and tablet widths. Picture and Aim remain in the
+notebook viewport. Capture and the single transaction area are checked for full
+reachability by page scrolling; the legacy shutter-above-fold and bottom-rail rules
+remain applicable to legacy decks, not this revised composition. Overflow, contrast,
+nested scrolling, credentials, and committed geometry checks remain enforced.
+
+The network harness supplies kernel interface and route observations alongside
+NetworkManager fixtures, keeping automatic reachability untested until explicitly
+probed. Palette changes are exercised from Settings, and pending changes through the
+current Revert control. Retired databar/diagnostic readings have been removed from the
+specimen inventory; controller-path labels use their current names.
