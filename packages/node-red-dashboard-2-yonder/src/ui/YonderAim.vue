@@ -492,6 +492,7 @@ export default {
 
 <style scoped>
 .y-aimpanel { container-type: inline-size; }
+.y-aimpanel__mode { color: var(--yonder-value, #cdd5dc); }
 .y-aimpanel__mode-help { margin:8px 0 0; font-size:11px; line-height:1.45; color:var(--yonder-label, #7f8a95); }
 .y-aimpanel__position { display: grid; grid-template-columns: 1fr 1fr; gap: 12px; margin: 0 0 10px; }
 .y-aimpanel__position div { display: flex; justify-content: space-between; gap: 8px; }

@@ -447,6 +447,7 @@ export function measure([liveSelectors, fixedSelector, specimenValues, maskedKey
   const CONTROL_TEXT = [
     ".nrdb-ui-widget input", ".nrdb-ui-widget textarea", ".nrdb-ui-widget .v-label",
     ".nrdb-ui-widget label", ".nrdb-ui-widget .v-field__input",
+    ".y-aimpanel__mode",
     ".nrdb-ui-widget .v-select__selection-text", ".nrdb-ui-widget .v-messages__message",
     // The table's own search box is not inside a widget wrapper of its own,
     // and it is a field an operator types into. It measured 1.03:1.
