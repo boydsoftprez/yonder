@@ -39,6 +39,7 @@ import YonderSegmented from "./YonderSegmented.vue";
  */
 
 interface AimReport {
+    camera?: string;
     state: string;
     reason: string;
     pan: number;
@@ -499,14 +500,79 @@ describe("the dead state, with its reason", () => {
     });
 });
 
-describe("not-offered: a stated fact, and nothing else", () => {
-    it("draws one fact row and no control at all", () => {
+describe("not-offered: no Aim drawer", () => {
+    it("keeps an absent layout marker, but draws neither an Aim panel nor its handle", () => {
         const { wrapper } = mountAim(makeReport({ state: "not-offered" }));
-        expect(wrapper.text()).toContain("this camera has none");
+        expect(wrapper.attributes("data-aim-state")).toBe("absent");
+        expect(wrapper.find(".y-aimpanel__handle").exists()).toBe(false);
+        expect(wrapper.find(".y-aimpanel__drawer").exists()).toBe(false);
         expect(wrapper.find(".y-aim__dial").exists()).toBe(false);
         expect(wrapper.find(".y-pg").exists()).toBe(false);
         expect(wrapper.find(".y-aimpanel__recentre").exists()).toBe(false);
         expect(wrapper.find(".y-col").exists()).toBe(false);
+    });
+});
+
+describe("the collapsible Aim drawer", () => {
+    it("keeps capable but inoperative cameras reachable through the touch-sized Aim handle", () => {
+        const { wrapper } = mountAim(makeReport({ state: "advertised", reason: "no motor" }));
+        const handle = wrapper.find(".y-aimpanel__handle");
+        expect(wrapper.attributes("data-aim-state")).toBe("open");
+        expect(handle.exists()).toBe(true);
+        expect(handle.attributes("aria-expanded")).toBe("true");
+        expect(handle.element).toHaveProperty("tagName", "BUTTON");
+        expect(wrapper.find(".y-aimpanel__drawer").exists()).toBe(true);
+    });
+
+    it("closes without unmounting the controls, stops an active slew, and persists the choice for that camera", async () => {
+        const cameraKey = "drawer-camera-17";
+        window.localStorage.removeItem(`yonder.aim.drawer.${cameraKey}`);
+        const { wrapper, emit } = mountAim(makeReport(), "a1");
+        await wrapper.setProps({ cameraKey });
+        const el = dial(wrapper);
+        press(el, 0, 0); drag(el, 40, 0);
+        expect(slewCalls(emit).length).toBeGreaterThan(0);
+
+        await wrapper.find(".y-aimpanel__handle").trigger("click");
+        expect(wrapper.attributes("data-aim-state")).toBe("closed");
+        expect(wrapper.find(".y-aimpanel__handle").attributes("aria-expanded")).toBe("false");
+        expect(wrapper.find(".y-aimpanel__drawer").exists()).toBe(true);
+        expect(stopCalls(emit)).toHaveLength(1);
+        expect(window.localStorage.getItem(`yonder.aim.drawer.${cameraKey}`)).toBe("closed");
+
+        const before = slewCalls(emit).length;
+        drag(el, 40, 0);
+        expect(slewCalls(emit)).toHaveLength(before);
+        wrapper.unmount();
+
+        const restored = mountAim(makeReport(), "a2").wrapper;
+        await restored.setProps({ cameraKey });
+        expect(restored.attributes("data-aim-state")).toBe("closed");
+        restored.unmount();
+        window.localStorage.removeItem(`yonder.aim.drawer.${cameraKey}`);
+    });
+
+    it("uses the report's actual camera identity when selection switches between cameras", async () => {
+        const first = "usb:1-2.4";
+        const second = "rtsp:thermal-01";
+        window.localStorage.removeItem(`yonder.aim.drawer.${encodeURIComponent(first)}`);
+        window.localStorage.removeItem(`yonder.aim.drawer.${encodeURIComponent(second)}`);
+        const { wrapper } = mountAim(makeReport({ camera: first }));
+
+        await wrapper.find(".y-aimpanel__handle").trigger("click");
+        expect(wrapper.attributes("data-aim-state")).toBe("closed");
+        expect(window.localStorage.getItem(`yonder.aim.drawer.${encodeURIComponent(first)}`)).toBe("closed");
+
+        await wrapper.setProps({ props: { report: makeReport({ camera: second }) } });
+        expect(wrapper.attributes("data-aim-state")).toBe("open");
+        await wrapper.find(".y-aimpanel__handle").trigger("click");
+        expect(window.localStorage.getItem(`yonder.aim.drawer.${encodeURIComponent(second)}`)).toBe("closed");
+
+        await wrapper.setProps({ props: { report: makeReport({ camera: first }) } });
+        expect(wrapper.attributes("data-aim-state")).toBe("closed");
+        wrapper.unmount();
+        window.localStorage.removeItem(`yonder.aim.drawer.${encodeURIComponent(first)}`);
+        window.localStorage.removeItem(`yonder.aim.drawer.${encodeURIComponent(second)}`);
     });
 });
 

@@ -1,0 +1,123 @@
+--- a/rkaiq_3A_server/rkaiq_3A_server.cpp
++++ b/rkaiq_3A_server/rkaiq_3A_server.cpp
+@@ -13,6 +13,9 @@
+ #include <pthread.h>
+
+ #include <linux/videodev2.h>
++#include <linux/v4l2-subdev.h>
++#include <stddef.h>
++#include "common/rk-camera-module.h"
+ #include "uAPI2/rk_aiq_user_api2_sysctl.h"
+ #include "common/mediactl/mediactl.h"
+
+@@ -46,6 +49,7 @@
+     char vd_stats_path[RKAIQ_FILE_PATH_LEN];
+     char mainpath[RKAIQ_FILE_PATH_LEN];
+     char sensor_entity_name[32];
++    char sensor_path[RKAIQ_FILE_PATH_LEN];
+
+     char mdev_path[32];
+     int available;
+@@ -135,15 +139,87 @@
+     }
+
+     strcpy(media_info->sensor_entity_name, sensor_name);
++    ret = rkaiq_get_devname(device, sensor_name, media_info->sensor_path);
+
+     media_device_unref (device);
+
+     return ret;
+ }
+
++static bool experimental_hdr2()
++{
++    const char *mode = getenv("YONDER_SEEKERHD_MODE");
++    if (!mode || !strcmp(mode, "linear")) return false;
++    if (!strcmp(mode, "hdr2")) return true;
++    ERR("YONDER_SEEKERHD_MODE must be linear or hdr2\n");
++    exit(EXIT_FAILURE);
++}
++
++// Pinned Rockchip 6.1 ABI. New Linux headers reuse reserved[0] as stream,
++// so their named reserved array no longer contains the vendor HDR mode.
++struct seekerhd_vendor_frame_interval_enum {
++    __u32 index, pad, code, width, height;
++    struct v4l2_fract interval;
++    __u32 which;
++    __u32 reserved[8];
++};
++static_assert(sizeof(seekerhd_vendor_frame_interval_enum) == 64, "vendor frame interval ABI size");
++static_assert(offsetof(seekerhd_vendor_frame_interval_enum, reserved) == 32, "vendor HDR mode ABI offset");
++
++static void check_hdr_merge()
++{
++    // R-CTL-06: this pinned RK356x path needs the ISP HDR merge block.
++    // The vendor kernel starts CSI even after rejecting a missing block,
++    // leaving dropped frames instead of a useful capture-start failure.
++    FILE *feature = fopen("/proc/device-tree/rkisp@fdff0000/rockchip,iq-feature", "rb");
++    unsigned char bytes[9] = {};
++    size_t count = feature ? fread(bytes, 1, sizeof(bytes), feature) : 0;
++    if (feature) fclose(feature);
++    unsigned long long mask = 0;
++    if (count == 8) {
++        for (size_t i = 0; i < count; ++i) mask = (mask << 8) | bytes[i];
++    }
++    if (count != 8 || !(mask & (1ULL << 27))) {
++        ERR("HDR2 refused: board ISP feature mask does not enable HDR merge (mask=0x%llx)\n", mask);
++        exit(EXIT_FAILURE);
++    }
++}
++
++static void check_hdr_sensor(struct rkaiq_media_info *info, bool prepared)
++{
++    int fd = open(info->sensor_path, O_RDWR | O_CLOEXEC);
++    if (fd < 0) errno_exit("open HDR sensor");
++    bool advertised = false;
++    for (unsigned int index = 0; index < 32; ++index) {
++        struct seekerhd_vendor_frame_interval_enum fie = {};
++        fie.index = index;
++        if (xioctl(fd, _IOWR('V', 75, struct seekerhd_vendor_frame_interval_enum), &fie) < 0) break;
++        if (fie.reserved[0] == HDR_X2 && fie.width == 1952 && fie.height == 1089)
++            advertised = true;
++    }
++    struct rkmodule_hdr_cfg cfg = {};
++    int result = xioctl(fd, RKMODULE_GET_HDR_CFG, &cfg);
++    close(fd);
++    if (!advertised || result < 0 ||
++        (prepared && (cfg.hdr_mode != HDR_X2 || cfg.esp.mode != HDR_ID_CODE))) {
++        ERR("IMX462 HDR2 %s check failed: advertised=%d query=%d mode=%u packing=%u\n",
++            prepared ? "readback" : "capability", advertised, result, cfg.hdr_mode, cfg.esp.mode);
++        exit(EXIT_FAILURE);
++    }
++}
++
+ static void init_engine(struct rkaiq_media_info *media_info)
+ {
+     int index;
++    const bool hdr2 = experimental_hdr2();
++    if (hdr2) {
++        check_hdr_merge();
++        check_hdr_sensor(media_info, false);
++        if (rk_aiq_uapi2_sysctl_preInit_scene(media_info->sensor_entity_name, "hdr", "day")) {
++            ERR("HDR calibration scene selection failed\n");
++            exit(EXIT_FAILURE);
++        }
++    }
+
+     media_info->aiq_ctx = rk_aiq_uapi2_sysctl_init(media_info->sensor_entity_name,
+                                                   IQ_PATH, NULL, NULL);
+@@ -154,10 +230,13 @@
+         rk_aiq_uapi2_sysctl_setMulCamConc(media_info->aiq_ctx, 1);
+
+     if (rk_aiq_uapi2_sysctl_prepare(media_info->aiq_ctx,
+-            width, height, RK_AIQ_WORKING_MODE_NORMAL)) {
++            hdr2 ? 1952 : width, hdr2 ? 1089 : height,
++            hdr2 ? RK_AIQ_WORKING_MODE_ISP_HDR2 : RK_AIQ_WORKING_MODE_NORMAL)) {
+         ERR("rkaiq engine prepare failed !\n");
+         exit(-1);
+     }
++    if (hdr2) check_hdr_sensor(media_info, true);
++    fprintf(stderr, "SeekerHD capture mode: %s\n", hdr2 ? "experimental HDR2 (two exposures)" : "linear");
+ }
+
+ static void start_engine(struct rkaiq_media_info *media_info)

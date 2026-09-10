@@ -1,12 +1,26 @@
 <!-- SPDX-License-Identifier: GPL-3.0-or-later -->
 <template>
-    <div class="y-aimpanel">
+    <div class="y-aimpanel" :data-aim-state="drawerState">
+        <!-- An absent capability owns no edge handle. The camera workspace
+             leaves this empty mount point in place so its layout can respond
+             without mounting or remounting the picture receiver. -->
         <div v-if="!report" class="y-aimpanel__empty">Waiting for this camera's report.</div>
-        <div v-else-if="aimState === 'not-offered'" class="y-aimpanel__fact">
-            <span class="y-aimpanel__fact-l">Aim</span>
-            <span class="y-aimpanel__fact-v">{{ reason || 'this camera has none' }}</span>
-        </div>
-        <YonderColumn v-else legend="Aim" :qualifier="badgeText" :tone="badgeTone">
+        <template v-else-if="aimOffered">
+            <button
+                type="button"
+                class="y-aimpanel__handle"
+                :aria-expanded="String(drawerOpen)"
+                :aria-controls="drawerId"
+                :title="drawerOpen ? 'Hide Aim controls' : 'Show Aim controls'"
+                @click="toggleDrawer"
+            ><span>Aim</span><i aria-hidden="true">{{ drawerOpen ? '›' : '‹' }}</i></button>
+            <section
+                v-show="drawerOpen"
+                :id="drawerId"
+                class="y-aimpanel__drawer"
+                aria-label="Aim controls"
+            >
+        <YonderColumn legend="Aim" :qualifier="badgeText" :tone="badgeTone">
             <!--
               **Said once, at the top, for the whole panel.**
 
@@ -68,6 +82,8 @@
             <YonderAimPresets v-if="report.presets && report.url" :presets="report.presets" :endpoint="presetEndpoint" :can-move="presetReady"
                 :move-reason="presetBlockReason" :active-slot="activePreset" :movement-message="presetMessage" @recall="recallPreset" @stop="aimDisconnect" />
         </YonderColumn>
+            </section>
+        </template>
     </div>
 </template>
 
@@ -80,6 +96,27 @@ import YonderSegmented from './YonderSegmented.vue'
 import YonderColumn from './YonderColumn.vue'
 import { AimTransport } from './aim-transport.ts'
 import { SPEED_KEY, savedNumber } from './aim-response.ts'
+
+const DRAWER_PREFERENCE_PREFIX = 'yonder.aim.drawer.'
+
+function drawerPreference (cameraKey) {
+    try {
+        const saved = window.localStorage.getItem(DRAWER_PREFERENCE_PREFIX + encodeURIComponent(cameraKey))
+        return saved === null ? true : saved === 'open'
+    } catch (_) {
+        // Storage can be unavailable in a private or policy-managed browser.
+        // The usable, default-open control is preferable to failing to draw it.
+        return true
+    }
+}
+
+function saveDrawerPreference (cameraKey, open) {
+    try {
+        window.localStorage.setItem(DRAWER_PREFERENCE_PREFIX + encodeURIComponent(cameraKey), open ? 'open' : 'closed')
+    } catch (_) {
+        // Preference storage is an enhancement, never a reason to lose Aim.
+    }
+}
 
 /**
  * `ui-yonder-aim` — the gimbal panel as a node of its own (R-UI-28,
@@ -233,8 +270,12 @@ export default {
     mixins: [cameraSessionMixin],
     inject: ['$socket', '$dataTracker'],
     components: { YonderAimPad, YonderAimPresets, YonderPositionGauge, YonderSegmented, YonderColumn },
+    emits: ['drawer-change'],
     props: {
         id: { type: String, required: true },
+        /** A stable camera identity supplied by the composition. `id` is a
+         * Dashboard widget id, so it is only the fallback for older callers. */
+        cameraKey: { type: String, default: '' },
         props: { type: Object, default: () => ({}) },
         state: { type: Object, default: () => ({}) }
     },
@@ -250,7 +291,8 @@ export default {
         aimError: null,
         activePreset: null,
         presetMessage: '',
-        recentrePending: false
+        recentrePending: false,
+        drawerOpen: true
     }),
     computed: {
         presetEndpoint () { return this.report?.url?.replace(/\/aim$/, '/presets') || '' },
@@ -288,6 +330,24 @@ export default {
          * state never falls open into a live control. */
         aimState () {
             return (this.report && this.report.state) || 'not-offered'
+        },
+        /** A camera that has no aim capability gets no empty side panel or
+         * handle. `advertised` and `gated` still offer Aim, even though their
+         * controls remain inoperative as their existing state requires. */
+        aimOffered () {
+            return Boolean(this.report) && this.aimState !== 'not-offered'
+        },
+        /** The stable browser preference belongs to the camera, never to a
+         * transient selected-card position or Dashboard widget instance. */
+        drawerCameraKey () {
+            return this.cameraKey || this.report?.camera || this.report?.cameraKey || this.report?.cameraId || this.id
+        },
+        drawerState () {
+            if (!this.aimOffered) return 'absent'
+            return this.drawerOpen ? 'open' : 'closed'
+        },
+        drawerId () {
+            return `aim-drawer-${this.id.replace(/[^A-Za-z0-9_-]/g, '-')}`
         },
         reason () {
             return (this.report && this.report.reason) || ''
@@ -416,6 +476,9 @@ export default {
         }
     },
     watch: {
+        drawerCameraKey (now, before) {
+            if (now !== before) this.drawerOpen = drawerPreference(now)
+        },
         /** The nearest honest "seen since" signal this payload has for a
          * fire-and-forget Recentre press — see this component's own doc
          * comment. Fires on every fresh report, which is deliberate: a
@@ -429,6 +492,7 @@ export default {
         }
     },
     created () {
+        this.drawerOpen = drawerPreference(this.drawerCameraKey)
         this.$dataTracker(this.id)
         this.aimTransport = new AimTransport(() => this.report, (rate, reason) => { this.commandedPan = rate.pan; this.commandedTilt = rate.tilt; this.aimError = reason }, undefined, state => {
             this.activePreset = state?.state === 'moving' ? state.slot : null
@@ -438,6 +502,16 @@ export default {
     },
     beforeUnmount () { this.aimTransport?.close(); this.$socket.off?.('disconnect', this.aimDisconnect) },
     methods: {
+        setDrawerOpen (open) {
+            if (!this.aimOffered || this.drawerOpen === open) return
+            // Hiding a live pad ends its active gesture. `onEnd()` is
+            // idempotent, so this relays a stop only when movement is active.
+            if (!open) this.$refs.aimPad?.onEnd()
+            this.drawerOpen = open
+            saveDrawerPreference(this.drawerCameraKey, open)
+            this.$emit('drawer-change', { cameraKey: this.drawerCameraKey, open })
+        },
+        toggleDrawer () { this.setDrawerOpen(!this.drawerOpen) },
         recallPreset ({slot,revision}) {
             if (!this.presetReady) return
             this.$refs.aimPad?.onEnd()
@@ -500,27 +574,64 @@ export default {
 .y-aimpanel__position dd { margin: 0; font-variant-numeric: tabular-nums; font-size: 13px; color: var(--yonder-value, #fff); }
 .y-aimpanel {
     font-family: var(--yonder-font, system-ui, sans-serif);
+    display: flex;
+    align-items: stretch;
+    min-width: 0;
+    position: relative;
 }
 .y-aimpanel__empty {
     padding: 14px 16px;
     color: var(--yonder-label, #7f8a95);
     font-size: 12px;
 }
-.y-aimpanel__fact {
-    display: flex;
-    gap: 10px;
-    align-items: baseline;
-    padding: 4px 16px;
-    font-size: 13px;
-}
-.y-aimpanel__fact-l {
+.y-aimpanel__handle {
+    order: 2;
+    align-self: stretch;
+    margin-left: auto;
+    min-width: 44px;
+    min-height: 44px;
+    padding: 8px 6px;
+    border: 1px solid var(--yonder-divider, #2b333c);
+    border-radius: 0 3px 3px 0;
+    background: var(--yonder-panel, rgba(12, 18, 24, 0.94));
+    color: var(--yonder-value, #fff);
+    font: inherit;
     font-size: 10.5px;
-    letter-spacing: 0.1em;
+    font-weight: 600;
+    letter-spacing: .1em;
     text-transform: uppercase;
-    color: var(--yonder-label, #7f8a95);
-    min-width: 90px;
+    cursor: pointer;
 }
-.y-aimpanel__fact-v { color: var(--yonder-neutral, #7d7869); }
+.y-aimpanel__handle:hover,
+.y-aimpanel__handle:focus-visible {
+    border-color: var(--yonder-select, #2ad4f0);
+    color: var(--yonder-select, #2ad4f0);
+    outline: none;
+}
+.y-aimpanel__handle i { display: block; margin-top: 5px; font-size: 16px; font-style: normal; line-height: 1; }
+.y-aimpanel__drawer { order: 1; min-width: 0; flex: 1; padding: 0 4px; }
+
+/* A narrow screen keeps the receiver at its normal width. The drawer sits
+   over the picture workspace until the operator closes it; it never narrows
+   the video column or causes that receiver to be recreated. */
+@container camera-workspace (max-width: 899px) {
+    .y-aimpanel__handle { margin-left: auto; }
+    .y-aimpanel[data-aim-state='open'] .y-aimpanel__drawer {
+        position: absolute;
+        z-index: 20;
+        right: 44px;
+        top: 0;
+        width: min(280px, calc(100cqw - 76px));
+        box-sizing: border-box;
+        max-height: min(calc(100dvh - 140px), 42rem);
+        overflow: auto;
+        padding: 12px;
+        border: 1px solid var(--yonder-divider, #2b333c);
+        border-radius: 3px 0 0 3px;
+        background: var(--yonder-pane, #0c1218);
+        box-shadow: -10px 0 24px rgba(0, 0, 0, .28);
+    }
+}
 
 /* Always the neutral tone, deliberately, rather than a second tone lookup
    keyed on aimState. The badge beside this line (`badgeTone`) already

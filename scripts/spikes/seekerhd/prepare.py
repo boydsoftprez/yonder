@@ -6,11 +6,29 @@ import subprocess
 import fcntl
 import os
 import struct
+import errno
 from pathlib import Path
 
 
 def run(*args):
     return subprocess.check_output(args, text=True, timeout=20)
+
+
+def sensor_capture_mode(fd):
+    # Pinned vendor 6.1 rkmodule_hdr_cfg ABI: 16 bytes mode/packing and
+    # 324 bytes compression description. The legacy bring-up driver has
+    # no GET_HDR_CFG; ENOTTY means its existing linear-only behavior.
+    data = bytearray(340)
+    try:
+        fcntl.ioctl(fd, 0x815456c4, data, True)  # RKMODULE_GET_HDR_CFG
+    except OSError as error:
+        if error.errno == errno.ENOTTY:
+            return 0
+        raise
+    mode = struct.unpack_from('I', data)[0]
+    if mode not in (0, 5):
+        raise RuntimeError(f'Unsupported sensor capture mode {mode}')
+    return mode
 
 
 def main():
@@ -41,7 +59,11 @@ def main():
     # the stable V4L2 control ABI and verify each write through G_CTRL.
     fd = os.open(sensor, os.O_RDWR)
     try:
-        for control, value in [(0x009e0901, 1170), (0x00980911, 2000), (0x009e0903, 48)]:
+        hdr2 = sensor_capture_mode(fd) == 5
+        # HDR owns its FSC, two shutters and two gains through the vendor
+        # HDR exposure ABI. Applying linear controls here would corrupt it.
+        controls = [] if hdr2 else [(0x009e0901, 1170), (0x00980911, 2000), (0x009e0903, 48)]
+        for control, value in controls:
             fcntl.ioctl(fd, 0xc008561c, struct.pack('Ii', control, value))  # S_CTRL
             result = bytearray(struct.pack('Ii', control, 0))
             fcntl.ioctl(fd, 0xc008561b, result, True)  # G_CTRL
@@ -52,7 +74,8 @@ def main():
     run('udevadm', 'settle', '--timeout=10')
     run('v4l2-ctl', '-d', '/dev/v4l/by-path/platform-rkisp-vir0-video-index0',
         '--set-fmt-video=width=1280,height=720,pixelformat=NV12')
-    print('SeekerHD prepared: full-field NV12 1280x720, sensor 30 fps')
+    print('SeekerHD prepared: NV12 1280x720, ' +
+          ('experimental HDR2 timing retained' if hdr2 else 'linear sensor 30 fps'))
 
 
 if __name__ == '__main__':

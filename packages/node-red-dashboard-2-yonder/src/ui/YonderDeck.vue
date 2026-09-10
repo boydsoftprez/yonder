@@ -1,6 +1,6 @@
 <!-- SPDX-License-Identifier: GPL-3.0-or-later -->
 <script>
-import { h } from 'vue'
+import { h, Teleport, markRaw } from 'vue'
 import YonderIdentity from './YonderIdentity.vue'
 import { expireCameraSession } from './camera-session.ts'
 import YonderPlacard from './YonderPlacard.vue'
@@ -112,15 +112,22 @@ const GROUP_LEGEND = {
  * and never moves another group between columns. Preview sits alone because
  * it is the tallest and most variable group.
  */
-const IMAGE_SLOTS = [['capture'], ['exposure'], ['optics', 'colour'], ['rendering', 'housekeeping']]
-const CONFIG_SLOTS = [['stream'], ['preview'], ['streamColor', 'orientation']]
+/* The working controls stay in one three-column deck. Stream and Preview are
+ * staged policy; Camera image is a native, immediate control when the ISP is
+ * present. Orientation and the shutter follow it in that third column, where
+ * the live picture makes their effect and destination visible together. */
+const MAIN_SLOTS = [['stream'], ['preview'], ['isp', 'streamColor', 'orientation']]
+/* Other camera-native controls remain available, but are a separate section
+ * only when the camera actually reported one. CSI therefore has no empty
+ * "Native camera controls" heading. */
+const NATIVE_SLOTS = [['exposure', 'optics'], ['colour', 'rendering'], ['housekeeping']]
 const OUTPUT_PATH = { rtp: 'outputRtp', rtsp: 'outputRtsp', srt: 'outputSrt' }
 const DRAFT_LABELS = {
   name:'Camera name', width:'Output width', height:'Output height', framerate:'Output frame rate', codec:'Output codec',
   streamMode:'Stream bitrate mode', streamBitrate:'Stream bitrate', streamFloor:'Stream minimum bitrate', streamCeiling:'Stream maximum bitrate',
   previewMode:'Preview bitrate mode', previewCodec:'Preview codec', previewSize:'Preview size', previewLadderBottom:'Smallest preview size', previewLadderTop:'Largest preview size',
   previewFloor:'Preview minimum bitrate', previewCeiling:'Preview maximum bitrate', previewBitrate:'Preview bitrate', previewRate:'Preview frame rate',
-  rotation:'Rotation', horizontalFlip:'Mirror', verticalFlip:'Flip', outputRtp:'RTP output', outputRtsp:'RTSP output', outputSrt:'SRT output',
+  rotation:'Rotation', horizontalFlip:'Mirror', verticalFlip:'Flip', outputRtp:'RTP output', outputRtsp:'RTSP output', outputSrt:'SRT output', rtpHost:'RTP receiver address', rtpPort:'RTP receiver port',
   imageBrightness:'Stream brightness', imageContrast:'Stream contrast', imageSaturation:'Stream saturation', imageHue:'Stream hue',
 }
 
@@ -179,6 +186,33 @@ function stepPrecision (step) {
   const s = String(step)
   const i = s.indexOf('.')
   return i === -1 ? 0 : s.length - i - 1
+}
+
+/**
+ * The ISP uses unsigned bytes, centred at 128.  Keep that protocol entirely
+ * at this boundary: the operator sees an ordinary signed adjustment, while
+ * the native command and readback remain exact at both 0 and 255.
+ */
+export function ispRawToSigned (raw) {
+  if (!Number.isFinite(raw)) return null
+  return Math.round(raw < 128 ? ((raw - 128) / 128) * 100 : ((raw - 128) / 127) * 100)
+}
+
+export function ispSignedToRaw (display) {
+  if (!Number.isFinite(display)) return null
+  const signed = Math.max(-100, Math.min(100, display))
+  return Math.round(128 + signed * (signed < 0 ? 128 : 127) / 100)
+}
+
+export function ispRawToDisplay (control, raw) {
+  const signed = ispRawToSigned(raw)
+  if (signed === null) return null
+  return control === 'contrast' || control === 'saturation' ? 100 + signed : signed
+}
+
+export function ispDisplayToRaw (control, display) {
+  const signed = control === 'contrast' || control === 'saturation' ? display - 100 : display
+  return ispSignedToRaw(signed)
 }
 
 /**
@@ -255,7 +289,10 @@ export function appliedForDraft (payload) {
   if (payload && payload.camera && typeof payload.camera.name === 'string') {
     flat.name = payload.camera.name
   }
-  for (const output of payload?.outputs || []) if (OUTPUT_PATH[output.kind]) flat[OUTPUT_PATH[output.kind]] = output.enabled
+  for (const output of payload?.outputs || []) {
+    if (OUTPUT_PATH[output.kind]) flat[OUTPUT_PATH[output.kind]] = output.enabled
+    if (output.kind === 'rtp') { flat.rtpHost = output.host; flat.rtpPort = output.port }
+  }
   return flat
 }
 
@@ -270,6 +307,7 @@ export default {
   },
   data () {
     return {
+      captureTarget: null,
       draftStore: createDraftStore(),
       /** Bumped on every staged edit, applied or discarded — the reactive
        * dependency that tells Vue the plain `Map`s inside `draftStore` (never
@@ -322,8 +360,18 @@ export default {
       : null
     if (saved || readCameraDrafts()) { this.draftStore.restore(saved || readCameraDrafts()); this.draftVersion++ }
   },
-  mounted () { this.clockTimer = setInterval(() => { this.now = Date.now() }, 1000) },
-  beforeUnmount () { clearInterval(this.clockTimer); this.closeConnection() },
+  mounted () {
+    this.clockTimer = setInterval(() => { this.now = Date.now() }, 1000)
+    // Independently mounted widgets share a dock, never command ownership.
+    const dock = () => {
+      const target = document.querySelector('#nrdb-page-page-camera .y-pic__capture-host')
+      if (target !== this.captureTarget) this.captureTarget = target ? markRaw(target) : null
+    }
+    dock()
+    this.captureObserver = new MutationObserver(dock)
+    this.captureObserver.observe(document.body, { childList: true, subtree: true })
+  },
+  beforeUnmount () { this.captureObserver?.disconnect(); clearInterval(this.clockTimer); this.closeConnection() },
   computed: {
     message () { return this.$store?.state?.data?.messages?.[this.id]?.payload || this.props.report || null },
     workspace () { return this.message?.workspace || {} },
@@ -398,6 +446,23 @@ export default {
     pendingEdits () {
       void this.draftVersion
       return this.report ? this.draftStore.pending(this.camera, this.appliedFlat) : []
+    },
+    /** The ISP block is present only in the SeekerHD CSI report.  Its values
+     * are device readback, never a local draft: a press changes the camera
+     * immediately and the next report is the authority for what is shown. */
+    isp () {
+      const isp = this.report?.isp
+      return isp && typeof isp === 'object' ? isp : null
+    },
+    ispWritable () {
+      return Boolean(this.isp?.available && this.isp?.running && !this.signInRequired)
+    },
+    ispReason () {
+      if (this.signInRequired) return 'Sign in to restore camera controls.'
+      if (this.isp?.reason) return this.isp.reason
+      if (!this.isp?.available) return 'Camera image controls are unavailable.'
+      if (!this.isp?.running) return 'Camera service is not running.'
+      return ''
     },
   },
   watch: {
@@ -489,6 +554,16 @@ export default {
         ...(pending && component === YonderTextField ? { hint: notice } : {}) })
     },
     nativeControl (command) { this.post({ nativeControl: command }) },
+    setIspProfile (profile) {
+      if (!this.ispWritable) return
+      this.nativeControl({ kind: 'isp-profile', value: profile })
+    },
+    setIspControl (control, value) {
+      if (!this.ispWritable) return
+      const raw = ispDisplayToRaw(control, value)
+      if (raw === null || raw === this.isp.values?.[control]) return
+      this.nativeControl({ kind: 'isp-control', control, value: raw })
+    },
     hasDraft (path) {
       return Object.prototype.hasOwnProperty.call(this.draft, path)
     },
@@ -610,6 +685,7 @@ export default {
       this.persistDraft()
     },
     toggleOutput (kind, enabled) {
+      if (kind === 'rtp' && enabled && !this.hasDraft('rtpPort') && !this.report.outputs?.some(o => o.kind === 'rtp')) this.stage('rtpPort', 5600)
       if (OUTPUT_PATH[kind]) this.stage(OUTPUT_PATH[kind], enabled)
     },
     /**
@@ -795,6 +871,7 @@ export default {
         : captureDestination(this.recorder, mode)
       return h(YonderShutter, {
         key: 'shutter',
+        compact: true,
         mode,
         // From the recorder's own answer, so the elapsed time counts from
         // when the board began rather than from when this browser pressed —
@@ -849,6 +926,7 @@ export default {
         this.field(YonderPicker, { key: 'captureRate', label: 'Output frame rate', value: this.draftValue('framerate', capture.framerate), options: rates.map(value => ({ value: String(value), label: `${value} fps` })), onChange: value => this.stage('framerate', Number(value)) })]
     },
     buildGroup (groupId) {
+      if (groupId === 'isp') return this.buildIspImage()
       if (groupId === 'streamColor') return this.buildStreamColor()
       if (this.report?.accessory) return this.buildNativeGroup(groupId)
       const r = this.report
@@ -1008,7 +1086,7 @@ export default {
       }, `Captures (${count}) \u203a`))
       }
 
-      return h(YonderColumn, { legend: GROUP_LEGEND.capture, key: 'capture' }, () => children)
+      return h('section', { class: 'y-deck__capture-toolbar', 'aria-label': 'Capture' }, children)
     },
     /**
      * Stream and preview policy edits go to the draft, never the socket —
@@ -1023,7 +1101,7 @@ export default {
       const applied = r.applied && r.applied.stream
       const uiMode = this.draftValue('streamMode', toUiMode(policy.mode))
       const adaptive = uiMode === 'Adaptive'
-      const children = []
+      const children = [h('p', { class: 'y-deck__panel-note' }, 'Staged changes take effect when you press Apply.')]
       {
         children.push(this.field(YonderTextField, {
           key: 'name',
@@ -1237,7 +1315,7 @@ export default {
         const [width, height] = option.value.split('x').map(Number)
         return width <= maxWidth && height <= maxHeight
       }
-      const children = []
+      const children = [h('p', { class: 'y-deck__panel-note' }, 'Staged changes take effect when you press Apply.')]
       const hevc = typeof RTCRtpReceiver !== 'undefined' &&
         RTCRtpReceiver.getCapabilities?.('video')?.codecs?.some(c => c.mimeType.toLowerCase() === 'video/h265')
       const codecs = (r.codecs || ['h264']).filter(codec => codec !== 'h265' || hevc)
@@ -1337,33 +1415,85 @@ export default {
       if (adaptive) children.push(h('p', { class: 'y-deck__note' }, this.report.runtime?.decision?.reason || 'Waiting for receiver feedback.'))
       return h(YonderColumn, { legend: GROUP_LEGEND.preview, qualifier: 'to this browser', key: 'preview' }, () => children)
     },
-    buildStreamColor () {
-      const image = this.report.policy?.image || { brightness: 0, contrast: 100, saturation: 100, hue: 0 }
+    buildGenericStreamColor (image, activeNote = '') {
       const fields = [
         ['imageBrightness', 'Brightness', 'brightness', -100, 100, '%'],
         ['imageContrast', 'Contrast', 'contrast', 0, 200, '%'],
         ['imageSaturation', 'Saturation', 'saturation', 0, 200, '%'],
         ['imageHue', 'Hue', 'hue', -180, 180, '°'],
       ]
-      return h(YonderColumn, { legend: 'Stream color', key: 'streamColor' }, () => [
-        h('p', { class: 'y-deck__color-note' }, "Adjusts Yonder's streams and thumbnails. Neutral values bypass processing; adjustments use CPU and can reduce frame rate. Camera-card files use native settings."),
+      return h(YonderColumn, { legend: 'Stream color', key: 'streamColorGeneric' }, () => [
+        h('p', { class: 'y-deck__color-note' }, activeNote || "Staged changes take effect when you press Apply. Adjusts Yonder's streams and thumbnails; neutral values bypass processing, while adjustments use CPU and can reduce frame rate. Camera-card files use native settings."),
         ...fields.map(([key, label, property, min, max, unit]) => this.field(YonderSetBar, { key, label, unit, min, max, step: 1,
           actual: image[property], requested: this.stagedValue(key), onSet: value => this.stage(key, value) })),
       ])
+    },
+    buildIspImage () {
+      if (!this.isp) return null
+      const values = this.isp.values || {}
+      const state = this.ispWritable ? 'present' : 'gated'
+      const fields = [
+        ['Brightness', 'brightness'],
+        ['Contrast', 'contrast'],
+        ['Saturation', 'saturation'],
+        ['Hue', 'hue'],
+      ]
+      return h(YonderColumn, { legend: 'Camera image', qualifier: 'hardware · live', key: 'isp' }, () => [
+        this.field(YonderPicker, {
+          key: 'ispProfile', label: 'Preset', value: this.isp.profile || '', options: this.isp.profiles || [],
+          state, reason: this.ispReason, onChange: value => this.setIspProfile(value),
+        }),
+        h('p', { class: 'y-deck__color-note' }, 'Release a slider to apply its value live. Brightness and hue are centred at 0; contrast and saturation are centred at 100%.'),
+        ...fields.map(([label, control]) => this.field(YonderSetBar, {
+          key: `isp-${control}`, label,
+          min: control === 'contrast' || control === 'saturation' ? 0 : -100,
+          max: control === 'contrast' || control === 'saturation' ? 200 : 100,
+          unit: '%', step: 1, precision: 0, commitOnRelease: true,
+          actual: ispRawToDisplay(control, values[control]), state, reason: this.ispReason,
+          onSet: value => this.setIspControl(control, value),
+        })),
+        h('p', { class: 'y-deck__color-note' }, 'Applies live to both streams without restarting video. Preset selection survives reboot; adjustments reset when a preset is loaded or the camera service restarts.'),
+      ])
+    },
+    buildStreamColor () {
+      const image = { brightness: 0, contrast: 100, saturation: 100, hue: 0, ...(this.report.policy?.image || {}) }
+      const streamColorActive = image.brightness !== 0 || image.contrast !== 100 || image.saturation !== 100 || image.hue !== 0
+      if (this.isp && !streamColorActive) return null
+      return this.buildGenericStreamColor(image, this.isp
+        ? 'Existing Stream color adjustments also affect the image. Set them to their neutral values and press Apply to clear them.'
+        : '')
     },
     buildOutputs () {
       const outputs = [...(this.report.outputs || [])]
       if (!outputs.some(output => output.kind === 'rtsp')) outputs.push({ kind: 'rtsp', label: 'RTSP', enabled: false, costKbps: null,
         reach: { note: 'Enable for an authenticated player on your LAN or mesh.' } })
+      if (!outputs.some(output => output.kind === 'rtp')) outputs.push({ kind: 'rtp', label: 'RTP / UDP · to the ground station', enabled: false })
       const rows = outputs.map((o) => h('div', { class: 'y-deck__out', key: o.kind }, [
         h('span', { class: 'y-deck__out-l' }, o.label || o.kind),
         this.field(YonderSegmented, {
-          key: OUTPUT_PATH[o.kind], label: o.kind === 'rtsp' ? 'Enable RTSP' : '',
+          key: OUTPUT_PATH[o.kind], label: o.kind === 'rtsp' ? 'Enable RTSP' : o.kind === 'rtp' ? 'Enable RTP / UDP' : '',
           options: ['Off', 'On'],
           value: this.draftValue(OUTPUT_PATH[o.kind], o.enabled) ? 'On' : 'Off',
           reason: this.stagedReason(OUTPUT_PATH[o.kind]),
           onChange: (v) => this.toggleOutput(o.kind, v === 'On'),
         }),
+        ...(o.kind === 'rtp' ? [
+          this.field(YonderTextField, {
+            key: 'rtpHost', label: 'Receiver IPv4 address', max: 15,
+            value: this.draftValue('rtpHost', o.host || ''), placeholder: '192.168.1.50',
+            hint: 'Address of the ground station receiving video.',
+            'onUpdate:value': value => {
+              this.stage('rtpHost', value.trim())
+              if (!this.hasDraft('rtpPort') && o.port === undefined) this.stage('rtpPort', 5600)
+            },
+          }),
+          this.field(YonderTextField, {
+            key: 'rtpPort', label: 'Receiver UDP port', max: 5,
+            value: String(this.draftValue('rtpPort', o.port ?? 5600)),
+            'onUpdate:value': value => this.stage('rtpPort', /^\d+$/.test(value) ? Number(value) : value),
+          }),
+          h('p', { class: 'y-deck__panel-note' }, 'Uses the main stream codec. The ground station listens on this port. Apply saves the destination and restarts video.'),
+        ] : []),
         h('span', { class: 'y-deck__out-cost' }, typeof o.costKbps === 'number' ? `${o.costKbps} kb/s` : ''),
         h('span', {
           class: ['y-deck__out-reach', { 'y-deck__out-reach--warn': o.reach && !o.reach.reachable }],
@@ -1485,7 +1615,17 @@ export default {
         if (id === 'orientation') return this.buildOrientation()
         return this.buildGroup(id)
       }).filter(Boolean)).filter(column => column.length)
+      if (!columns.length) return null
       return h('div', { class: 'y-deck__cols' }, columns.map((column, index) => h('div', { class: 'y-deck__slot', key: index }, column)))
+    },
+    buildNativeControls () {
+      const slots = this.buildSlots(NATIVE_SLOTS)
+      if (!slots) return null
+      return h('section', { class: 'y-deck__native' }, [
+        h('h2', { class: 'y-deck__section' }, 'Native camera controls'),
+        h('p', { class: 'y-deck__hint' }, 'These camera controls apply immediately and show the camera’s readback.'),
+        slots,
+      ])
     },
   },
   render () {
@@ -1493,6 +1633,7 @@ export default {
     if (!r) return h('div', { class: 'y-deck' }, [this.buildRail(), h('p', "Waiting for this camera's report.")])
     const cam = r.camera || {}
     return h('div', { class: 'y-deck y-deck--workspace' }, [
+      h(Teleport, { to: this.captureTarget || 'body', disabled: !this.captureTarget }, [this.buildCapture()]),
       h(YonderPlacard, { kind: 'Camera', name: cam.name || '', unit: cam.spec || '' }),
       this.signInRequired ? h('div', { class: 'y-deck__transaction', role: 'status' }, [h('a', { href: this.signInHref }, 'Sign in'), ' to restore camera controls. Your unsaved edits are kept.']) : null,
       this.buildRail(),
@@ -1502,12 +1643,9 @@ export default {
         h('button', { type: 'button', class: 'y-deck__key', disabled: this.signInRequired, 'aria-expanded': this.connectionOpen, onClick: () => this.connectionOpen ? this.closeConnection() : this.loadConnection() }, this.connectionOpen ? 'Hide connection details' : 'Connection details'),
       ]),
       this.buildConnection(),
-      h('h2', { class: 'y-deck__section' }, 'Camera image and capture'),
-      h('p', { class: 'y-deck__hint' }, "Camera exposure and capture changes take effect immediately. The controls show the camera's readback."),
-      this.buildSlots(IMAGE_SLOTS),
-      h('h2', { class: 'y-deck__section' }, 'Stream, picture and outputs'),
-      h('p', { class: 'y-deck__hint' }, 'These edits are staged until you press Apply.'),
-      this.buildSlots(CONFIG_SLOTS),
+      h('h2', { class: 'y-deck__section' }, 'Stream, preview and camera controls'),
+      this.buildSlots(MAIN_SLOTS),
+      this.buildNativeControls(),
       this.buildOutputs(),
     ])
   },
@@ -1515,6 +1653,25 @@ export default {
 </script>
 
 <style scoped>
+.y-deck__capture-toolbar {
+  display: flex; flex-wrap: wrap; align-items: center; gap: 8px 16px;
+  padding: 8px 12px; font-family: var(--yonder-font, system-ui, sans-serif);
+  background: var(--yonder-pane, #0a0e13); color: var(--yonder-value, #fff);
+  border-bottom: 1px solid var(--yonder-divider, #2b333c);
+}
+.y-deck__capture-toolbar :deep(.y-shutter) { margin: 0; flex-direction: row; flex-wrap: wrap; gap: 8px 16px; }
+.y-deck__capture-toolbar :deep(.y-shutter__btn) { min-width: 0; min-height: 36px; padding: 0 12px; }
+.y-deck__capture-toolbar :deep(.y-seg__label) { display: none; }
+.y-deck__capture-toolbar :deep(.y-seg__opt) { min-height: 36px; }
+.y-deck__capture-toolbar :deep(.y-shutter__dest) { text-align: left; }
+.y-deck__capture-toolbar .y-deck__mode { margin: 0; }
+.y-deck__capture-toolbar .y-deck__captures { margin: 0 0 0 auto; min-height: 36px; }
+.y-deck__capture-toolbar .y-deck__ended { flex-basis: 100%; margin: 0; }
+@media (max-width: 600px) {
+  .y-deck__capture-toolbar { gap: 8px 12px; }
+  .y-deck__capture-toolbar .y-deck__captures { margin-left: 0; }
+}
+
 .y-deck__adaptation { margin: 12px 0; padding: 10px; border: 1px solid var(--yonder-divider); font-size: 12px; line-height: 1.5; overflow-wrap: anywhere; }
 .y-deck__adaptation p { margin: 4px 0 0; }
 .y-deck__adaptation.is-unavailable { border-color: var(--yonder-waiting); }
@@ -1536,6 +1693,7 @@ export default {
 }
 .y-deck__transaction-head, .y-deck__section { font-size: 14px; font-weight: 600; color: var(--yonder-value, #fff); }
 .y-deck__transaction-message, .y-deck__hint { margin: 6px 0; font-size: 12px; line-height: 1.5; color: var(--yonder-label, #7f8a95); }
+.y-deck__panel-note { margin: 0 0 8px; font-size: 11px; line-height: 1.4; color: var(--yonder-label, #7f8a95); }
 .y-deck__transaction-countdown { margin: 6px 0; font-size: 13px; font-variant-numeric: tabular-nums; color: var(--yonder-waiting, #ffcf28); }
 .y-deck__transaction-error, .y-deck__result.is-rejected { color: var(--yonder-bad, #ff6b6b); }
 .y-deck__result { margin: 8px 0; font-size: 12px; line-height: 1.5; overflow-wrap: anywhere; }
@@ -1615,7 +1773,7 @@ export default {
    height — never from the gap beneath it. A negative margin here took the eight
    pixels back by pulling the key up over the `Video | Photo` buttons, which is
    not saving space, it is hiding a control behind another one. */
-.y-deck__mode :deep(.y-seg__btn) { min-height: 26px; }
+.y-deck__mode :deep(.y-seg__opt) { min-height: 36px; }
 .y-deck__mode :deep(.y-seg__label) { margin-bottom: 3px; }
 /* R-STO-06: a recording that ended by itself, said where the next press is.
    The caution tone, because it is a thing that happened to the operator

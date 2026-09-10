@@ -1,0 +1,704 @@
+--- a/rkaiq_3A_server/rkaiq_3A_server.cpp	2026-09-10 15:51:44
++++ b/rkaiq_3A_server/rkaiq_3A_server.cpp	2026-09-10 15:54:27
+@@ -15,6 +15,7 @@
+ #include <linux/videodev2.h>
+ #include "uAPI2/rk_aiq_user_api2_sysctl.h"
+ #include "common/mediactl/mediactl.h"
++#include "seekerhd_live_controls.h"
+ 
+ #define CLEAR(x) memset(&(x), 0, sizeof(x))
+ #define DBG(...) do { if(!silent) printf("DBG: " __VA_ARGS__);} while(0)
+@@ -50,11 +51,13 @@
+     char mdev_path[32];
+     int available;
+     rk_aiq_sys_ctx_t* aiq_ctx;
++    struct seekerhd_live_controls controls;
+ 
+     pthread_t pid;
+ };
+ 
+ static struct rkaiq_media_info media_infos[MAX_MEDIA_NODES];
++static struct rkaiq_media_info *control_media_info;
+ 
+ static void errno_exit(const char *s)
+ {
+@@ -158,13 +161,19 @@
+         ERR("rkaiq engine prepare failed !\n");
+         exit(-1);
+     }
++    if (seekerhd_live_controls_init(&media_info->controls,
++            media_info->aiq_ctx, media_info->mainpath,
++            media_info->sensor_entity_name)) {
++        ERR("failed to initialize SeekerHD live ISP controls\n");
++        exit(EXIT_FAILURE);
++    }
+ }
+ 
+ static void start_engine(struct rkaiq_media_info *media_info)
+ {
+     DBG("device manager start\n");
+-    rk_aiq_uapi2_sysctl_start(media_info->aiq_ctx);
+-    if (media_info->aiq_ctx == NULL) {
++    if (seekerhd_live_controls_start_engine(&media_info->controls) !=
++            XCAM_RETURN_NO_ERROR) {
+         ERR("rkisp_init engine failed\n");
+         exit(-1);
+     } else {
+@@ -174,7 +183,7 @@
+ 
+ static void stop_engine(struct rkaiq_media_info *media_info)
+ {
+-    rk_aiq_uapi2_sysctl_stop(media_info->aiq_ctx, false);
++    seekerhd_live_controls_stop_engine(&media_info->controls);
+ }
+ 
+ static void deinit_engine(struct rkaiq_media_info *media_info)
+@@ -292,9 +301,15 @@
+ 
+     init_engine(media_info);
+     subscrible_stream_event(media_info, isp_fd, true);
++    if (media_info == control_media_info &&
++        seekerhd_live_controls_start(&media_info->controls)) {
++        ERR("failed to start " SEEKERHD_ISP_SOCKET "\n");
++        exit(EXIT_FAILURE);
++    }
+     // Report readiness only after ISP preparation and stream subscription.
+     const char *notify = getenv("NOTIFY_SOCKET");
+-    if (notify && strlen(notify) < sizeof(((struct sockaddr_un *)0)->sun_path)) {
++    if (media_info == control_media_info && notify &&
++        strlen(notify) < sizeof(((struct sockaddr_un *)0)->sun_path)) {
+         int notify_fd = socket(AF_UNIX, SOCK_DGRAM | SOCK_CLOEXEC, 0);
+         if (notify_fd >= 0) {
+             struct sockaddr_un address = {};
+@@ -355,6 +370,13 @@
+         has_mul_cam = 1;
+ 
+     for (i = 0; i < MAX_MEDIA_NODES; i++) {
++        if (media_infos[i].available) {
++            control_media_info = &media_infos[i];
++            break;
++        }
++    }
++
++    for (i = 0; i < MAX_MEDIA_NODES; i++) {
+         if (!media_infos[i].available)
+             continue;
+         ret = pthread_create(&media_infos[i].pid, NULL, engine_thread, &media_infos[i]);
+--- /dev/null	2026-09-10 16:01:28
++++ b/rkaiq_3A_server/seekerhd_live_controls.h	2026-09-10 15:59:43
+@@ -0,0 +1,615 @@
++#ifndef SEEKERHD_LIVE_CONTROLS_H
++#define SEEKERHD_LIVE_CONTROLS_H
++
++#include <sys/socket.h>
++#include <sys/stat.h>
++#include <sys/time.h>
++#include <sys/un.h>
++
++#include <errno.h>
++#include <fcntl.h>
++#include <stddef.h>
++#include <pthread.h>
++#include <stdint.h>
++#include <stdio.h>
++#include <stdlib.h>
++#include <string.h>
++#include <unistd.h>
++
++#include <sstream>
++#include <string>
++#include <vector>
++
++#include "uAPI2/rk_aiq_user_api2_acp.h"
++#include "uAPI2/rk_aiq_user_api2_sysctl.h"
++
++#define SEEKERHD_ISP_SOCKET "/run/yonder-seekerhd/isp.sock"
++#define SEEKERHD_ACTIVE_IQ \
++    "/usr/local/share/yonder-seekerhd/iqfiles/imx462_IMX462_default.json"
++#define SEEKERHD_PROFILE_DIR "/usr/local/share/yonder-seekerhd/profiles/"
++#define SEEKERHD_MAX_IQ_SIZE (16U * 1024U * 1024U)
++
++struct seekerhd_values {
++    unsigned int brightness;
++    unsigned int contrast;
++    unsigned int saturation;
++    unsigned int hue;
++};
++
++struct seekerhd_profile {
++    const char *name;
++    const char *path;
++};
++
++static bool seekerhd_values_equal(const struct seekerhd_values& a,
++                                  const struct seekerhd_values& b)
++{
++    return a.brightness == b.brightness && a.contrast == b.contrast &&
++           a.saturation == b.saturation && a.hue == b.hue;
++}
++
++struct seekerhd_live_controls {
++    pthread_mutex_t lock;
++    rk_aiq_sys_ctx_t *ctx;
++    const char *device;
++    const char *sensor;
++    const struct seekerhd_profile *active_profile;
++    bool running;
++    int listen_fd;
++    pthread_t thread;
++};
++
++static const struct seekerhd_profile seekerhd_profiles[] = {
++    { "normal-light", SEEKERHD_PROFILE_DIR "normal-light.json" },
++    { "low-light", SEEKERHD_PROFILE_DIR "low-light.json" },
++    { "legacy-low-light", SEEKERHD_PROFILE_DIR "legacy-low-light.json" },
++};
++
++static std::string seekerhd_error(const char *what)
++{
++    std::string error(what);
++    error += ": ";
++    error += strerror(errno);
++    return error;
++}
++
++static std::string seekerhd_json_string(const char *value)
++{
++    static const char hex[] = "0123456789abcdef";
++    std::string out("\"");
++
++    if (!value)
++        value = "";
++    for (const unsigned char *p = (const unsigned char *)value; *p; ++p) {
++        switch (*p) {
++        case '\\': out += "\\\\"; break;
++        case '"': out += "\\\""; break;
++        case '\b': out += "\\b"; break;
++        case '\f': out += "\\f"; break;
++        case '\n': out += "\\n"; break;
++        case '\r': out += "\\r"; break;
++        case '\t': out += "\\t"; break;
++        default:
++            if (*p < 0x20) {
++                out += "\\u00";
++                out += hex[*p >> 4];
++                out += hex[*p & 0xf];
++            } else {
++                out += (char)*p;
++            }
++        }
++    }
++    out += '"';
++    return out;
++}
++
++static std::string seekerhd_failure(const std::string& error)
++{
++    return std::string("{\"ok\":false,\"error\":") +
++           seekerhd_json_string(error.c_str()) + "}";
++}
++
++static bool seekerhd_write_all(int fd, const char *data, size_t size)
++{
++    while (size) {
++        ssize_t count = write(fd, data, size);
++        if (count < 0) {
++            if (errno == EINTR)
++                continue;
++            return false;
++        }
++        if (!count) {
++            errno = EIO;
++            return false;
++        }
++        data += count;
++        size -= count;
++    }
++    return true;
++}
++
++static bool seekerhd_read_trusted(const char *path, std::string *bytes,
++                                  std::string *error)
++{
++    int fd = open(path, O_RDONLY | O_CLOEXEC | O_NOFOLLOW);
++    if (fd < 0) {
++        *error = seekerhd_error("open IQ file");
++        return false;
++    }
++
++    struct stat st = {};
++    if (fstat(fd, &st) < 0) {
++        *error = seekerhd_error("inspect IQ file");
++        close(fd);
++        return false;
++    }
++    if (!S_ISREG(st.st_mode) || st.st_uid != 0 || (st.st_mode & 022) ||
++        st.st_size <= 0 || (uint64_t)st.st_size > SEEKERHD_MAX_IQ_SIZE) {
++        errno = EPERM;
++        *error = seekerhd_error("untrusted IQ file");
++        close(fd);
++        return false;
++    }
++
++    bytes->assign((size_t)st.st_size, '\0');
++    size_t offset = 0;
++    while (offset < bytes->size()) {
++        ssize_t count = read(fd, &(*bytes)[offset], bytes->size() - offset);
++        if (count < 0 && errno == EINTR)
++            continue;
++        if (count <= 0) {
++            if (!count)
++                errno = EIO;
++            *error = seekerhd_error("read IQ file");
++            close(fd);
++            return false;
++        }
++        offset += count;
++    }
++    if (close(fd) < 0) {
++        *error = seekerhd_error("close IQ file");
++        return false;
++    }
++    return true;
++}
++
++static bool seekerhd_write_active(const std::string& bytes, std::string *error)
++{
++    char name[] =
++        "/usr/local/share/yonder-seekerhd/iqfiles/.active-XXXXXX";
++    int fd = mkstemp(name);
++    if (fd < 0) {
++        *error = seekerhd_error("create active IQ file");
++        return false;
++    }
++    fcntl(fd, F_SETFD, FD_CLOEXEC);
++    bool ok = fchmod(fd, 0644) == 0 &&
++              seekerhd_write_all(fd, bytes.data(), bytes.size()) &&
++              fsync(fd) == 0;
++    int saved_errno = errno;
++    if (close(fd) < 0 && ok) {
++        ok = false;
++        saved_errno = errno;
++    }
++    if (ok && rename(name, SEEKERHD_ACTIVE_IQ) < 0) {
++        ok = false;
++        saved_errno = errno;
++    }
++    if (ok) {
++        int dirfd = open("/usr/local/share/yonder-seekerhd/iqfiles",
++                         O_RDONLY | O_DIRECTORY | O_CLOEXEC);
++        if (dirfd < 0 || fsync(dirfd) < 0) {
++            ok = false;
++            saved_errno = errno;
++        }
++        if (dirfd >= 0)
++            close(dirfd);
++    }
++    if (!ok) {
++        unlink(name);
++        errno = saved_errno;
++        *error = seekerhd_error("persist active IQ file");
++        return false;
++    }
++    return true;
++}
++
++static XCamReturn seekerhd_get_values(const rk_aiq_sys_ctx_t *ctx,
++                                      struct seekerhd_values *values)
++{
++    acp_attrib_t attr = {};
++    attr.sync.sync_mode = RK_AIQ_UAPI_MODE_SYNC;
++    XCamReturn ret = rk_aiq_user_api2_acp_GetAttrib(ctx, &attr);
++    if (ret != XCAM_RETURN_NO_ERROR)
++        return ret;
++    values->brightness = attr.brightness;
++    values->contrast = attr.contrast;
++    values->saturation = attr.saturation;
++    values->hue = attr.hue;
++    return XCAM_RETURN_NO_ERROR;
++}
++
++static XCamReturn seekerhd_set_value(const rk_aiq_sys_ctx_t *ctx,
++                                     const std::string& control,
++                                     unsigned int value)
++{
++    acp_attrib_t attr = {};
++    attr.sync.sync_mode = RK_AIQ_UAPI_MODE_SYNC;
++    XCamReturn ret = rk_aiq_user_api2_acp_GetAttrib(ctx, &attr);
++    if (ret != XCAM_RETURN_NO_ERROR)
++        return ret;
++
++    if (control == "brightness")
++        attr.brightness = value;
++    else if (control == "contrast")
++        attr.contrast = value;
++    else if (control == "saturation")
++        attr.saturation = value;
++    else if (control == "hue")
++        attr.hue = value;
++    else
++        return XCAM_RETURN_ERROR_PARAM;
++
++    attr.sync.sync_mode = RK_AIQ_UAPI_MODE_SYNC;
++    attr.sync.done = false;
++    return rk_aiq_user_api2_acp_SetAttrib(ctx, &attr);
++}
++
++static XCamReturn seekerhd_set_values(const rk_aiq_sys_ctx_t *ctx,
++                                      const struct seekerhd_values& values)
++{
++    acp_attrib_t attr = {};
++    attr.sync.sync_mode = RK_AIQ_UAPI_MODE_SYNC;
++    attr.brightness = values.brightness;
++    attr.contrast = values.contrast;
++    attr.saturation = values.saturation;
++    attr.hue = values.hue;
++    return rk_aiq_user_api2_acp_SetAttrib(ctx, &attr);
++}
++
++static const struct seekerhd_profile *
++seekerhd_find_profile(const std::string& name)
++{
++    for (size_t i = 0; i < sizeof(seekerhd_profiles) / sizeof(seekerhd_profiles[0]); ++i)
++        if (name == seekerhd_profiles[i].name)
++            return &seekerhd_profiles[i];
++    return NULL;
++}
++
++static const struct seekerhd_profile *seekerhd_detect_profile()
++{
++    std::string active;
++    std::string error;
++    if (!seekerhd_read_trusted(SEEKERHD_ACTIVE_IQ, &active, &error))
++        return NULL;
++
++    for (size_t i = 0; i < sizeof(seekerhd_profiles) / sizeof(seekerhd_profiles[0]); ++i) {
++        std::string preset;
++        if (seekerhd_read_trusted(seekerhd_profiles[i].path, &preset, &error) &&
++            preset == active)
++            return &seekerhd_profiles[i];
++    }
++    return NULL;
++}
++
++static std::string seekerhd_success(struct seekerhd_live_controls *state,
++                                    const struct seekerhd_values& values)
++{
++    std::ostringstream out;
++    out << "{\"ok\":true,\"profile\":";
++    if (!state->active_profile)
++        out << "null";
++    else
++        out << seekerhd_json_string(state->active_profile->name);
++    out << ",\"running\":" << (state->running ? "true" : "false")
++        << ",\"device\":" << seekerhd_json_string(state->device)
++        << ",\"sensor\":" << seekerhd_json_string(state->sensor)
++        << ",\"values\":{\"brightness\":" << values.brightness
++        << ",\"contrast\":" << values.contrast
++        << ",\"saturation\":" << values.saturation
++        << ",\"hue\":" << values.hue << "}}";
++    return out.str();
++}
++
++static std::string seekerhd_status_locked(struct seekerhd_live_controls *state)
++{
++    struct seekerhd_values values = {};
++    if (!state->ctx)
++        return seekerhd_failure("AIQ context is unavailable");
++    if (seekerhd_get_values(state->ctx, &values) != XCAM_RETURN_NO_ERROR)
++        return seekerhd_failure("RKAIQ control readback failed");
++    return seekerhd_success(state, values);
++}
++
++static std::string seekerhd_apply_profile_locked(
++    struct seekerhd_live_controls *state, const struct seekerhd_profile *profile)
++{
++    std::string selected, previous, error;
++    const struct seekerhd_profile *previous_profile = state->active_profile;
++    struct seekerhd_values previous_values = {};
++    struct seekerhd_values values = {};
++    bool update_attempted = false;
++    bool persist_attempted = false;
++
++    if (!state->running)
++        return seekerhd_failure("AIQ is stopped");
++    if (!seekerhd_read_trusted(profile->path, &selected, &error) ||
++        !seekerhd_read_trusted(SEEKERHD_ACTIVE_IQ, &previous, &error))
++        return seekerhd_failure(error);
++    if (seekerhd_get_values(state->ctx, &previous_values) !=
++        XCAM_RETURN_NO_ERROR)
++        return seekerhd_failure("RKAIQ control readback failed");
++
++    update_attempted = true;
++    XCamReturn ret = rk_aiq_uapi2_sysctl_updateIq(
++        state->ctx, const_cast<char *>(profile->path));
++    if (ret == XCAM_RETURN_NO_ERROR) {
++        if (seekerhd_get_values(state->ctx, &values) != XCAM_RETURN_NO_ERROR)
++            error = "RKAIQ profile readback failed";
++        else if (seekerhd_set_values(state->ctx, values) !=
++                 XCAM_RETURN_NO_ERROR) {
++            error = "RKAIQ profile control reset failed";
++        } else {
++            struct seekerhd_values readback = {};
++            if (seekerhd_get_values(state->ctx, &readback) !=
++                    XCAM_RETURN_NO_ERROR ||
++                !seekerhd_values_equal(values, readback))
++                error = "RKAIQ profile control readback failed";
++            values = readback;
++        }
++        if (error.empty()) {
++            persist_attempted = true;
++            if (!seekerhd_write_active(selected, &error))
++                ret = XCAM_RETURN_ERROR_FAILED;
++        }
++    } else {
++        error = "RKAIQ profile update failed";
++    }
++
++    if (!error.empty()) {
++        bool rollback_ok = true;
++        const char *rollback_path = previous_profile ? previous_profile->path :
++                                                      SEEKERHD_ACTIVE_IQ;
++        if (update_attempted && rk_aiq_uapi2_sysctl_updateIq(
++                state->ctx, const_cast<char *>(rollback_path)) !=
++                XCAM_RETURN_NO_ERROR)
++            rollback_ok = false;
++        if (rollback_ok && seekerhd_set_values(state->ctx, previous_values) !=
++                           XCAM_RETURN_NO_ERROR)
++            rollback_ok = false;
++        if (rollback_ok) {
++            struct seekerhd_values rollback_values = {};
++            if (seekerhd_get_values(state->ctx, &rollback_values) !=
++                    XCAM_RETURN_NO_ERROR ||
++                !seekerhd_values_equal(previous_values, rollback_values))
++                rollback_ok = false;
++        }
++        if (persist_attempted) {
++            std::string restore_error;
++            if (!seekerhd_write_active(previous, &restore_error)) {
++                rollback_ok = false;
++                error += "; " + restore_error;
++            }
++        }
++        if (!rollback_ok) {
++            state->active_profile = NULL;
++            error += "; rollback failed";
++        } else {
++            state->active_profile = previous_profile;
++        }
++    } else {
++        state->active_profile = profile;
++    }
++
++    if (!error.empty())
++        return seekerhd_failure(error);
++    return seekerhd_success(state, values);
++}
++
++static std::string seekerhd_handle_request_locked(
++    struct seekerhd_live_controls *state, const std::string& request)
++{
++    std::istringstream input(request);
++    std::vector<std::string> words;
++    std::string word;
++    while (input >> word)
++        words.push_back(word);
++
++    if (words.size() == 1 && words[0] == "status")
++        return seekerhd_status_locked(state);
++
++    if (words.size() == 2 && words[0] == "profile") {
++        const struct seekerhd_profile *profile = seekerhd_find_profile(words[1]);
++        if (!profile)
++            return seekerhd_failure("unknown profile");
++        return seekerhd_apply_profile_locked(state, profile);
++    }
++
++    if (words.size() == 3 && words[0] == "set") {
++        const char *value_text = words[2].c_str();
++        char *end = NULL;
++        errno = 0;
++        long value = strtol(value_text, &end, 10);
++        if (errno || !*value_text || *end || value < 0 || value > 255)
++            return seekerhd_failure("control value must be an integer from 0 to 255");
++        if (words[1] != "brightness" && words[1] != "contrast" &&
++            words[1] != "saturation" && words[1] != "hue")
++            return seekerhd_failure("unknown control");
++        if (!state->running)
++            return seekerhd_failure("AIQ is stopped");
++        if (seekerhd_set_value(state->ctx, words[1], (unsigned int)value) !=
++            XCAM_RETURN_NO_ERROR)
++            return seekerhd_failure("RKAIQ control update failed");
++
++        struct seekerhd_values values = {};
++        if (seekerhd_get_values(state->ctx, &values) != XCAM_RETURN_NO_ERROR)
++            return seekerhd_failure("RKAIQ control readback failed");
++        unsigned int actual = words[1] == "brightness" ? values.brightness :
++                              words[1] == "contrast" ? values.contrast :
++                              words[1] == "saturation" ? values.saturation : values.hue;
++        if (actual != (unsigned int)value)
++            return seekerhd_failure("RKAIQ control readback did not match");
++        return seekerhd_success(state, values);
++    }
++
++    return seekerhd_failure("invalid request");
++}
++
++static bool seekerhd_read_request(int fd, std::string *request,
++                                  std::string *error)
++{
++    request->clear();
++    while (request->size() <= 256) {
++        unsigned char ch;
++        ssize_t count = recv(fd, &ch, 1, 0);
++        if (count < 0 && errno == EINTR)
++            continue;
++        if (count <= 0) {
++            *error = count ? seekerhd_error("read request") :
++                             "request ended before newline";
++            return false;
++        }
++        if (ch == '\n')
++            return true;
++        if (ch < 0x20 || ch > 0x7e) {
++            *error = "request must contain printable ASCII";
++            return false;
++        }
++        request->push_back((char)ch);
++    }
++    *error = "request exceeds 256 bytes";
++    return false;
++}
++
++static void seekerhd_serve_client(struct seekerhd_live_controls *state, int fd)
++{
++    struct timeval timeout = { 2, 0 };
++    setsockopt(fd, SOL_SOCKET, SO_RCVTIMEO, &timeout, sizeof(timeout));
++    setsockopt(fd, SOL_SOCKET, SO_SNDTIMEO, &timeout, sizeof(timeout));
++
++    std::string request, error, reply;
++    if (!seekerhd_read_request(fd, &request, &error)) {
++        reply = seekerhd_failure(error);
++    } else {
++        pthread_mutex_lock(&state->lock);
++        reply = seekerhd_handle_request_locked(state, request);
++        pthread_mutex_unlock(&state->lock);
++    }
++    reply += '\n';
++    if (reply.size() <= 4096) {
++        const char *data = reply.data();
++        size_t left = reply.size();
++        while (left) {
++            ssize_t count = send(fd, data, left, MSG_NOSIGNAL);
++            if (count < 0 && errno == EINTR)
++                continue;
++            if (count <= 0)
++                break;
++            data += count;
++            left -= count;
++        }
++    }
++}
++
++static void *seekerhd_control_thread(void *arg)
++{
++    struct seekerhd_live_controls *state =
++        (struct seekerhd_live_controls *)arg;
++    for (;;) {
++        int fd = accept(state->listen_fd, NULL, NULL);
++        if (fd < 0) {
++            if (errno == EINTR)
++                continue;
++            fprintf(stderr, "ERR: accept ISP control request: %s\n", strerror(errno));
++            continue;
++        }
++        fcntl(fd, F_SETFD, FD_CLOEXEC);
++        seekerhd_serve_client(state, fd);
++        close(fd);
++    }
++    return NULL;
++}
++
++static int seekerhd_live_controls_init(struct seekerhd_live_controls *state,
++                                       rk_aiq_sys_ctx_t *ctx,
++                                       const char *device, const char *sensor)
++{
++    memset(state, 0, sizeof(*state));
++    state->listen_fd = -1;
++    state->ctx = ctx;
++    state->device = device;
++    state->sensor = sensor;
++    state->active_profile = seekerhd_detect_profile();
++    return pthread_mutex_init(&state->lock, NULL);
++}
++
++static int seekerhd_live_controls_start(struct seekerhd_live_controls *state)
++{
++    const char *directory = "/run/yonder-seekerhd";
++    struct stat st = {};
++    if (mkdir(directory, 0700) < 0 && errno != EEXIST)
++        return -errno;
++    if (lstat(directory, &st) < 0 || !S_ISDIR(st.st_mode) || st.st_uid != 0)
++        return -EPERM;
++    if (chmod(directory, 0700) < 0)
++        return -errno;
++
++    if (lstat(SEEKERHD_ISP_SOCKET, &st) == 0) {
++        if (!S_ISSOCK(st.st_mode) || st.st_uid != 0)
++            return -EPERM;
++        if (unlink(SEEKERHD_ISP_SOCKET) < 0)
++            return -errno;
++    } else if (errno != ENOENT) {
++        return -errno;
++    }
++
++    int fd = socket(AF_UNIX, SOCK_STREAM | SOCK_CLOEXEC, 0);
++    if (fd < 0)
++        return -errno;
++    struct sockaddr_un address = {};
++    address.sun_family = AF_UNIX;
++    strncpy(address.sun_path, SEEKERHD_ISP_SOCKET,
++            sizeof(address.sun_path) - 1);
++    if (bind(fd, (struct sockaddr *)&address,
++             offsetof(struct sockaddr_un, sun_path) +
++             strlen(address.sun_path) + 1) < 0 ||
++        chmod(SEEKERHD_ISP_SOCKET, 0600) < 0 || listen(fd, 4) < 0) {
++        int saved_errno = errno;
++        close(fd);
++        unlink(SEEKERHD_ISP_SOCKET);
++        return -saved_errno;
++    }
++    state->listen_fd = fd;
++    int ret = pthread_create(&state->thread, NULL,
++                             seekerhd_control_thread, state);
++    if (ret) {
++        close(fd);
++        state->listen_fd = -1;
++        unlink(SEEKERHD_ISP_SOCKET);
++        return -ret;
++    }
++    pthread_detach(state->thread);
++    return 0;
++}
++
++static XCamReturn seekerhd_live_controls_start_engine(
++    struct seekerhd_live_controls *state)
++{
++    pthread_mutex_lock(&state->lock);
++    XCamReturn ret = rk_aiq_uapi2_sysctl_start(state->ctx);
++    state->running = ret == XCAM_RETURN_NO_ERROR;
++    pthread_mutex_unlock(&state->lock);
++    return ret;
++}
++
++static XCamReturn seekerhd_live_controls_stop_engine(
++    struct seekerhd_live_controls *state)
++{
++    pthread_mutex_lock(&state->lock);
++    state->running = false;
++    XCamReturn ret = rk_aiq_uapi2_sysctl_stop(state->ctx, false);
++    pthread_mutex_unlock(&state->lock);
++    return ret;
++}
++
++#endif

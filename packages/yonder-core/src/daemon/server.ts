@@ -45,6 +45,7 @@ import { detectCameras, probeCamera, detectWithAccessory } from "../video/probe/
 import { AccessorySources } from '../video/accessory/source.js';
 import { probeEncoder, type Encoder } from "../video/probe/encoder.js";
 import { applyControls } from "../video/controls.js";
+import { SeekerHdIsp } from '../video/isp.js';
 import { EncoderChannel } from "../video/encoder.js";
 import { Viewers } from "../video/viewers.js";
 import { Adaptation } from "../video/adaptation.js";
@@ -125,6 +126,7 @@ export function onceAsync<T>(fn: () => Promise<T>): () => Promise<T> {
 }
 
 export interface ServerOptions {
+  isp?: import('../video/isp.js').IspControls;
   /** Observation dependencies for isolated integration tests. Not configuration. */
   rtspObservation?: Pick<RtspFeedbackOptions, 'sessions' | 'tcp' | 'localAddresses'>;
   diagnosticRunner?: DiagnosticRunner;
@@ -1444,6 +1446,7 @@ export async function startServer(opts: ServerOptions): Promise<{ close(): Promi
       // reason: a test that injects a fake runner must get a fake v4l2-ctl
       // for POST …/controls too, not a real one by omission.
       applyControls: (opts) => applyControls({ ...opts, runner: probeRunner }),
+      isp: opts.isp ?? (opts.runner ? undefined : new SeekerHdIsp()),
       // One supervisor, for the process's lifetime. See buildRenderers.
       supervisor: built.supervisor,
       pipelineRenderer: built.pipelineRenderer,

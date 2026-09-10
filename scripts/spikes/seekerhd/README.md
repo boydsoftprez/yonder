@@ -61,8 +61,9 @@ translated to Rockchip's ISP rather than copying the JSON directly.
 
 The image-processing sources are
 [roju/rkaiq_3A_server-rk356x](https://github.com/roju/rkaiq_3A_server-rk356x)
-at `622bdfa1ee61d2279cfc273b1a53b546e0ec71be`. Apply the three `aiq-*.patch`
-files in this directory to that tree. Build with CMake on the board; `xxd`
+at `622bdfa1ee61d2279cfc273b1a53b546e0ec71be`. Apply `aiq-server.patch`,
+`aiq-thread-fallback.patch`, and `aiq-sensor-timing.patch`, followed by
+`aiq-live-controls.patch`. Build with CMake on the board; `xxd`
 is also a build dependency. The patches:
 
 - Select the 1920×1080 sensor mode and the private SeekerHD IQ directory;
@@ -74,6 +75,9 @@ is also a build dependency. The patches:
 - Derive pixel clock from **current blanking and current frame interval**.
   Combining minimum blanking with the current slower interval halved the
   inferred clock and made the automatic exposure engine double the frame rate.
+- Expose a local native ISP control socket for live preset and color changes;
+  see [the protocol and build notes](aiq-live-controls.md). Experimental HDR
+  patches are separate and are not part of this normal camera service build.
 
 `tune.py` takes the Rockchip reference IQ JSON and the manufacturer's Raspberry
 Pi SeekerHD JSON as inputs. It writes a separate Rockchip profile with logarithmic
@@ -127,10 +131,11 @@ Generate from a preserved baseline, not from an already modified named profile:
 python3 profiles.py original-tuned-iq.json generated-profiles
 ```
 
-Install the generated JSONs and `manifest.json` under
-`/usr/local/share/yonder-seekerhd/profiles`, and install `select-profile.py` as
-`/usr/local/bin/yonder-camera-profile` with mode 0755. The selector is a bench
-command, not yet a dashboard dropdown:
+Install the generated JSONs and `manifest.json`, owned by root with mode 0644,
+under `/usr/local/share/yonder-seekerhd/profiles`, and install `select-profile.py` as
+`/usr/local/bin/yonder-camera-profile` with mode 0755. The camera page offers
+these presets under **Camera image and capture → Camera image → Preset**.
+The same presets are available from the command line:
 
 ```sh
 sudo yonder-camera-profile normal-light
@@ -139,12 +144,21 @@ sudo yonder-camera-profile legacy-low-light
 yonder-camera-profile status
 ```
 
-Selection checks the generated profile's checksum and the attached IMX462,
+With the live ISP bridge installed, preset selection and the four native color
+controls update the running ISP without restarting the core, encoder or sensor.
+Brightness, contrast, saturation and hue use native 0–255 levels; 128 is neutral.
+Values shown by the page come from RKAIQ readback. Presets persist in the active
+IQ file across reboot. Individual color adjustments are runtime controls and
+reset on preset reload or ISP service restart. Start video before adjusting.
+
+On legacy installs without the bridge, the command-line selector checks the
+generated profile's checksum and the attached IMX462,
 stops its video through the core API, replaces the active IQ JSON atomically,
 restarts the ISP service, and restarts video only if it was previously running.
 Failure restores the exact preceding IQ bytes. The console and network services
 are not restarted. The active IQ file persists across reboot; status identifies
-it by hash rather than maintaining a second copy of the selection.
+it by hash rather than maintaining a second copy of the selection. A failed live
+command never silently falls back to this interrupting legacy procedure.
 
 For an ISP-only comparison, set the Yonder Stream Color controls to neutral
 through Apply (brightness 0, contrast 100, saturation 100, hue 0). Otherwise
@@ -154,14 +168,114 @@ those additional CPU adjustments are applied on top of either profile.
 
 [Sony's IMX462LQR product information](https://www.sony-semicon.com/files/62/pdf/p-12_IMX462LQR_LQR1_LLR_Flyer.pdf)
 lists multiple-exposure and digital-overlap HDR. This establishes a sensor
-capability, not a working SeekerHD/Radxa camera mode. The current
-`imx462_yonder.c` exposes linear modes and its vendor ioctl handler implements
-module information only; it has no HDR configuration or HDR exposure controls.
-The AIQ service explicitly prepares `RK_AIQ_WORKING_MODE_NORMAL`, and the IQ
-profiles keep `hdr_en=0`. DOL would require verified sensor register sequences,
-CSI framing/virtual-channel handling, exposure controls and ISP merge setup,
-then bandwidth/frame-rate and motion-artifact measurements. Neither named
-profile is labelled HDR: gamma/shadow lifting does not recover clipped data.
+capability, not by itself a working SeekerHD/Radxa camera mode.
+
+The driver now contains an **experimental**, opt-in two-exposure DOL path
+(R-CTL-06). Its IMX462 register sequence comes from Rockchip's GPL-2.0
+[IMX462 driver at f39b590](https://github.com/rockchip-linux/kernel/blob/f39b590ea11da2d897644e42119ba5099b2eefc8/drivers/media/i2c/imx462.c),
+which publishes a **four-lane** HDR2 mode. The bench adaptation uses the
+already working two-lane 891 Mbit/s PHY configuration, preserving the same
+aggregate serial rate. This conversion is an engineering hypothesis requiring
+hardware validation; no published two-lane IMX462 DOL table was found.
+
+The mode is 1952×1089 RAW10 with ID-code framing, HMAX 2028, VMAX 1220,
+FSC 2440 and RHS1 225. The ISP produces the configured video output size.
+The intended output remains tone-mapped NV12 through the existing H.265
+streams; sensor HDR capture does not imply HDR10 video or display signalling.
+The mode's calculated rate is about 30.01 fps; odd frame-length requests round
+up to an even FSC because sensor VMAX represents half the HDR frame. The
+vendor exposure callback's hardcoded RHS1=9 does not match its MIPI table;
+this implementation uses the table's RHS1=225 and checks both shutters before
+writing either. Separate gains and shutters use register hold. Linear control
+writes cannot overwrite the HDR exposure pair.
+
+`experimental_hdr2=1` must be supplied **when loading** the module. It defaults
+off and is read-only after load. HDR3, unsupported lane/clock combinations and
+live mode changes are rejected. Stopping video and returning to linear resets
+the DOL registers. The opt-in is a bench mechanism, not a supported-camera
+capability claim or a dashboard HDR toggle.
+
+Do not replace this sensor driver through runtime unbind/unload on the vendor
+kernel. A sensor-only replacement faulted in the V4L2 asynchronous notifier;
+a subsequent full-graph teardown lost board access before its failure phase
+could be recorded. The vendor ISP/DPHY remove paths leave persistent references
+behind. A cold-boot, one-use candidate load succeeded instead: the original
+module remained installed, and the test marker was consumed and synchronized
+to disk before inserting the candidate. The following boot uses the original
+module. A userspace rollback cannot guarantee recovery from a kernel fault.
+
+#### Hardware result: RK3566 merge feature gate
+
+The 2026-09-10 bench reached actual sensor DOL programming, but **did not
+produce HDR video**. Sensor readback during a bounded capture-to-null test was:
+
+| Field | Readback |
+| --- | --- |
+| HDR mode / packing | HDR_X2 (5) / HDR_ID_CODE (2) |
+| WDMODE / lane count | 0x11 / 2 |
+| HMAX / VMAX / RHS1 | 2028 / 1221 / 225 |
+| SHS1 / SHS2 | 151 / 1855 |
+| Short / long integration | about 0.997 ms / 8.003 ms |
+| Short / long analogue gain register | 20 / 20 (about 2×) |
+
+The kernel explicitly logged `hdrmge is not supported`, followed by MIPI
+frame drops. No ISP output frames arrived within 20 seconds. The live
+`rockchip,iq-feature` value was `0x1bfbf7fe67ff`, with HDRMGE bit 27 clear.
+This matches the vendor [RK3566 override](https://github.com/rockchip-linux/kernel/blob/77168c8d5ab82399f65a80e9f807b50ba37cf483/arch/arm64/boot/dts/rockchip/rk3566.dtsi).
+The [ISP21 CSI setup](https://github.com/rockchip-linux/kernel/blob/77168c8d5ab82399f65a80e9f807b50ba37cf483/drivers/media/platform/rockchip/isp/csi.c)
+rejects HDR merge when that bit is absent; its caller nevertheless starts the
+sensor, which explains mode readback without delivered frames. This proves
+the current vendor configuration excludes the needed merge path, not that
+changing lane timing or bypassing the mask would provide working HDR.
+
+The AIQ patch now checks that feature bit before requesting HDR. It fails
+closed on a missing/malformed feature property or a mask without HDRMGE.
+This vendor profile does not establish whether the block is physically absent
+or fused off; no feature-mask override was attempted.
+No dashboard HDR capability is advertised for this board. The sensor path
+and manual calibration remain experimental building blocks for a supported
+ISP or a separately validated merge implementation.
+
+Returning the already loaded candidate to linear reset WDMODE, SHS2 and RHS1
+to zero and restored H.265 playback. A 20-second off-board decode measured
+29.73 fps on both 1920×1080 main and 1280×720 preview, with five single-frame
+gaps; this verifies recovery, not stutter-free performance. All test capture
+frames were discarded. No camera images or videos are part of this change.
+
+Apply `aiq-hdr-mode.patch` after the existing three AIQ patches, and apply
+`aiq-vendor-hdr-abi.patch` to the RKAIQ library before rebuilding it. Both pin
+the vendor frame-interval ABI to 64 bytes with the HDR mode at byte 32.
+Newer Debian headers reuse that word as `stream`, moving their `reserved[0]`
+to byte 36; using those headers directly hides the sensor's HDR modes. The 3A service
+uses linear capture unless `YONDER_SEEKERHD_MODE=hdr2` is explicitly set. HDR
+activation requires an enabled ISP merge feature and an advertised matching sensor mode and checks
+`RKMODULE_GET_HDR_CFG` again after ISP preparation; this compensates for the
+library otherwise ignoring a failed sensor mode change. Updated `prepare.py`
+preserves HDR timing instead of writing linear shutters after ISP readiness.
+
+`hdr-profile.py` derives a separate experimental IQ file from a normal-light
+profile. It preserves the linear scene and creates an HDR scene with fixed
+1 ms / 8 ms exposures and matched 2× gain by default. Manual exposures make
+initial sensor/merge verification reproducible; this is not a tuned automatic
+HDR profile. Merge curves and colour calibration remain provisional. The
+existing named image-profile selector continues to select linear profiles.
+Do not activate an HDR IQ file independently of the driver and ISP mode.
+
+`hdr-status.c` is a read-only bench diagnostic for this board's I2C2/0x1a
+sensor. It reports the HDR ioctl, sensor timing/shutter/gain registers, lane
+count and frame interval as JSON. Build it using the installed vendor
+`rk-camera-module.h` and `rk-video-format.h` with the normal userspace Linux
+headers. It does not read or save images. Verify actual sensor DOL mode,
+different exposure registers, ISP `HDRMGE` enabled, advancing output frames,
+delivered frame spacing and return to linear before calling HDR usable.
+
+Run the sensor arithmetic regression cases in addition to the Python tests:
+
+```sh
+cc -Wall -Wextra -Werror scripts/spikes/seekerhd/test_imx462_hdr2.c -o /tmp/test-imx462-hdr2
+/tmp/test-imx462-hdr2
+python3 -m unittest discover -s scripts/spikes/seekerhd -p 'test_*.py' -v
+```
 
 ### First hardware comparison
 

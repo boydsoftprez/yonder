@@ -195,6 +195,33 @@ describe("compose", () => {
     expect(text()).toContain("rtsp://127.0.0.1:8554/cam0-preview");
   });
 
+  it.each([
+    ["usb", opts],
+    ["csi", mppOpts],
+    ["accessory", opts],
+  ] as const)("publishes both %s RTSP branches over interleaved TCP", (source, sourceOpts) => {
+    const camera = {
+      ...CAMERA,
+      source,
+      device: source === "accessory" ? "pocket2:test.udc" : CAMERA.device,
+      outputs: [rtspOutput],
+    };
+    const line = compose({
+      ...sourceOpts,
+      camera,
+      accessory: source === "accessory"
+        ? { endpoint: "/run/yonder/accessory/cam0.sock", live: true, generation: 1, reason: null, native: { width: 1280, height: 720, fps: 29.97 } }
+        : undefined,
+    });
+    const sinks = line.flatMap((token, at) => token === "rtspclientsink"
+      ? [line.slice(at + 1, line.indexOf("!", at) === -1 ? line.length : line.indexOf("!", at))]
+      : []);
+    expect(sinks).toHaveLength(2); // configured main output and always-on preview
+    for (const properties of sinks) {
+      expect(properties).toEqual(expect.arrayContaining(["latency=0", "protocols=tcp"]));
+    }
+  });
+
   it("carries a fixed bitrate, in bits, on both encodes (R-VID-08)", () => {
     expect(text()).toContain("video_bitrate=2000000");
     expect(text()).toContain("video_bitrate=400000");

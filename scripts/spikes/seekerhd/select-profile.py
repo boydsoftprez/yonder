@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 # SPDX-License-Identifier: GPL-3.0-or-later
-"""Bench profile selector: stop video, replace IQ atomically, restart ISP, verify or restore."""
+"""Select a native ISP profile live when supported; legacy installs restart only video/ISP."""
 import argparse
 import fcntl
 import hashlib
@@ -73,6 +73,12 @@ def main():
         view = api('/cameras/'+args.camera)
         if view['camera']['source'] != 'csi' or 'imx462' not in (view.get('card') or '').lower():
             raise RuntimeError('the selected camera is not the attached IMX462 CSI sensor')
+        if view.get('deck', {}).get('isp', {}).get('available'):
+            # The service owns native calibration activation and persistence.
+            # A refused/uncertain live write must never fall back to a restart.
+            result = api('/cameras/'+args.camera+'/controls', {'kind': 'isp-profile', 'value': args.profile})
+            print(json.dumps(result['deck']['isp']))
+            return
         was_running = view['run']['state'] in ('running', 'starting', 'backoff')
         try:
             if was_running:

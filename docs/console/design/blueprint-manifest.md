@@ -9,7 +9,6 @@
 > `camera-notebook`, and `camera-tablet`; legacy audit rows remain historical
 > evidence, not a request to restore the retired navigation split.
 
-
 Every element the approved blueprint draws, written as a claim somebody can
 check against a capture, with what the console does today beside it.
 
@@ -218,15 +217,15 @@ No real camera image is part of the fixture or evidence.
 
 This update does not reclassify unrelated historical manifest rows as complete.
 
-### 1.6 The Capture column
+### 1.6 The Capture toolbar
 
 | # | The blueprint shows | Today | Class | Note |
 |---|---|---|---|---|
-| L-43 | **A `MODE` segmented control, `Video │ Photo`, at the head of the column** | Built — `YonderSegmented`, drawn only where the camera offers both | present | Task 33b. The mode is the browser's: not configuration, never an apply, and it does not survive a reload (the operator's own decision) |
-| L-44 | **One shutter key that follows the mode** — `○ RECORD` in Video, `PHOTO` in Photo, `● RECORDING 00:13:47` while running | Built — one key, drawn from whichever capability the mode selects | present | Task 33b. It lights and counts from `recorder.since`, the board's own answer, not from a local guess: a page opened after a recording started shows it running |
+| L-43 | **A `MODE` segmented control, `Video │ Photo`, in the capture toolbar directly below the image** | Built — `YonderSegmented`, drawn only where the camera offers both | present | Task 33b. The mode is the browser's: not configuration, never an apply, and it does not survive a reload (the operator's own decision) |
+| L-44 | **One shutter key that follows the mode** — `○ RECORD` in Video, `TAKE PHOTO` in Photo, `■ STOP RECORDING 00:13:47` while running | Built — one key, drawn from whichever capability the mode selects | present | Task 33b. It lights and counts from `recorder.since`, the board's own answer, not from a local guess: a page opened after a recording started shows it running |
 | L-45 | Beneath the key, where a capture lands (R-CAM-17): `to this board · 118 min free`, or `to the camera's card · no card in the camera` | Built — `captureDestination()` in `yonder-core`, from `recorder.remainingSeconds` against the storage reserve | present | Task 33b. A medium this device cannot measure says so — *this device cannot see what is left on it* — rather than *0 min free*, which is the opposite fact |
 | L-46 | In Photo mode the free-space line counts photos: `to this board · 3900 photos free` | Built — the same sentence, from `recorder.remainingPhotos` | present | Task 33b. The count is an estimate at a measured 0.15 bytes per pixel, taken at the pessimistic end; `recorder.ts` says why an estimate beats silence here |
-| L-47 | **A `CAPTURES (3) ›` link beside the shutter key** | Built — a link under the key, counting the same listing the panel draws, and pressing it re-reads now rather than at the next poll | present | Task 33b |
+| L-47 | **A `CAPTURES (3) ›` link beside the shutter key** | Built — a link beside the key in the capture toolbar, counting the same listing the panel draws, and pressing it re-reads now rather than at the next poll | present | Task 33b |
 | L-48 | **The captures popover**: `CAPTURES · THIS BOARD` / `4 SAVED`, one row per still with a thumbnail, `just now`, `1280×720 · 1.1 MB`, and `VIEW · DOWNLOAD · DELETE` | Built (`ui-yonder-captures`) — **as a panel below the deck, not a popover hanging off the link** | drifted, deliberately — **owner: the operator, to accept or reverse** | A Dashboard 2.x widget cannot render inside another widget's column, and the deck's own columns are 220 px — the constraint the blueprint's popover exists to escape. Everything else is the render: the heading and count, the rows, the relative time, `1280×720 · 1.1 MB`, and the three keys. A recording carries its kind instead of a thumbnail (there is no frame without decoding the file); a camera-held capture is listed and carries none of the three keys (R-CAM-18 — Yonder never saw it); Delete asks on the row before it acts |
 | L-49 | A `DEVICE` readout: `usb-1.2 · ELP-USBFHD01M` | Absent from the column; a by-path string appears in a separate `IDENTITY` panel below the deck | drifted | |
 | L-50 | An `ENCODER` readout: `v4l2h264enc · hardware` | Absent from the column; folded into the placard (L-08), without the `hardware`/`re-encoded` qualifier | drifted | |

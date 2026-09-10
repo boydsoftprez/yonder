@@ -994,6 +994,7 @@ describe("cameraDeck", () => {
       paths: { lan: false, mesh: false, cellular: true },
     });
     expect(behindNat.outputs[0]).toMatchObject({ kind: "rtp", enabled: true });
+    expect(behindNat.outputs[0]).toMatchObject({ host: "192.168.77.20", port: 5600 });
     expect(behindNat.outputs[0]?.reach.reachable).toBe(true);
     // A listener cannot be dialled from behind a carrier's NAT, and a stopped
     // output keeps everything but its `enabled`.

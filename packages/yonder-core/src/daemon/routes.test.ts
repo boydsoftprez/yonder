@@ -219,6 +219,8 @@ let probed: { node: string; card: string }[] = [];
 let controlsCalls: ApplyControlsOptions[] = [];
 
 interface RouterOptions {
+  isp?: import('../video/isp.js').IspControls;
+  supervisor?: Supervisor;
   credential?: AdminCredential | undefined;
   throttle?: AttemptThrottle;
   scan?: () => Promise<ScanResult>;
@@ -283,6 +285,7 @@ function router(opts: RouterOptions = {}): Router {
     clock: frozenClock,
   });
   return createRouter({
+    isp: opts.isp,
     accessory: opts.accessory,
     engine,
     configPath,
@@ -314,7 +317,7 @@ function router(opts: RouterOptions = {}): Router {
         },
       },
       encoder: () => Promise.resolve(ENCODER),
-      supervisor,
+      supervisor: opts.supervisor ?? supervisor,
       rtspPassword: () => RTSP_PASSWORD,
       addresses: () => Promise.resolve(opts.addresses ?? ADDRESSES),
       // Given, never a real applyControls — exactly as `cameras` and
@@ -2511,6 +2514,20 @@ describe("the camera routes", () => {
       const config = (await r("GET", "/config", undefined)).body as Config;
       expect(config.cameras[0]?.name).toBe("Nose mast");
     });
+
+    it("adds an RTP output only from the destination the operator staged", async () => {
+      const r = provisioned({ cameras: fixtureDetection(), camera: { outputs: [] } });
+      const invalid = await r("POST", "/cameras/cam0/apply", { rtpHost: "receiver", rtpPort: 5600, outputRtp: true });
+      expect(invalid).toMatchObject({ status: 400, body: { problems: [
+        { path: "outputs.rtpHost", message: expect.stringContaining("IPv4") },
+      ] } });
+      const added = await r("POST", "/cameras/cam0/apply", { rtpHost: "192.0.2.44", rtpPort: 5600, outputRtp: true });
+      expect(added.status).toBe(200);
+      const config = (await r("GET", "/config", undefined)).body as Config;
+      expect(config.cameras[0]?.outputs).toEqual([
+        { kind: "rtp", host: "192.0.2.44", port: 5600, enabled: true },
+      ]);
+    });
   });
 
   /**
@@ -3796,5 +3813,47 @@ describe('accessory route dispatch', () => {
     const adopted = await route('POST', '/cameras', { device: detected.byPath, source: 'usb' });
     expect(adopted.status).toBe(200);
     expect(loadConfig(configPath).cameras.find(c => c.device === detected.byPath)?.source).toBe('accessory');
+  });
+});
+
+describe('SeekerHD live ISP camera routes (R-CTL-04/10/16)', () => {
+  function setup(overrides: { device?: string; running?: boolean; csi?: boolean } = {}) {
+    const detection = fixtureDetection();
+    detection.found[0] = { ...detection.found[0], source: overrides.csi === false ? 'usb' : 'csi', card: 'm00_b_imx462 2-001a' };
+    let state = { ok: true as const, device: overrides.device ?? '/dev/video0', sensor: 'm00_b_imx462 2-001a', running: overrides.running ?? true,
+      profile: 'normal-light' as const, values: { brightness: 128, contrast: 128, saturation: 128, hue: 128 } };
+    const apply = vi.fn(async (command: import('../video/isp.js').IspCommand) => {
+      if (command.kind === 'isp-control') state = { ...state, values: { ...state.values, [command.control]: command.value } };
+      return state;
+    });
+    const supervisor = new Supervisor({ spawner: () => ({ kill() {}, on() {} }), clock: frozenClock });
+    vi.spyOn(supervisor, 'state').mockReturnValue({ id: 'cam0', state: 'running', since: 0, restarts: 0 });
+    const stop = vi.spyOn(supervisor, 'stop');
+    const r = provisioned({ cameras: detection, camera: { source: overrides.csi === false ? 'usb' : 'csi' }, supervisor,
+      isp: { status: async () => state, apply } });
+    return { r, apply, stop };
+  }
+  it('applies immediately with actual readback and no configuration or pipeline changes', async () => {
+    const { r, apply, stop } = setup();
+    const before = readFileSync(configPath, 'utf8');
+    const out = await r('POST', '/cameras/cam0/controls', { kind: 'isp-control', control: 'brightness', value: 142 });
+    expect(out.status).toBe(200);
+    expect((out.body as any).deck.isp.values.brightness).toBe(142);
+    expect(apply).toHaveBeenCalledTimes(1);
+    expect(apply).toHaveBeenCalledWith({ kind: 'isp-control', control: 'brightness', value: 142 });
+    expect(stop).not.toHaveBeenCalled();
+    expect(spawned).toEqual([]);
+    expect(controlsCalls).toEqual([]);
+    expect(readFileSync(configPath, 'utf8')).toBe(before);
+  });
+  it.each([{ device: '/dev/video2' }, { running: false }, { csi: false }])('refuses unavailable or mismatched ISP before writing: %j', async options => {
+    const { r, apply } = setup(options);
+    expect((await r('POST', '/cameras/cam0/controls', { kind: 'isp-profile', value: 'normal-light' })).status).toBe(409);
+    expect(apply).not.toHaveBeenCalled();
+  });
+  it('rejects invalid presets without dispatching them', async () => {
+    const { r, apply } = setup();
+    expect((await r('POST', '/cameras/cam0/controls', { kind: 'isp-profile', value: 'hdr' })).status).toBe(400);
+    expect(apply).not.toHaveBeenCalled();
   });
 });

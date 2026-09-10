@@ -63,6 +63,7 @@ import { RTSP_BASE, RTSP_PORT } from "../media/ports.js";
 import { pathCheck } from "../mav/check.js";
 import type { LinkState } from "../mav/link.js";
 import { SweepInProgressError, type DetectOutcome } from "../mav/detect.js";
+import { isSeekerHd, ispView, matchingIsp, parseIspCommand, type IspControls } from '../video/isp.js';
 
 export interface RouterDeps {
   interfaces?: () => Promise<InterfaceSnapshot>;
@@ -172,6 +173,8 @@ export interface RouterDeps {
    * than pretending the write happened.
    */
   applyControls?: (opts: ApplyControlsOptions) => Promise<ApplyControlsResult>;
+  /** Native SeekerHD ISP service; injected so tests never access a real camera. */
+  isp?: IspControls;
   /**
    * The one supervisor this process owns.
    *
@@ -1366,6 +1369,7 @@ export function createRouter(deps: RouterDeps): Router {
           run, startBlocked: display.startBlocked, identity: display.identity,
           runtime: deps.viewers?.runtime(id),
           accessory: accessorySnapshot,
+          isp: camera.source === 'csi' && isSeekerHd(found) ? await ispView(deps.isp, found.device) : undefined,
           camera, capabilities, encoder, paths: await reachPaths(),
           // The same two facts the `recorder` field below carries, on the
           // deck's own payload: the capture column draws the shutter key's
@@ -1471,6 +1475,26 @@ export function createRouter(deps: RouterDeps): Router {
      * confirmation window.
      */
     if (method === "POST" && verb === "controls") {
+      if (body && typeof body === 'object' && 'kind' in body &&
+          typeof body.kind === 'string' && body.kind.startsWith('isp-')) {
+        const requested = parseIspCommand(body);
+        if (!requested) return { status: 400, body: { error: 'Choose an installed ISP preset or an image control with an integer value from 0 to 255.' } };
+        const found = (await probes.detect()).found.find(d => d.byPath === camera.device);
+        if (camera.source !== 'csi' || !isSeekerHd(found)) {
+          return { status: 409, body: { error: 'Live ISP controls require a connected SeekerHD camera.' } };
+        }
+        if (!deps.isp) return { status: 503, body: { error: 'Live ISP controls are not installed.' } };
+        try {
+          const before = await deps.isp.status();
+          if (!matchingIsp(before, found.device)) throw new Error('The ISP service belongs to a different camera.');
+          if (!before.running || supervisor.state(id).state !== 'running') throw new Error('Start video to adjust the camera image.');
+          const after = await deps.isp.apply(requested);
+          if (!matchingIsp(after, found.device)) throw new Error('The ISP readback belongs to a different camera.');
+          return { status: 200, body: await view(false) };
+        } catch (error) {
+          return { status: 409, body: { error: error instanceof Error ? error.message : 'ISP command failed.' } };
+        }
+      }
       if (camera.source === 'accessory') {
         if (!deps.accessory) return { status: 503, body: { error: 'Accessory source unavailable' } };
         try { await deps.accessory.controls(camera.device, body); return { status: 200, body: await view(false) }; }

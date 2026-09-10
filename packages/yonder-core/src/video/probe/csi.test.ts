@@ -42,6 +42,26 @@ describe("Rockchip CSI discovery from the SeekerHD board", () => {
       { width: 1920, height: 1080 }, { width: 1280, height: 720 }, { width: 640, height: 360 },
     ] } } });
   });
+  it.each([
+    ['NTSC-derived 29.97 fps', '1001/30000'],
+    ['HDR timing of 4952376/148500000', '4952376/148500000'],
+  ])('advertises %s as nominal 30 fps', async (_name, interval) => {
+    const timedGraph = graph.replaceAll('4950000/148500000', interval);
+    const result = await probeRockchipCsi('/dev/video0', 'rkisp_mainpath', runner(timedGraph), names);
+    expect(result).toMatchObject({ capabilities: { formats: { value: [
+      { fourcc: 'NV12', width: 1280, height: 720, rates: [30] },
+      { fourcc: 'NV12', width: 1920, height: 1080, rates: [30] },
+      { fourcc: 'NV12', width: 640, height: 360, rates: [30] },
+    ] } } });
+  });
+  it.each([
+    ['a non-nominal 25.5 fps interval', '2/51'],
+    ['a rate outside the nominal tolerance', '1000/29969'],
+  ])('rejects %s', async (_name, interval) => {
+    const timedGraph = graph.replaceAll('4950000/148500000', interval);
+    const result = await probeRockchipCsi('/dev/video0', 'rkisp_mainpath', runner(timedGraph), names);
+    expect(result).toHaveProperty('reason', expect.stringContaining('nominal frame rate'));
+  });
   it("rejects an ISP with no connected sensor", async () => {
     const result = await probeRockchipCsi("/dev/video0", "rkisp_mainpath",
       runner(graph.replace("subtype Sensor", "subtype Unknown")), names);

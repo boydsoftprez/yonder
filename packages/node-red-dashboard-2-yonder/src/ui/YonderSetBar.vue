@@ -7,7 +7,7 @@
         </div>
         <div ref="trk" class="y-sb__trk" :style="{ width: TRACK_WIDTH + 'px' }"
              @pointerdown="down" @pointermove="move" @pointerup="up"
-             @pointercancel="up" @pointerleave="up">
+             @pointercancel="cancel" @pointerleave="up" @lostpointercapture="cancel">
             <i v-if="showActual" class="y-sb__act" :style="{ left: pct(actual) }" />
             <i v-if="showCommanded" class="y-sb__cmd" :style="{ left: pct(commanded) }" />
             <i v-if="grabAt !== null" class="y-sb__req" data-grab
@@ -190,15 +190,17 @@ export default {
         fine: { type: String, default: '' },
         /** Real, reachable, and not settable right now — a live readout
          * rather than a control with nothing charging it (see above). */
-        readonly: { type: Boolean, default: false }
+        readonly: { type: Boolean, default: false },
+        /** Native writes are expensive commands; pointer movement stays local (R-CTL-16). */
+        commitOnRelease: { type: Boolean, default: false }
     },
     emits: ['set'],
     data: () => ({ dragging: false, captureFailed: false, dragAt: null, TRACK_WIDTH }),
     watch: {
         // Let go of the drag's own position the moment the device answers:
         // holding it after that would draw a value nothing on the board has.
-        actual () { this.dragAt = null },
-        requested () { this.dragAt = null },
+        actual () { if (!this.commitOnRelease || !this.dragging) this.dragAt = null },
+        requested () { if (!this.commitOnRelease || !this.dragging) this.dragAt = null },
     },
     computed: {
         hasRequested () {
@@ -300,15 +302,26 @@ export default {
             } catch {
                 this.captureFailed = true
             }
-            this.$emit('set', this.from(e))
+            if (!this.commitOnRelease) this.$emit('set', this.from(e))
         },
         move (e) {
             if (!this.dragging) return
             this.dragAt = this.from(e)
-            this.$emit('set', this.dragAt)
+            if (!this.commitOnRelease) this.$emit('set', this.dragAt)
         },
         up () {
+            if (!this.dragging) return
             this.dragging = false
+            if (!this.commitOnRelease) return
+            const value = this.dragAt
+            if (this.state === 'present' && !this.readonly && Number.isFinite(value) && value !== this.actual) {
+                this.$emit('set', value)
+            } else this.dragAt = null
+        },
+        cancel () {
+            if (!this.dragging) return
+            this.dragging = false
+            if (this.commitOnRelease) this.dragAt = null
         }
     }
 }
