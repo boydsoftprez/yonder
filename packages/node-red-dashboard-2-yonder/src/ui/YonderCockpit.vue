@@ -226,10 +226,10 @@
       >Caution threshold in {{fmt(terrainReport.forecast.earliestCautionSeconds)}}
         s</small><small>{{terrainReport.forecast.coverage}} sampled coverage</small></button>
     <div
-      v-if="error"
+      v-if="displayError"
       class="cockpit-error"
       role="status"
-    >{{error}}</div>
+    >{{displayError}}</div>
   </div>
   <nav class="cockpit-mobile-tabs"><button
       @click="mobileInset='mission'"
@@ -247,7 +247,7 @@
     :selection="selection"
     :sitl="vehicleControls"
     :busy="sending||snapshot.busy"
-    :error="error"
+    :error="displayError"
     :draft="!!draft"
     :upload-status="missionUploadStatus"
     :can-undo="history.length>0"
@@ -569,10 +569,15 @@
           </dl>
           <div class="cockpit-actions"><button @click="showFlightPlan">Flight plan · read or upload mission</button></div>
           <article
-            v-for="op in snapshot.operations||[]"
-            :key="op.id"
-          ><b>{{op.state}}</b>
-            <p>{{op.message}}</p><small>{{op.effect?.message}}</small>
+            v-for="entry in operationReports"
+            :key="entry.op.id"
+          ><b>{{entry.display.title}}</b>
+            <p>{{entry.display.detail}}</p>
+            <details><summary>Technical details</summary>
+              <p>Operation {{entry.op.id}} · {{entry.op.state}}</p>
+              <p v-if="entry.protocol">{{entry.protocol.family}} · command {{entry.protocol.command}} · result {{entry.protocol.code}}</p>
+              <p>{{entry.op.message}}</p><small>{{entry.op.effect?.message}}</small>
+            </details>
           </article>
         </template>
       </div>
@@ -628,6 +633,7 @@ import MissionHome from './cockpit/MissionHome.vue'
 import {controllerHomeRequest,sameHome} from './cockpit/mission-home.mjs'
 import {unitText} from './cockpit/flight-units.mjs'
 import TelemetrySettings from './cockpit/TelemetrySettings.vue'
+import {operationPresentation,operationProtocol} from './cockpit/operation-presentation.mjs'
 import {defaultTelemetryRate,telemetryRates,telemetryPollDelay,cockpitRequestId} from './cockpit/telemetry-cadence.mjs'
 import YonderCockpitMap from './cockpit/YonderCockpitMap.vue'
 import OwnTrailSettings from './cockpit/OwnTrailSettings.vue'
@@ -795,7 +801,7 @@ export default {
       reviewing: null,
       pendingOperationId: null,
       sending: false,
-      error: '',
+      error: '',operationNotice:null,
       pollError: null,
       predictionMode: 'time',
       predictionSeconds: 30,
@@ -805,6 +811,12 @@ export default {
     }
   },
   computed: {
+    operationReports(){return [...(this.snapshot.operations||[])].reverse().map(op=>({op,display:operationPresentation(op,this.snapshot),protocol:operationProtocol(op)}))},
+    displayError(){
+      if(this.operationNotice?.message!==this.error)return this.error;
+      const op=this.snapshot.operations?.find(o=>o.id===this.operationNotice.id&&(!o.vehicleGeneration||o.vehicleGeneration===this.snapshot.identity?.generation));
+      return op?operationPresentation(op,this.snapshot).text:'';
+    },
     panelHeading(){return ({'display-menu':'Display','cockpit-menu':'Cockpit menu',alerts:'Aircraft notices',display:'Map, terrain & data',traffic:'Traffic display',trail:'Aircraft breadcrumb settings','draft-conflict':'Draft context changed'})[this.panel]||'Aircraft status'},
     headerDocked(){return this.headerActive&&!this.fullscreen&&this.headerActions?.isConnected===true&&this.windowWidth>=600},
     customInstrumentSlot(){return !!this.$slots['instrument-strip']},
@@ -934,8 +946,9 @@ export default {
         modes: (this.snapshot.capabilities?.modes || []).map(m => m.name),
         immediateCommands: this.snapshot.capabilities?.commands || [],
         lastResult: last ? {
-          state: last.state,
-          message: last.message
+          state: operationPresentation(last,this.snapshot).title,
+          message: operationPresentation(last,this.snapshot).detail,
+          ok:!['rejected','failed','unknown'].includes(last.state)
         } : null
       }
     }
@@ -1108,7 +1121,7 @@ export default {
       if(value.instruments){this.instrumentation=value.instruments;this.instrumentReceivedAt=this.receivedAt}
       if(this.pendingOperationId){
         const operation=value.operations?.find(op=>op.id===this.pendingOperationId);
-        if(operation){this.error=operation.state+' · '+operation.message;if(['observed','accepted','rejected','failed','unknown'].includes(operation.state))this.pendingOperationId=null}
+        if(operation){this.error=operationPresentation(operation,value).text;this.operationNotice={id:operation.id,message:this.error};if(['observed','accepted','rejected','failed','unknown'].includes(operation.state))this.pendingOperationId=null}
       }
       if (value.traffic) this.trafficReport = value.traffic;
       if (!this.optionsLoaded && value.dataOptions) {
@@ -1430,7 +1443,7 @@ export default {
           return
         }
         this.pendingOperationId=response.operationId;
-        this.error = `Request queued · ${response.operationId}. Awaiting aircraft result.`;
+        this.error = 'Request sent. Waiting for the aircraft response.';
         this.reviewing = null;
         if(current.action.kind==='set-home')this.homeOpen=true
       } catch (e) {

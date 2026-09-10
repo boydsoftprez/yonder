@@ -132,7 +132,7 @@ opens the editor.
    and press **Confirm & send**. In RTL/QRTL a home change can redirect the
    aircraft. Home-relative flight altitude references also change. Cancel returns
    to the editor with the fields preserved.
-6. Wait for the controller request to become **observed**, and check its reported
+6. Wait for the controller request to show **Home change confirmed**, and check its reported
    coordinates/elevation. Acceptance alone is not verified readback. A changed
    controller home or aircraft invalidates an open review. Check the reported home
    again after a reconnect or reboot; editing the planning home never silently
@@ -922,8 +922,13 @@ altitudes, but execution requires suitable autopilot support and data. Immediate
 flight targets accept MSL or above-home values; they never reinterpret a terrain
 or home-relative altitude as MSL.
 
-Request admission, autopilot acceptance and observed effect are separate. Aircraft
-status lists queued, sent, in-progress, accepted, observed, rejected, failed and
+Request admission, autopilot acceptance and observed effect are separate. The
+main display uses plain-language outcomes such as **Arming failed**, **Mission
+upload confirmed**, and **Heading change accepted**. Accepted means the controller
+accepted the request; confirmed means the expected response was verified. Tap
+the PFD result or open **Aircraft** to read the explanation. **Technical details**
+contains the original protocol response and operation state: queued, sent,
+in-progress, accepted, observed, rejected, failed and
 unknown outcomes with their messages. A timeout can mean **unknown**, not failure.
 Inspect the aircraft state before deciding to repeat an uncertain request. Request
 flight telemetry and Read aircraft mission are explicit service requests without

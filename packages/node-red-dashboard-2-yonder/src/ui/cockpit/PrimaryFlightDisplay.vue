@@ -7,7 +7,7 @@
     <div ref="canvas" class="pfd-instrument-canvas">
     <slot name="traffic" :pose="displayPose" :viewport="viewport"/>
     <slot name="background" :pose="displayPose" :viewport="viewport"/>
-    <FlightModeAnnunciator :snapshot="modeSnapshot" :options="options" :director-label="options.fdVisible?(director?'FD CUES':'FD NO DATA'):'FD OFF'" @open="$emit('flight-controls',$event)" @director="open('director')"/>
+    <FlightModeAnnunciator :snapshot="modeSnapshot" :options="options" :director-label="options.fdVisible?(director?'FD CUES':'FD NO DATA'):'FD OFF'" @open="$emit('flight-controls',$event)" @director="open('director')" @status="$emit('navigate','status')"/>
     <svg :viewBox="viewport.viewBox" class="pfd-svg" role="img" aria-label="Artificial horizon, airspeed and altitude tapes, vertical speed and heading">
       <defs>
         <linearGradient id="pfd-sky" x2="0" y2="1"><stop stop-color="#075096"/><stop offset="1" stop-color="#388eda"/></linearGradient>
