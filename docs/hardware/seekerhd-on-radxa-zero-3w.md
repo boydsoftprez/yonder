@@ -181,3 +181,32 @@ Twelve sequential Radxa `/config` requests improved from 64.85 ms median /
 3,673 tests after that integration; the subsequent CSI probe/pipeline subset
 passed 100 tests. These improvements do not imply zero CPU cost for video or
 that Linux load average is a CPU-utilization percentage.
+
+## 1080p browser preview
+
+The operator explicitly requested 1080p for the preview as well. Commit
+`0cb8266` adds 1920×1080 to the preview sizes and automatic ladder. The default
+ladder ceiling remains 720p; 1080p is an explicit choice. Preview size menus
+are filtered against the applied or drafted capture dimensions, and retain
+an unavailable current value visibly so it can be replaced with a valid size.
+The backend's existing larger-than-capture refusal remains in force.
+
+Both main and preview were configured as H.265 1920×1080/30 fps through Apply
+and Confirm. The preview keeps its existing Adaptive bitrate envelope and
+holds the selected 1080p size. Mac decoder samples returned 295 preview frames
+at 30.000 fps and 282 main frames at 28.576 fps. At this point the board was
+around 84–85°C, with CPU thermal cooling state 2 and its frequency ceiling
+reduced to 1.416 GHz. These observations do not certify sustained dual-stream
+30 fps under those thermal conditions.
+
+The actual browser separately reported a connected `video/H265` stream at
+1920×1080, 3,847 decoded frames, 30 fps, and zero packet loss. The diagnostic
+reader used the existing private WHEP listener through a temporary local SSH
+forward, which was removed after verification. The user was asked about
+heatsink/fan airflow because thermal throttling remained active.
+
+The full source run found only two obsolete test expectations (1080p formerly
+invalid, and a retained disabled selection counted as a writable option).
+After correcting them, the schema, composer, adaptation and draft suites
+passed 234 tests and the camera deck passed 82 tests; all other suites had
+passed in the full run. The complete package build passed.

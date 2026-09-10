@@ -463,6 +463,13 @@ compatibility. Preview codec is shared by viewers of this camera, so an older br
 may need it changed back to H.264. Changing codec alone does not change the configured
 bitrate budget.
 
+**`cameras[].preview.size: 1920x1080`** holds a full-HD browser preview;
+`preview.framerate: 30` selects 30 fps. The main capture must be at least
+1920×1080. The preview menu also offers 1080p as the largest automatic size,
+while the default ladder still tops out at 720p. Dual full-HD encoding must
+be checked against board throughput and cooling; selecting a size does not
+guarantee a throttled board can sustain the requested rate.
+
 **`mavlink.serial.baud: auto`** sweeps the rates ArduPilot is actually configured for in
 the field, fastest-last so a slow link is found before a fast one is guessed at. A pinned
 value is checked against that same set — `57600`, `115200`, `230400` or `921600` — and
