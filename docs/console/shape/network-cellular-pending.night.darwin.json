@@ -51,6 +51,15 @@
       }
     },
     {
+      "key": "nrdb-ui-widget.nrdb-ui-yonder-interfaces",
+      "box": {
+        "x": 0,
+        "y": 0,
+        "w": 0,
+        "h": 0
+      }
+    },
+    {
       "key": "nrdb-ui-text.nrdb-ui-widget.yonder-fixed#0",
       "box": {
         "x": 0,
@@ -319,7 +328,7 @@
     },
     {
       "key": "nrdb-ui-text.nrdb-ui-widget.yonder-fixed.yonder-pending.yonder-qualifier#1",
-      "text": "Confirm it to keep it. If you do not, the device puts the previous configuration back by itself — which is what gets you back in if this change was the wrong one."
+      "text": "Choose Keep to save these settings or Revert to restore the previous settings. If you do neither, the device restores the previous settings automatically."
     },
     {
       "key": "nrdb-ui-text.nrdb-ui-widget.yonder-fixed#0",
@@ -351,7 +360,7 @@
     },
     {
       "key": "nrdb-ui-text.nrdb-ui-widget.yonder-fixed.yonder-pending.yonder-qualifier#1",
-      "text": "Confirm it to keep it. If you do not, the device puts the previous configuration back by itself — which is what gets you back in if this change was the wrong one."
+      "text": "Choose Keep to save these settings or Revert to restore the previous settings. If you do neither, the device restores the previous settings automatically."
     }
   ]
 }

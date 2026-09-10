@@ -1,5 +1,15 @@
 # The blueprint manifest
 
+> Camera integration update (2026-09-10): R-UI-29 and the
+> [approved camera workspace revision](../../superpowers/specs/2026-09-08-camera-workspace.md)
+> supersede the historical Live/Setup, separate Stream Address, and camera rail
+> composition audited below. The current Camera surface keeps image/capture,
+> stream/output settings, inline connection details, and one transaction area
+> together. Notebook/tablet captures use `camera`, `camera-sensor-turns`,
+> `camera-notebook`, and `camera-tablet`; legacy audit rows remain historical
+> evidence, not a request to restore the retired navigation split.
+
+
 Every element the approved blueprint draws, written as a claim somebody can
 check against a capture, with what the console does today beside it.
 

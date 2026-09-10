@@ -71,7 +71,7 @@ export default {
 .y-strip__age { display: block; grid-column: 2; grid-row: 3; font-size: 10px; color: var(--yonder-label, #7f8a95); }
 .y-strip {
     display: flex;
-    flex-wrap: nowrap;
+    flex-wrap: wrap;
     align-items: center;
     gap: 8px;
     font-family: var(--yonder-font, system-ui, sans-serif);
@@ -134,7 +134,7 @@ export default {
 .y-strip__dl {
     margin-left: auto;
     align-self: center;
-    flex: 0 0 auto;
+    flex: 1 1 160px;
     max-width: 280px;
     min-width: 160px;
     line-height: 1.4;

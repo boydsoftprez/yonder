@@ -146,7 +146,7 @@
         "x": 268,
         "y": 1242,
         "w": 1000,
-        "h": 377
+        "h": 697
       }
     },
     {
@@ -195,19 +195,100 @@
       }
     },
     {
-      "key": "nrdb-ui-group#4",
+      "key": "nrdb-ui-widget.nrdb-ui-yonder-interfaces",
       "box": {
-        "x": 268,
-        "y": 1630,
-        "w": 1000,
-        "h": 137
+        "x": 285,
+        "y": 1613,
+        "w": 966,
+        "h": 308
       }
     },
     {
-      "key": "nrdb-ui-text.nrdb-ui-widget",
+      "key": "nrdb-ui-group#4",
+      "box": {
+        "x": 268,
+        "y": 1950,
+        "w": 1000,
+        "h": 557
+      }
+    },
+    {
+      "key": "nrdb-ui-text.nrdb-ui-widget#0",
       "box": {
         "x": 285,
-        "y": 1702,
+        "y": 2022,
+        "w": 966,
+        "h": 48
+      }
+    },
+    {
+      "key": "nrdb-ui-widget.nrdb-ui-yonder-identity#0",
+      "box": {
+        "x": 285,
+        "y": 2082,
+        "w": 966,
+        "h": 48
+      }
+    },
+    {
+      "key": "nrdb-ui-widget.nrdb-ui-yonder-identity#1",
+      "box": {
+        "x": 285,
+        "y": 2142,
+        "w": 966,
+        "h": 48
+      }
+    },
+    {
+      "key": "nrdb-ui-text.nrdb-ui-widget#1",
+      "box": {
+        "x": 285,
+        "y": 2202,
+        "w": 477,
+        "h": 48
+      }
+    },
+    {
+      "key": "nrdb-ui-text.nrdb-ui-widget#2",
+      "box": {
+        "x": 774,
+        "y": 2202,
+        "w": 477,
+        "h": 48
+      }
+    },
+    {
+      "key": "nrdb-ui-text.nrdb-ui-widget#3",
+      "box": {
+        "x": 285,
+        "y": 2262,
+        "w": 966,
+        "h": 48
+      }
+    },
+    {
+      "key": "nrdb-ui-text.nrdb-ui-widget#4",
+      "box": {
+        "x": 285,
+        "y": 2322,
+        "w": 966,
+        "h": 48
+      }
+    },
+    {
+      "key": "nrdb-ui-widget.nrdb-ui-yonder-sparkline",
+      "box": {
+        "x": 285,
+        "y": 2382,
+        "w": 966,
+        "h": 48
+      }
+    },
+    {
+      "key": "nrdb-ui-text.nrdb-ui-widget#5",
+      "box": {
+        "x": 285,
+        "y": 2442,
         "w": 966,
         "h": 48
       }
@@ -216,7 +297,7 @@
       "key": "nrdb-ui-group#5",
       "box": {
         "x": 268,
-        "y": 1779,
+        "y": 2519,
         "w": 1000,
         "h": 197
       }
@@ -225,7 +306,7 @@
       "key": "nrdb-ui-widget.nrdb-ui-yonder-databar.yonder-fixed",
       "box": {
         "x": 285,
-        "y": 1851,
+        "y": 2591,
         "w": 966,
         "h": 48
       }
@@ -234,7 +315,7 @@
       "key": "nrdb-ui-text.nrdb-ui-widget.yonder-fixed.yonder-qualifier",
       "box": {
         "x": 285,
-        "y": 1911,
+        "y": 2651,
         "w": 966,
         "h": 48
       }
@@ -265,7 +346,7 @@
     },
     {
       "key": "nrdb-ui-text.nrdb-ui-widget.yonder-fixed.yonder-pending.yonder-qualifier#1",
-      "text": "Confirm it to keep it. If you do not, the device puts the previous configuration back by itself — which is what gets you back in if this change was the wrong one."
+      "text": "Choose Keep to save these settings or Revert to restore the previous settings. If you do neither, the device restores the previous settings automatically."
     },
     {
       "key": "nrdb-ui-widget.nrdb-ui-yonder-databar.yonder-fixed",
