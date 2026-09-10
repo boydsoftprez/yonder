@@ -210,3 +210,12 @@ invalid, and a retained disabled selection counted as a writable option).
 After correcting them, the schema, composer, adaptation and draft suites
 passed 234 tests and the camera deck passed 82 tests; all other suites had
 passed in the full run. The complete package build passed.
+
+The operator then confirmed a heatsink was already fitted and added a fan.
+The SoC dropped to 49.44°C, then 46.67°C; the CPU ceiling returned to 1.8 GHz.
+With the same dual-1080p settings, a follow-up fifteen-second main-stream
+decoder sample produced 443 frames, no timestamp gaps over 50 ms, and
+30.000 fps after the first two seconds of receiver acquisition. The cooled
+preview sample produced 300 frames at 30.000 fps. Initial HEVC reference
+diagnostics during joining remain; the later steady sample showed no frame gaps.
+No thermal protection, frequency limit or encoder governor was overridden.
