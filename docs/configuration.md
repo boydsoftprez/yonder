@@ -451,9 +451,17 @@ gpio:
 probed encoder offers it — a Rockchip board's MPP does; a Raspberry Pi's V4L2 encoder does
 not, and the camera page refuses Start with the encoder named rather than letting the
 pipeline die (R-CAM-08, R-CAM-10). It changes only what leaves for the ground station: the
-copy the console watches is always H.264, because a browser reaches it over WebRTC
-(R-VID-20). Changing it restarts the camera's pipeline and does not arm the confirmation
-window. There is no control for it on the camera page yet (K-65); it is set here.
+copy the console watches has its own `cameras[].preview.codec` setting (R-VID-20).
+Both codecs have selectors on the camera page and use the existing Apply workflow.
+Changing either codec restarts the camera pipeline; retain or revert the change when
+the confirmation window is offered.
+
+**`cameras[].preview.codec`** defaults to H.264 when omitted. Select `h265` for a
+browser that can receive HEVC over WebRTC. The console offers this choice only when
+the board encoder and current browser advertise H.265; H.264 remains selectable for
+compatibility. Preview codec is shared by viewers of this camera, so an older browser
+may need it changed back to H.264. Changing codec alone does not change the configured
+bitrate budget.
 
 **`mavlink.serial.baud: auto`** sweeps the rates ArduPilot is actually configured for in
 the field, fastest-last so a slow link is found before a fast one is guessed at. A pinned

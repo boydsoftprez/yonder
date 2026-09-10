@@ -45,6 +45,12 @@ Armbian 26.8.1 trixie, `6.1.115-vendor-rk35xx`, Radxa Zero 3W:
 - CSI discovery exposes only the prepared NV12 mode and observed sensor rate.
   It does not claim all stepwise ISP sizes as tested camera modes.
 
+The later native-resolution pass supersedes that initial discovery restriction:
+full-field 1080p, 720p and 360p output candidates are now verified with TRY_FMT.
+The main H.265 stream was verified at 1080p30 using a Mac decoder while the
+independent H.265 preview remained at 720p30. See the final
+[hardware record](../../../docs/hardware/seekerhd-on-radxa-zero-3w.md) for measurements.
+
 The reference IQ file is not a calibrated SeekerHD profile: its sensor section
 describes another resolution and gain conversion. Do not install it unchanged. Divimath's
 [tuning guide](https://github.com/rquellet/SeekerHD-RaspberryPi-Helper/blob/main/docs/imx462-tuning.md)
