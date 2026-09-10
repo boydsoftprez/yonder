@@ -1235,6 +1235,10 @@ if node -e 'import("playwright")' >/dev/null 2>&1; then
 
     # PR #7's pair proof, adapted to R-UI-29's single Camera workspace.
     capture_pair() {
+        # Output explanations depend on measured reachability. Make that state
+        # explicit rather than inheriting whichever probes ran before this test.
+        pair_probe=$(cat "$PROBE_ANSWER")
+        drive_paths 1
         cp "$CAMERAS_PAIR" "$CAMERAS_LIVE"
         sock /config > "$ROOT/pair-before.json"
         node -e '
@@ -1246,6 +1250,15 @@ if node -e 'import("playwright")' >/dev/null 2>&1; then
             --unix-socket "$SOCKET" http://localhost/apply)
         confirm_apply "$added"
         expect_contains "the camera pair is configured" '"id":"tail"' "$(sock /config)"
+        if sock /cameras/front | node -e '
+            let raw=""; process.stdin.on("data",s=>raw+=s); process.stdin.on("end",()=>{
+                const rows=JSON.parse(raw).deck.outputs;
+                process.exit(rows.length>0 && rows.every(row=>row.reach.reachable===false) ? 0 : 1);
+            });'; then
+            ok "the pair has no demonstrated output path, independent of earlier probes"
+        else
+            bad "the camera pair inherited inconsistent reachability"
+        fi
         for pair_cam in front tail; do
             sock_post "/cameras/$pair_cam/run" '{"action":"start"}' >/dev/null
             i=0
@@ -1287,7 +1300,7 @@ if node -e 'import("playwright")' >/dev/null 2>&1; then
             --unix-socket "$SOCKET" http://localhost/apply)
         confirm_apply "$restored"
         cp "$CAMERAS" "$CAMERAS_LIVE"
-        sleep 7
+        drive_paths "$pair_probe"
         expect_missing "the pair was removed after capture" '"id":"tail"' "$(sock /config)"
     }
 

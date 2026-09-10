@@ -38,12 +38,4 @@ export async function prepareCameraPair(page, selected) {
     assert.equal(await page.locator('.y-aim__dial').count(), 0, 'switching to a camera without aim retires the dial');
     assert.match(await page.locator('.y-strip__thumb.on').innerText(), /Tail camera/);
   }
-  // The full gate has already exercised rollback; its settled action notice
-  // is not part of this camera-pair state. Dismiss it through the actual UI
-  // so focused and full runs capture the same settled workspace.
-  const notice = page.locator('.y-deck__result').getByRole('button', {name: 'Dismiss message', exact: true});
-  if (await notice.count()) {
-    await notice.click();
-    await notice.waitFor({state: 'hidden'});
-  }
 }

@@ -56,7 +56,9 @@ second has no gimbal.
 The browser proof checks decoded full-size stills and thumbnails, their age,
 nonzero traffic, the private state overlay, one dial, null position readouts,
 and switching to the second camera without retaining the first camera's Aim.
-It runs on Camera and Cockpit in both palettes, with additional standalone
+Its output-path probes are explicitly set to not-reaching, then restored, so
+reachability explanations are independent of earlier test order. It runs on
+Camera and Cockpit in both palettes, with additional standalone
 Cockpit notebook/tablet captures. The normal console gate still runs all prior
 base, state, credential, rollback and viewport checks.
 
