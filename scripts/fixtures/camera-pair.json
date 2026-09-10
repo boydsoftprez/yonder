@@ -1,0 +1,24 @@
+{
+  "why": "Synthetic two-camera browser coverage carried forward from PR #7. A generic capability advertises bounds but reports no attitude or guarded transport; no gimbal motion is enabled. The actual pipeline host uses fake GI and writes decodable grey JPEGs, not hardware photographs.",
+  "aim": {
+    "state": "present",
+    "value": {
+      "yaw": {
+        "min": -180,
+        "max": 180
+      },
+      "pitch": {
+        "min": -90,
+        "max": 30
+      },
+      "mode": "follow"
+    }
+  },
+  "second": {
+    "id": "tail",
+    "name": "Tail camera",
+    "device": "/dev/video2",
+    "byPath": "platform-fd500000.pcie-pci-0000:01:00.0-usb-0:1.4:1.0-video-index0",
+    "rtpPort": 5602
+  }
+}

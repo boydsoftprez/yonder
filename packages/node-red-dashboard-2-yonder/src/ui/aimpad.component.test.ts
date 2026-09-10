@@ -420,6 +420,40 @@ describe("inhibited: emits nothing, and says why", () => {
   });
 
   /**
+   * `note` is what is drawn; `inhibited` is what refuses the press. They
+   * were one prop until K-63, when the first photograph of a panel that
+   * says the same sentence at its own head showed it twice, 40 px apart.
+   * The two tests below are the pair: an unset `note` keeps the inhibition's
+   * own words for a caller with nowhere else to put them (`YonderDeck`'s aim
+   * block), and `note: ""` silences the sentence **without** softening the
+   * guard by a single press.
+   */
+  it("defaults to saying the inhibition's own words", () => {
+    expect(pad({ inhibited: REASON }).find(".y-aim__reason").text()).toBe(REASON);
+  });
+
+  it("an empty note draws nothing and still refuses every press", () => {
+    const w = pad({ inhibited: REASON, note: "" });
+    expect(w.find(".y-aim__reason").exists()).toBe(false);
+    expect(w.text()).not.toContain(REASON);
+
+    const dial = dialOf(w);
+    down(dial, 20, 0);
+    move(dial, 40, 0);
+    fire(dial, "pointerup");
+    expect(w.emitted("slew")).toBeUndefined();
+    expect(w.emitted("stop")).toBeUndefined();
+  });
+
+  it("a note of its own is drawn in place of the inhibition's words", () => {
+    // The panel's own case: a short `not answering` under the dial while the
+    // head carries the device's full reason. Two sentences, one each.
+    const w = pad({ inhibited: REASON, note: "not answering" });
+    expect(w.find(".y-aim__reason").text()).toBe("not answering");
+    expect(w.text()).not.toContain(REASON);
+  });
+
+  /**
    * Not one of the plan's own eight — the test above dispatches a real
    * pointerdown, which a CSS-only gate (`pointer-events: none`) would not
    * stop, since a dispatched event bypasses hit-testing entirely. This

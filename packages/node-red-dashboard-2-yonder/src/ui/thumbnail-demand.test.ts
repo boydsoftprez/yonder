@@ -17,3 +17,26 @@ describe('visible thumbnail demand', () => {
     expect(calls).toHaveLength(1);resolve();await settle();expect(calls).toEqual([{want:'video',stills:true},{want:'off',stills:false}]);
   });
 });
+
+
+it('delivers selected display state without requiring a WebRTC stats session', async () => {
+  const state={camera:'one',viewer:'viewer-1',at:100,overlay:{head:'Stills'}};
+  const got=vi.fn();
+  const demand=new ThumbnailDemand(vi.fn(async()=>({ok:true,json:async()=>state})) as any,got);
+  demand.set([{id:'one',want:'stills'}]);await settle();
+  expect(got).toHaveBeenCalledWith(state);
+  demand.close();await settle();expect(got).toHaveBeenCalledTimes(1);
+});
+
+it('rejects late responses after selection changes or closes, and mismatched camera replies', async () => {
+  for (const retire of ['switch','close','mismatch']) {
+    let finish!:(value:unknown)=>void;const got=vi.fn();
+    const fetcher=vi.fn(async()=>({ok:true,json:()=>new Promise(resolve=>{finish=resolve})}));
+    const demand=new ThumbnailDemand(fetcher as any,got);
+    demand.set([{id:'one',want:'stills'}]);await settle();
+    if(retire==='switch')demand.set([{id:'one',want:'off'}]);
+    if(retire==='close')demand.close();
+    finish({camera:retire==='mismatch'?'another':'one',viewer:'v1',at:100,overlay:{head:'Stills'}});
+    await settle();expect(got).not.toHaveBeenCalled();demand.close();
+  }
+});

@@ -397,6 +397,19 @@ describe("the pipeline host takes a still off the raw tee", () => {
     });
     expect((reply.observed as { bytes: number }).bytes).toBeGreaterThan(0);
     expect(statSync(path).isFile()).toBe(true);
+    // **And what it wrote is a picture.** A still is drawn on a console page
+    // — the strip's thumbnail and the fall-back frame (R-VID-14) — and
+    // `scripts/verify-pages.sh` photographs it, so a file that grows is not
+    // enough here the way it is for a recording: an <img> holding bytes that
+    // are not an image draws nothing at all, silently. The two markers are
+    // the frame's own boundaries, so this fails on a truncated file as well
+    // as on one that was never a JPEG.
+    const frame = readFileSync(path);
+    expect([frame[0], frame[1]], "a JPEG starts with SOI").toEqual([0xff, 0xd8]);
+    expect(
+      [frame[frame.length - 2], frame[frame.length - 1]],
+      "and ends with EOI, once",
+    ).toEqual([0xff, 0xd9]);
   }, 20_000);
 
   it("hangs it off `raw`, where the decoded frames are, and not off `main`", async () => {

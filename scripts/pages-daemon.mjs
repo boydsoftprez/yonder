@@ -39,6 +39,9 @@
 //   YONDER_PAGES_ROUTER_STATS file the journalctl stand-in prints
 
 import { readFileSync, writeFileSync } from "node:fs";
+import { dirname } from "node:path";
+import { fileURLToPath } from "node:url";
+import { controlledSpawner } from "../packages/yonder-core/dist/video/supervisor.js";
 import { createSocket } from "node:dgram";
 import { startServer, consolePathsFromEnv } from "../packages/yonder-core/dist/daemon/server.js";
 import { heartbeatV2 } from "../packages/yonder-core/dist/mav/testing.js";
@@ -254,7 +257,14 @@ const probe = async (node, card) => {
   return structuredClone(rejected ?? { device: node, card, reason: "this device is not in the fixture" });
 };
 
+// Exercise the real pipeline protocol with the test GStreamer graph. No device
+// nodes or media listeners are opened, and all still files stay under this run.
+const pipelineHost = fileURLToPath(new URL('../installer/payload/yonder-pipeline', import.meta.url));
+const fakeGi = fileURLToPath(new URL('../packages/yonder-core/src/video/fake-gi', import.meta.url));
 await startServer({
+  spawner: controlledSpawner(pipelineHost, { PYTHONPATH: fakeGi }),
+  stillsRoot: dirname(env('YONDER_SOCKET')) + '/stills',
+
   socketPath: env("YONDER_SOCKET"),
   configPath: env("YONDER_CONFIG"),
   journalPath: env("YONDER_JOURNAL"),

@@ -41,7 +41,7 @@ import {
   type AimPanel, type CameraDeck, type CameraStrip, type CapabilityFact, type ThumbRow,
 } from "../video/present.js";
 import type { Stills } from "../video/stills.js";
-import { STILL_AGE_HEADER, STILL_AT_HEADER } from "../video/media-path.js";
+import { STILL_AGE_HEADER, STILL_AT_HEADER, VIEWER_ID } from "../video/media-path.js";
 import { systemClock, type Clock } from "../apply/types.js";
 import { applyCameraDraft, deckDraft, interruption, validateDraft } from "../apply/draft.js";
 import { captureRefusal, captureSizes } from "../video/capability.js";
@@ -674,7 +674,6 @@ const CAMERA_ID = /^[a-z0-9][a-z0-9-]{0,31}$/;
  * wider than that on purpose: it is a statement of what this route will
  * accept as a key in a map, not a restatement of one minter's format.
  */
-const VIEWER_ID = /^[a-z0-9][a-z0-9-]{0,63}$/;
 
 /**
  * `/cameras/<id>` and its suffixes.

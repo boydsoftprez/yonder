@@ -119,6 +119,20 @@ it("not-offered draws no wrapper at all, not an empty one", () => {
     expect(w.html().replace(/<!--.*?-->/g, "").trim()).toBe("");
 });
 
+it("draws nothing at all when it has no options to offer, in any state", () => {
+    // K-63's fourth part, guarded here rather than only in the caller. A
+    // labelled group with no buttons in it is a control offering nothing —
+    // R-UI-20 — and an operator cannot tell it from a control whose choices
+    // failed to arrive. `YonderAim` states a fact where the control would
+    // have been (`aim.component.test.ts`); this is the promise that stops
+    // any *other* caller producing the empty box by forgetting to.
+    for (const state of ["present", "advertised", "gated"]) {
+        const w = seg({ options: [], value: "", state, reason: "why" });
+        expect(w.find(".y-seg").exists(), `${state} drew an empty control`).toBe(false);
+        expect(w.html().replace(/<!--.*?-->/g, "").trim()).toBe("");
+    }
+});
+
 it("the disabled attribute alone stops the press", async () => {
     // These two isolate what the general "emits nothing" test cannot: it
     // passes with either protection removed, so it proves only their joint

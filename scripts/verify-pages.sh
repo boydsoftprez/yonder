@@ -449,6 +449,23 @@ for (const [key, value] of Object.entries(overlay.capabilities)) {
 writeFileSync(process.env.OUT, JSON.stringify(base, null, 2) + "\n");
 ' || die "could not build the sensor-turns fixture at $CAMERAS_SENSOR"
 
+# Pair coverage uses the same recorded UVC controls on a second socket. The
+# advertised gimbal has bounds but no attitude/guarded transport.
+CAMERAS_PAIR="$ROOT/cameras-pair.json"
+PAIR_OVERLAY="$REPO/scripts/fixtures/camera-pair.json"
+BASE="$CAMERAS" OVERLAY="$PAIR_OVERLAY" OUT="$CAMERAS_PAIR" node -e '
+const fs = require("node:fs");
+const base = JSON.parse(fs.readFileSync(process.env.BASE, "utf8"));
+const extra = JSON.parse(fs.readFileSync(process.env.OVERLAY, "utf8"));
+const second = structuredClone(base.found[0]);
+second.device = extra.second.device; second.byPath = extra.second.byPath;
+base.found.push(second); base.found[0].capabilities.aim = extra.aim;
+base.secondCamera = structuredClone(base.camera);
+Object.assign(base.secondCamera, {id: extra.second.id, name: extra.second.name, device: extra.second.byPath});
+for (const output of base.secondCamera.outputs) if (output.kind === "rtp") output.port = extra.second.rtpPort;
+fs.writeFileSync(process.env.OUT, JSON.stringify(base));
+' || die "could not prepare the camera pair"
+
 DAEMON_PID=""
 CONSOLE_PID=""
 cleanup() {
@@ -547,7 +564,7 @@ expect_contains() {
 }
 # One field out of a JSON reply, parsed rather than pattern-matched.
 #
-# `sed -n 's/.*"id":"\([^"]*\)".*/\1/p'` is greedy, and `GET /status` carries
+# Greedy text matching can choose a nested id, and `GET /status` carries
 # two ids: the pending change's and `lastResult`'s, left over from the apply
 # before it. So the pattern read the *previous* apply's id, confirmed a change
 # that was already over, and left the real one pending — which then refused
@@ -632,7 +649,7 @@ expect_missing "a bitrate change arms the confirmation window" '"expiresAt":null
 # script first reported "pressing Night did nothing: the control is wired but
 # dead", and the control was fine.
 confirm_apply() {
-    id=$(printf '%s' "$1" | sed -n 's/.*"id":"\([^"]*\)".*/\1/p')
+    id=$(printf '%s' "$1" | json_field id)
     [ -n "$id" ] && sock_post /confirm "{\"id\":\"$id\"}" >/dev/null
 }
 confirm_apply "$armed"
@@ -970,7 +987,7 @@ if node -e 'import("playwright")' >/dev/null 2>&1; then
     expect_contains "nothing has been probed, so the base captures are the untested state" \
         '"evidence":"untested"' "$(sock /reach/state)"
 
-    capture day
+    [ "${PAIR_ONLY:-0}" = "1" ] || capture day
 
     # Night through the route an operator uses, not by writing the file: the
     # theme goes through the apply engine, so this also proves the palette a
@@ -989,7 +1006,7 @@ if node -e 'import("playwright")' >/dev/null 2>&1; then
 
     reach_theme() {
         reply=$(sock_post /ui/theme "{\"theme\":\"$1\"}")
-        id=$(printf '%s' "$reply" | sed -n 's/.*"id":"\([^"]*\)".*/\1/p')
+        id=$(printf '%s' "$reply" | json_field id)
         [ -n "$id" ] && sock_post /confirm "{\"id\":\"$id\"}" >/dev/null
         i=0
         while [ "$i" -lt "$TRIES" ]; do
@@ -1214,6 +1231,64 @@ if node -e 'import("playwright")' >/dev/null 2>&1; then
         sleep 7
         expect_contains "the recorded camera is back for the rest of the run" \
             '"horizontalFlip":{"state":"not-offered"}' "$(sock /cameras/front)"
+    }
+
+    # PR #7's pair proof, adapted to R-UI-29's single Camera workspace.
+    capture_pair() {
+        cp "$CAMERAS_PAIR" "$CAMERAS_LIVE"
+        sock /config > "$ROOT/pair-before.json"
+        node -e '
+          const fs = require("node:fs"), config = require(process.argv[1]), fixture = require(process.argv[2]);
+          config.cameras.push(fixture.secondCamera);
+          fs.writeFileSync(process.argv[3], JSON.stringify(config));
+        ' "$ROOT/pair-before.json" "$CAMERAS_PAIR" "$ROOT/pair-config.json"
+        added=$(curl -s -H 'content-type: application/json' --data @"$ROOT/pair-config.json" \
+            --unix-socket "$SOCKET" http://localhost/apply)
+        confirm_apply "$added"
+        expect_contains "the camera pair is configured" '"id":"tail"' "$(sock /config)"
+        for pair_cam in front tail; do
+            sock_post "/cameras/$pair_cam/run" '{"action":"start"}' >/dev/null
+            i=0
+            while [ "$i" -lt "$TRIES" ]; do
+                case "$(sock "/cameras/$pair_cam")" in *"\"run\":{\"id\":\"$pair_cam\",\"state\":\"running\""*) break ;; esac
+                sleep "$POLL"; i=$((i + 1))
+            done
+            expect_contains "the $pair_cam fixture pipeline is running" '"state":"running"' "$(sock "/cameras/$pair_cam")"
+        done
+        for pair_page in camera cockpit; do
+            for selected in front tail; do
+                if node "$REPO/scripts/capture-pages.mjs" \
+                    --base-url "http://127.0.0.1:$PORT" --password "$PASSWORD" \
+                    --palette "$1" --only "$pair_page" --as "$pair_page-pair-$selected" \
+                    --camera-pair "$selected" --artifacts "$REPO/vendor/capture" \
+                    --synthetic-cameras "$CAMERAS_PAIR" --secrets "$ETC/secrets.yaml" \
+                    ${ACCEPT_SHAPE:+--accept}; then
+                    ok "$pair_page pair ($1, $selected): decoded stills, traffic, selection and honest aim"
+                else
+                    bad "$pair_page pair ($1, $selected): see browser proof above"
+                fi
+            done
+        done
+        for pair_surface in notebook:1440x900 tablet:1024x768; do
+            surface=${pair_surface%%:*}; size=${pair_surface#*:}
+            if node "$REPO/scripts/capture-pages.mjs" \
+                --base-url "http://127.0.0.1:$PORT" --password "$PASSWORD" \
+                --palette "$1" --only cockpit --as "cockpit-pair-$surface" \
+                --viewport "$size" --fold --camera-pair front \
+                --artifacts "$REPO/vendor/capture" --synthetic-cameras "$CAMERAS_PAIR" \
+                --secrets "$ETC/secrets.yaml" ${ACCEPT_SHAPE:+--accept}; then
+                ok "Cockpit pair ($1, $surface): independent viewport contract"
+            else
+                bad "Cockpit pair ($1, $surface): see viewport checks above"
+            fi
+        done
+        for pair_cam in front tail; do sock_post "/cameras/$pair_cam/run" '{"action":"stop"}' >/dev/null; done
+        restored=$(curl -s -H 'content-type: application/json' --data @"$ROOT/pair-before.json" \
+            --unix-socket "$SOCKET" http://localhost/apply)
+        confirm_apply "$restored"
+        cp "$CAMERAS" "$CAMERAS_LIVE"
+        sleep 7
+        expect_missing "the pair was removed after capture" '"id":"tail"' "$(sock /config)"
     }
 
     # Status's third shape, and the one the confirmation timer exists for
@@ -1656,6 +1731,19 @@ if node -e 'import("playwright")' >/dev/null 2>&1; then
             fi
     }
 
+    # A focused development run; normal CI leaves PAIR_ONLY unset and runs
+    # every base, state, viewport and pair capture below.
+    if [ "${PAIR_ONLY:-0}" = "1" ]; then
+        for pair_palette in night day; do
+            reach_theme "$pair_palette" || die "could not reach $pair_palette"
+            capture_pair "$pair_palette"
+        done
+        say "focused camera-pair result"
+        printf '  %s passed, %s failed\n' "$pass" "$fail"
+        [ "$fail" -eq 0 ]
+        exit
+    fi
+
     if reach_theme night; then
         ok "the device reached the night palette through /ui/theme"
         capture night
@@ -1669,6 +1757,7 @@ if node -e 'import("playwright")' >/dev/null 2>&1; then
         capture_status_pending night
         capture_pending_radio night
         capture_sensor_turns night
+        capture_pair night
         capture_fold night notebook 1440x900
         capture_fold night tablet 1024x768
         capture_telemetry_states night
@@ -1688,6 +1777,7 @@ if node -e 'import("playwright")' >/dev/null 2>&1; then
         capture_status_pending day
         capture_pending_radio day
         capture_sensor_turns day
+        capture_pair day
         capture_fold day notebook 1440x900
         capture_fold day tablet 1024x768
         capture_telemetry_states day

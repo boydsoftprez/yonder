@@ -88,6 +88,7 @@ export function measure([liveSelectors, fixedSelector, specimenValues, maskedKey
     }
     if (el.classList.contains("y-spark__ceiling")) return "ceiling";
     if (el.classList.contains("y-spark__span")) return "span";
+    if (el.classList.contains("y-strip__dl-v")) return "Thumbnail traffic";
     // A table cell's field is its column, not the cell: every row of one
     // column holds the same kind of value, so one specimen is what a column
     // is owed and the widest of them is what the column has to fit.

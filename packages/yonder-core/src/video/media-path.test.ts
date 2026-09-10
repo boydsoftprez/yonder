@@ -1,6 +1,6 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 import { describe, expect, it } from "vitest";
-import { cameraFor, stillUrl } from "./media-path.js";
+import { cameraFor, stillUrl, VIEWER_ID } from "./media-path.js";
 
 describe("cameraFor", () => {
   it("strips a trailing -preview", () => {
@@ -41,5 +41,15 @@ describe("stillUrl", () => {
 
   it("encodes the id, so it cannot be a path of its own", () => {
     expect(stillUrl("a/b")).toBe("/video/a%2Fb/still");
+  });
+});
+
+
+describe("viewer identifiers shared by both HTTP boundaries", () => {
+  it("accepts minted identifiers and bounded named viewers", () => {
+    for (const value of ["abc012", "browser-1", "a".repeat(64)]) expect(VIEWER_ID.test(value)).toBe(true);
+  });
+  it("rejects path syntax, blank and overlong identifiers", () => {
+    for (const value of ["", "a".repeat(65), "../camera", "a/b", "-browser", "a?b", "a\n"]) expect(VIEWER_ID.test(value)).toBe(false);
   });
 });

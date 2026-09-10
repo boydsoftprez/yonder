@@ -996,7 +996,11 @@ export default {
         this.remember(this.command)
     },
     mounted () {
-        this.thumbnailDemand = new ThumbnailDemand()
+        this.thumbnailDemand = new ThumbnailDemand(undefined, state => {
+            const current = this.deliveryState
+            if (!this.signInRequired && state.camera === cameraFor(this.streamPath)
+                && (!current || current.camera !== state.camera || !Number.isFinite(current.at) || state.at >= current.at)) this.deliveryState = state
+        })
         this.thumbnailTimer = setInterval(() => this.refreshThumbnails(), 5000)
         this.aimTransport = new AimTransport(() => this.aim, (_rate, reason) => {
             if (reason) this.onDragEnd()
@@ -1690,8 +1694,9 @@ export default {
     height: 100%;
     min-height: 0;
     display: grid;
-    /* Status/thumbnail arrivals must not resize the image while aiming. */
-    grid-template-rows: auto minmax(0, 1fr) minmax(34px, auto) 80px;
+    /* Reserve thumbnail space before frames arrive; additional camera rows
+       remain visible instead of being clipped by a fixed-height strip. */
+    grid-template-rows: auto minmax(0, 1fr) minmax(34px, auto) minmax(80px, max-content);
     grid-template-columns: minmax(0, 1fr);
 }
 /* **Takes the shape of the video it is showing, and never more room than it
@@ -1756,7 +1761,7 @@ export default {
 }
 #nrdb-page-page-camera .y-pic {
     height: auto;
-    grid-template-rows: auto auto minmax(34px, auto) 80px;
+    grid-template-rows: auto auto minmax(34px, auto) minmax(80px, max-content);
 }
 #nrdb-page-page-camera .y-pic__fit {
     container-type: normal;
@@ -1939,7 +1944,7 @@ export default {
    `.y-pic__frame` rather than one more absolutely-positioned overlay. */
 .y-pic__notices, .y-pic__thumbnails { min-width: 0; min-height: 0; overflow: auto; }
 .y-pic__resume { padding: 4px 10px; margin: 2px 0; border: 1px solid currentColor; border-radius: 3px; color: var(--yonder-select, #2ad4f0); background: transparent; font: inherit; cursor: pointer; }
-.y-pic__thumbnails { overflow-y: hidden; }
+.y-pic__thumbnails { overflow: visible; }
 .y-pic__strip { margin-top: 8px; }
 
 .y-pic__reason { color: var(--yonder-waiting, #ffcf28); }
