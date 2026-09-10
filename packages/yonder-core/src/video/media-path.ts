@@ -81,3 +81,7 @@ export function stillUrl(camera: string): string {
  */
 export const STILL_AT_HEADER = "x-yonder-still-at";
 export const STILL_AGE_HEADER = "x-yonder-still-age";
+
+/** Shared accepted viewer-id shape for the daemon and authenticated console relay. */
+// The negative lookahead requires the absolute end; `$` also accepts a final newline.
+export const VIEWER_ID = /^[a-z0-9][a-z0-9-]{0,63}(?![\s\S])/;

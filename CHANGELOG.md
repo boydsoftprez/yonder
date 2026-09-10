@@ -20,6 +20,9 @@ SD image or a claim of physical flight acceptance.
   consistency check; configuration schema version remains `1`.
 - Recovered telemetry/installer fixes, updated browser fixtures and reviewed
   macOS/Linux layout references.
+- Reconcile PR #7: recover two-camera/gimbal browser coverage, shared viewer
+  validation and missing video requirements; repair Stills status delivery
+  and narrow camera controls.
 
 Before installing, read [Getting started](docs/getting-started.md),
 [versioning and upgrades](docs/versioning.md), and [known issues](docs/known-issues.md).

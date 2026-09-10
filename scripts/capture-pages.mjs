@@ -66,6 +66,7 @@ import { fileURLToPath } from "node:url";
 // The rules that run inside the page. Their own module so they can be
 // tested against a synthetic DOM without a console — see measure-page.mjs.
 import { measure, railAtBottom, railAtTop } from "./measure-page.mjs";
+import { prepareCameraPair } from "./camera-pair-check.mjs";
 
 const REPO = join(dirname(fileURLToPath(import.meta.url)), "..");
 
@@ -74,9 +75,15 @@ function pagesFromFlows() {
   const flows = JSON.parse(readFileSync(join(REPO, "flows/flows.json"), "utf8"));
   const base = flows.find((n) => n.type === "ui-base");
   const out = [];
+  const contracts = new Map();
   for (const p of flows.filter((n) => n.type === "ui-page")) {
     const slug = String(p.name).toLowerCase().replace(/[^a-z0-9]+/g, "-");
     const url = (base?.path ?? "/dashboard") + p.path;
+    const groups = flows.filter(n => n.type === 'ui-group' && n.page === p.id);
+    const groupIds = new Set(groups.map(n => n.id));
+    const types = new Set(flows.filter(n => groupIds.has(n.group)).map(n => n.type));
+    contracts.set(url, {picture: types.has('ui-yonder-picture'), aim: types.has('ui-yonder-aim'),
+      deck: types.has('ui-yonder-deck'), rail: groups.some(n => String(n.className || '').split(/\s+/).includes('yonder-rail'))});
     // A tabbed page shows one group at a time, so "every page" would quietly
     // mean "the first tab" unless each tab is captured in its own right
     // (R-UI-12). The tab's label is its group's name.
@@ -133,7 +140,7 @@ function pagesFromFlows() {
       }
     }
   }
-  return out;
+  return out.map(page => ({...page, contract: contracts.get(page.url)}));
 }
 
 /**
@@ -189,6 +196,7 @@ const LIVE = [
   // under it wear `yonder-fixed`, so what the banner is about is still
   // readable in the picture.
   ".yonder-live .y-ann__text",
+  ".y-strip__dl-v",
   // The telemetry instruments' own readings. A leg's rate and a sparkline's
   // series are measurements that differ between two runs of this gate by
   // construction — a heartbeat interval and a router's kB counter — so
@@ -365,6 +373,7 @@ const as = arg("as");
  * exists to make true.
  */
 const syntheticCameras = arg("synthetic-cameras");
+const pairCamera = arg("camera-pair");
 /**
  * The device's own secret store, for the check below.
  *
@@ -542,10 +551,14 @@ for (const page of pages) {
   // filter is on the resource it names rather than on the words, which are the
   // browser's and not ours. A 404 on a widget bundle still fails, which is
   // what this check was written for.
+  // A newly subscribed running camera may have no first still yet. The pair
+  // proof below requires a subsequently decoded frame; other still errors fail.
+  const noStillYet = (url, status) => pairCamera !== undefined && status === 404 && /\/video\/[^/]+\/still(?:\?|$)/.test(String(url ?? ''));
   const aboutTheStream = (url) => /\/whep(\?|$)/.test(String(url ?? ""));
   tab.on("console", (m) => {
     if (m.type() !== "error") return;
     if (aboutTheStream(m.location()?.url)) return;
+    if (/\b404\b/.test(m.text()) && noStillYet(m.location()?.url, 404)) return;
     noise.push(`console: ${m.text().slice(0, 200)}`);
   });
   tab.on("pageerror", (e) => noise.push(`uncaught: ${String(e.message).slice(0, 200)}`));
@@ -560,6 +573,7 @@ for (const page of pages) {
     // on the rail"). A 404 on a widget bundle still fails, which is what this
     // check was written for.
     if (aboutTheStream(r.url())) return;
+    if (noStillYet(r.url(), r.status())) return;
     if (r.status() >= 400) noise.push(`HTTP ${r.status()}: ${r.url().slice(-90)}`);
   });
 
@@ -596,7 +610,7 @@ for (const page of pages) {
   // goes to Node-RED, the flow answers with a ui-control message, and the
   // groups appear. So this is also the only proof that path works at all.
   if (page.press) {
-    const key = tab.locator("button", { hasText: page.press }).first();
+    const key = tab.locator(".y-keys__key", { hasText: page.press }).first();
     if (await key.count()) {
       await key.click();
       await tab.waitForTimeout(900);
@@ -604,6 +618,11 @@ for (const page of pages) {
       note(`  FAIL  ${page.title} (${palette}) has no key labelled "${page.press}" to reach it`);
       failures += 1;
     }
+  }
+
+  if (pairCamera !== undefined) {
+    try { await prepareCameraPair(tab, pairCamera); }
+    catch (error) { note(`  FAIL  ${page.title} (${palette}) camera-pair proof: ${error.message}`); failures += 1; }
   }
 
   // **Read before anything is rewritten.** The specimens below replace the
@@ -638,7 +657,9 @@ for (const page of pages) {
   // R-UI-29 supersedes the Live/Setup split: picture and Aim remain bounded;
   // capture and transaction controls stay on the single scrolling workspace.
   const workspace = await tab.locator('.y-deck--workspace').count() > 0;
-  const foldParts = workspace ? ABOVE_THE_FOLD.filter(([name]) => name !== 'the shutter key') : ABOVE_THE_FOLD;
+  const declared = page.contract;
+  const foldParts = ABOVE_THE_FOLD.filter(([name]) => name === 'the picture' ? declared.picture
+    : name === 'the Aim panel' ? declared.aim : declared.deck && !workspace);
   const shape = await tab.evaluate(measure, [LIVE, FIXED, specimens.fields, specimens.masked, foldParts, DECK]);
   for (const reading of shape.readings) fieldsSeen.add(reading.key);
 
@@ -796,7 +817,7 @@ for (const page of pages) {
     // already argues that for the parts above. `nested` was empty on every
     // run because `querySelectorAll` matched nothing, and an empty list reads
     // exactly like a page with no scroller in it.
-    if (shape.fold.decks === 0) {
+    if (declared.deck && shape.fold.decks === 0) {
       report(
         { rule: "nested", page: page.name, palette, key: "the deck" },
         `${page.title} (${palette}) has no deck on it, so nothing was checked for a scroller of its own`,
@@ -826,7 +847,8 @@ for (const page of pages) {
         } else note(`  ok    ${page.title} (${palette}) keeps the ${name} reachable on its single workspace`);
       }
       await tab.evaluate(() => { window.scrollTo(0, 0); });
-    } else if (rail === null || !rail.present) {
+    } else if (declared.rail) {
+    if (rail === null || !rail.present) {
       note(`  FAIL  ${page.title} (${palette}) has no rail to keep reachable`);
       failures += 1;
     } else if (!rail.inside) {
@@ -835,6 +857,7 @@ for (const page of pages) {
       failures += 1;
     } else {
       note(`  ok    ${page.title} (${palette}) keeps the rail in the viewport at the bottom of the page`);
+    }
     }
     if (railTop !== null && railTop.present && railTop.tall && !railTop.inside) {
       report(
@@ -926,7 +949,7 @@ for (const page of pages) {
   // that walked off leaving the console on Setup would photograph the next
   // run's Live deck as Setup, and the shape reference would drift with it.
   if (page.restore) {
-    const key = tab.locator("button", { hasText: page.restore }).first();
+    const key = tab.locator(".y-keys__key", { hasText: page.restore }).first();
     if (await key.count()) {
       await key.click();
       await tab.waitForTimeout(700);
@@ -936,6 +959,10 @@ for (const page of pages) {
     }
   }
 
+  if (pairCamera === 'tail') {
+    await tab.locator('.y-strip__thumb').filter({hasText: 'Front camera'}).click();
+    await tab.locator('.y-pic__camera').filter({hasText: 'Front camera'}).waitFor();
+  }
   await tab.close();
 }
 
@@ -968,11 +995,11 @@ await browser.close();
 
 // An accepted violation that no longer happens is a line to delete. Left in,
 // it would quietly re-accept the same defect if it ever came back.
-// Only on a full pass. A run of one page has not been anywhere near the
-// entries about the others, and reporting them as fixed would be a lie that
-// deletes a real debt.
-const stale = only !== undefined ? [] : debt.entries.filter(
-  (e) => !seen.has(e) && (e.palette === "*" || e.palette === palette),
+// Check only captured page names, including named state captures. A full
+// base pass must not claim that debt on an uncaptured state was fixed.
+const capturedPages = new Set(pages.map(p => p.name));
+const stale = debt.entries.filter(
+  (e) => !seen.has(e) && capturedPages.has(e.page) && (e.palette === "*" || e.palette === palette),
 );
 for (const e of stale) {
   note(`  FAIL  ${e.page} (${e.palette}) no longer has the accepted "${e.rule}" on "${e.key}"`);
@@ -1032,7 +1059,7 @@ if (only === undefined) {
 if (syntheticCameras !== undefined) {
   const fixture = JSON.parse(readFileSync(syntheticCameras, "utf8"));
   const wanted = String(fixture.camera?.name ?? "");
-  const captured = pages.filter((p) => p.name.startsWith("camera"));
+  const captured = pages.filter((p) => p.contract.picture);
   if (captured.length === 0) {
     note("  FAIL  --synthetic-cameras was given and no camera page was captured");
     failures += 1;

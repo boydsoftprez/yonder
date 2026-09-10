@@ -203,6 +203,14 @@ const LONG = "a value far too long for one hundred pixels of box to hold";
   }
 }
 
+// A noninteractive mode fact still has to be readable beside its controls.
+for (const [ink, expected] of [['#000', 1], ['#fff', 0]]) {
+  await tab.setContent(`<body style="background:#000"><div class="nrdb-ui-widget"><div class="y-aimpanel__mode" style="color:${ink}">Gimbal mode: follow.</div></div></body>`);
+  const result = await tab.evaluate(measure, ARGS);
+  if (result.unreadable.length === expected) ok(`gimbal mode contrast detects ${ink} on black correctly`);
+  else bad('gimbal mode contrast', JSON.stringify(result.unreadable));
+}
+
 await browser.close();
 process.stdout.write("\n");
 process.stdout.write(failures === 0 ? "  the page rules hold\n" : `  ${failures} rule(s) do not hold\n`);

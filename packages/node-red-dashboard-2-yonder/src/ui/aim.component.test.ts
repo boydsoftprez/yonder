@@ -484,7 +484,7 @@ describe("the dead state, with its reason", () => {
      */
     it("the pad refuses a press and says so, while the panel carries the reason in full", () => {
         const { wrapper, emit } = mountAim(makeReport({ state: "advertised", reason: REASON }));
-        expect(wrapper.find(".y-aim__reason").text()).toBe("not answering");
+        expect(wrapper.find(".y-aim__reason").exists()).toBe(false);
         expect(wrapper.find(".y-aimpanel__reason").text()).toBe(REASON);
         // Said once between them, never four times.
         expect(wrapper.findAll("*").filter((e) => e.element.children.length === 0
@@ -630,4 +630,16 @@ it('labels the position reference explicitly without putting it over the video',
   expect(native.wrapper.get('.y-aimpanel__reported').text()).toBe('Position relative to handle');native.wrapper.unmount();
   const world=mountAim({...makeReport({bounds:null}),positionFrame:'world'});
   expect(world.wrapper.get('.y-aimpanel__reported').text()).toBe('Camera attitude in the world');world.wrapper.unmount();
+});
+
+
+it("states an inhibition once and explains unreported axes separately", () => {
+    const report = { ...makeReport(), pan: null, tilt: null, inhibited: "No guarded camera transport." };
+    const { wrapper } = mountAim(report);
+    expect(wrapper.text().split(report.inhibited).length - 1).toBe(1);
+    expect(wrapper.find('.y-aim__dial').classes()).toContain('is-inhibited');
+    expect(wrapper.findAll('.y-pg__val').map(value => value.text())).toEqual(['—', '—']);
+    expect(wrapper.findAll('.y-pg__reason').map(value => value.text())).toEqual([
+        'Not reported by this camera.', 'Not reported by this camera.',
+    ]);
 });

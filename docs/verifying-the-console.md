@@ -499,3 +499,17 @@ NetworkManager fixtures, keeping automatic reachability untested until explicitl
 probed. Palette changes are exercised from Settings, and pending changes through the
 current Revert control. Retired databar/diagnostic readings have been removed from the
 specimen inventory; controller-path labels use their current names.
+
+## Two-camera and gimbal regression coverage
+
+The [PR #7 reconciliation](pr7-reconciliation.md) restores the states a single
+stopped camera cannot exercise. The real pipeline host runs against fake GI,
+producing decodable JPEGs through the normal stills service and authenticated
+relay. Camera and standalone Cockpit are captured with two running cameras,
+then after switching to the camera without a gimbal. Notebook/tablet Cockpit
+checks derive their required elements from the shipped flows, so a missing
+expected element fails while a deliberately absent deck is not invented.
+
+`PAIR_ONLY=1 ./scripts/verify-pages.sh` runs focused pair development checks.
+The default command and CI run the complete matrix. No physical camera, motor,
+flight controller or device network is commanded by this fixture.

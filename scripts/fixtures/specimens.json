@@ -239,6 +239,10 @@
     "nrdb-ui-text \u00b7 Controller latency": {
       "value": "9999 ms",
       "why": "messageFor's `${ms} ms`. Four digits is a relayed hop over a congested cellular uplink, and the widest worth reporting."
+    },
+    "nrdb-ui-yonder-picture \u00b7 Thumbnail traffic": {
+      "value": "1690 kb/s of stills \u00b7 counted in Path total",
+      "why": "A producible long total for ten copies of a roughly 100 kB JPEG per five seconds, at IP. Viewer count/frame size are unbounded, so this is a test case rather than a claimed maximum. The synthetic grey frames in the pair fixture are much smaller."
     }
   },
   "masked": {

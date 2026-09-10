@@ -2251,3 +2251,15 @@ it('a tiny video drag does not start a zero-wire gesture; continuing the same ho
   expect(vm.dragAt({clientX:172,clientY:100,shiftKey:true}).pan).toBe(10);
   expect(vm.dragAt({clientX:172,clientY:100}).pan).toBe(40);
 });
+
+
+it('shows the private stills status without a live WebRTC statistics session', async () => {
+  reportState={camera:'cam0',viewer:'viewer-1',at:Date.now(),overlay:{head:'Stills',size:'1280×720',bitrate:'6 kb/s'}};
+  const {wrapper}=mountPicture({report:{running:true,runState:'running',cameras:[{id:'cam0',active:true}]}});await settle();
+  expect(wrapper.find('.y-pic__state').exists()).toBe(false); // Live keeps its statistics-owned state.
+  await (wrapper.vm as any).setMode('stills');await settle();
+  await advance(5000);
+  expect(wrapper.get('.y-pic__state').text()).toContain('STILLS');
+  expect(wrapper.get('.y-pic__state').text()).toContain('6 kb/s');
+  expect((wrapper.vm as any).pc).toBeNull();
+});

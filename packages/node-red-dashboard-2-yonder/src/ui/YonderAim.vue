@@ -32,6 +32,7 @@
                 :max-rate="report.maxRate ?? 30"
                 :at-limit="atLimit"
                 :inhibited="padInhibited"
+                :note="effectiveReason ? '' : padInhibited"
                 @slew="onSlew"
                 @stop="onStop"
             />
@@ -47,8 +48,8 @@
                 <div><dt>Tilt</dt><dd>{{ tilt === null ? '—' : tilt.toFixed(1) + '°' }}</dd></div>
             </dl>
             <template v-else>
-                <YonderPositionGauge label="Pan" unit="°" :value="pan" :min="panBounds.lo" :max="panBounds.hi" :bounds-known="hasBounds" :dead="aimState !== 'present' || pan === null" :reason="gaugeReason" />
-                <YonderPositionGauge label="Tilt" unit="°" :value="tilt" :min="tiltBounds.lo" :max="tiltBounds.hi" :bounds-known="hasBounds" :dead="aimState !== 'present' || tilt === null" :reason="gaugeReason" />
+                <YonderPositionGauge label="Pan" unit="°" :value="pan" :min="panBounds.lo" :max="panBounds.hi" :bounds-known="hasBounds" :dead="aimState !== 'present' || pan === null" :reason="pan === null ? 'Not reported by this camera.' : gaugeReason" />
+                <YonderPositionGauge label="Tilt" unit="°" :value="tilt" :min="tiltBounds.lo" :max="tiltBounds.hi" :bounds-known="hasBounds" :dead="aimState !== 'present' || tilt === null" :reason="tilt === null ? 'Not reported by this camera.' : gaugeReason" />
             </template>
 
             <div v-if="modeControlState === 'not-offered'" class="y-aimpanel__mode">{{ modeSentence }}</div>
@@ -57,7 +58,7 @@
                 :value="mode"
                 :options="modes"
                 :state="modeControlState"
-                :reason="report.modeInhibited || gaugeReason"
+                :reason="report.modeInhibited || ''"
                 @change="onModeChange"
             />
 
@@ -490,6 +491,8 @@ export default {
 </script>
 
 <style scoped>
+.y-aimpanel { container-type: inline-size; }
+.y-aimpanel__mode { color: var(--yonder-value, #cdd5dc); }
 .y-aimpanel__mode-help { margin:8px 0 0; font-size:11px; line-height:1.45; color:var(--yonder-label, #7f8a95); }
 .y-aimpanel__position { display: grid; grid-template-columns: 1fr 1fr; gap: 12px; margin: 0 0 10px; }
 .y-aimpanel__position div { display: flex; justify-content: space-between; gap: 8px; }

@@ -39,7 +39,7 @@
         </label>
 
         <div v-if="limited" class="y-aim__limit"><i class="y-aim__limit-dot" />At the limit</div>
-        <div v-if="inhibited" class="y-aim__reason">{{ inhibited }}</div>
+        <div v-if="saying" class="y-aim__reason">{{ saying }}</div>
     </div>
 </template>
 
@@ -185,7 +185,10 @@ export default {
         atLimit: { type: Object, default: () => ({}) },
         /** A general inhibition reason, or `null`. The deck supplies
          * whatever is true; this component states no opinion on why. */
-        inhibited: { type: String, default: null }
+        inhibited: { type: String, default: null },
+        // A parent that already explains the inhibition can supply an empty
+        // note. This controls presentation only; inhibited still gates motion.
+        note: { type: String, default: null }
     },
     emits: ['slew', 'stop'],
     data: () => ({
@@ -199,6 +202,7 @@ export default {
         DIAL_SIZE
     }),
     computed: {
+        saying () { return this.note === null ? (this.inhibited || '') : this.note },
         rateLimit () {
             return rateLimit(this.maxRate)
         },
@@ -389,9 +393,9 @@ export default {
     max-width: 100%;
     color: var(--yonder-label, #7f8a95);
 }
-.y-aim__expo-label { display: flex; justify-content: space-between; gap: 12px; font-size: 11px; }
+.y-aim__expo-label { display: flex; flex-wrap: wrap; justify-content: space-between; gap: 12px; font-size: 11px; }
 .y-aim__expo-label output { color: var(--yonder-value, #cdd5dc); font-variant-numeric: tabular-nums; }
-.y-aim__expo input { width: 100%; margin: 0; accent-color: var(--yonder-select, #2ad4f0); }
+.y-aim__expo input { color: var(--yonder-value, #fff); width: 100%; margin: 0; accent-color: var(--yonder-select, #2ad4f0); }
 .y-aim__expo-help { font-size: 10px; line-height: 1.4; }
 
 .y-aim__ring { fill: none; stroke: var(--yonder-divider, #2b333c); stroke-width: 1; }
@@ -452,5 +456,10 @@ export default {
     line-height: 1.4;
     max-width: 200px;
     color: var(--yonder-neutral, #7d7869);
+}
+@container (max-width: 260px) {
+    .y-aim { grid-template-columns: minmax(0, 1fr); }
+    .y-aim__dial { grid-row: auto; }
+    .y-aim__expo { grid-column: 1; }
 }
 </style>

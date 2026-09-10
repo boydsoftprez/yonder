@@ -18,6 +18,13 @@ while its branch is linked, so a test can tell a recording that ran from one
 that never started. An end-of-stream travels **forward only** from the pad it
 is pushed into, which is the property the recording stop turns on.
 
+**And a still is a picture.** A filesink whose chain comes through a
+`jpegenc` -- which is the branch `yonder-pipeline`'s `still` op builds, and
+nothing else here -- is written one whole JPEG rather than a stream of dots.
+A dot per buffer answers the only question a recording asks, *did this file
+grow*; it does not answer the one `scripts/verify-pages.sh` asks, which is
+whether a browser can draw the frame on a console page. See `_JPEG`.
+
 `Pad.set_offset` is here for one reason: to be recorded and never called.
 Offsetting a branch's pad to zero destroyed both spike recordings, and a trace
 that names the call is what makes its absence assertable.
@@ -60,6 +67,73 @@ def _trace(event, **fields):
 
 def _on(name):
     return os.environ.get(name, "") not in ("", "0")
+
+
+# -- one frame, as a picture -------------------------------------------------
+#
+# A still off this fake has to be a file a browser can decode, because
+# `scripts/verify-pages.sh` puts one on the Camera page's picture and its
+# thumbnail strip and photographs both (R-VID-14, R-UI-12). A stream of dots
+# is a file that grows, which is all a recording is asked here; it is not an
+# image, and an <img> holding one draws nothing at all.
+#
+# So this is a whole baseline JPEG, assembled from its own segments below
+# rather than pasted in as a blob, so that every byte of it can be read.
+#
+# **1280x720, and that is not cosmetic.** The shape a still is *reported* at
+# is read off the branch's own pad, so a one-pixel frame would still be
+# answered as 1280x720 — and then the picture would draw a one-pixel image
+# letterboxed inside a 16:9 frame, and the strip would charge a viewer for a
+# hundred and forty bytes, which rounds to `0 kb/s of stills` on the readout
+# blueprint L-22 is about. A frame the size the pad says it is costs neither
+# of those lies.
+#
+# It is a flat mid-grey field, which is what an all-zero entropy stream
+# decodes to, and it compresses to nothing: about 3.7 kB where a photograph
+# off a board is nearer a hundred. Nothing in this tree has a camera. This is
+# the picture-shaped thing a fake hands over, and it must never be mistaken
+# for a photograph or its size read as a measurement.
+
+_JPEG_WIDTH = 1280
+_JPEG_HEIGHT = 720
+
+
+def _jpeg_segment(marker, payload):
+    length = len(payload) + 2
+    return bytes([0xFF, marker, length >> 8, length & 0xFF]) + payload
+
+
+def _grey_field(width, height):
+    # SOI, then a quantiser whose every coefficient is 16 -- flat, because
+    # there is nothing here to quantise well.
+    parts = [b"\xff\xd8", _jpeg_segment(0xDB, b"\x00" + bytes([16] * 64))]
+    # SOF0: baseline, 8 bits a sample, this many rows and columns, one
+    # component (id 1, 1x1 sampling, quantiser 0).
+    parts.append(_jpeg_segment(0xC0, bytes([
+        0x08,
+        height >> 8, height & 0xFF,
+        width >> 8, width & 0xFF,
+        0x01, 0x01, 0x11, 0x00,
+    ])))
+    # Two Huffman tables with one code each, a single bit long: the DC
+    # category and the end-of-block are the only two symbols a flat field
+    # needs, so the tables that carry them are one entry apiece.
+    parts.append(_jpeg_segment(0xC4, b"\x00" + bytes([1] + [0] * 15) + b"\x00"))
+    parts.append(_jpeg_segment(0xC4, b"\x10" + bytes([1] + [0] * 15) + b"\x00"))
+    # SOS: one component, both tables 0, the baseline spectral selection.
+    parts.append(_jpeg_segment(0xDA, b"\x01\x01\x00\x00\x3f\x00"))
+    # The entropy. Every 8x8 block is two bits -- a DC difference of zero
+    # ("0", category 0, no extra bits) and an end-of-block ("0") -- so the
+    # whole image is zero bytes, and a zero byte needs no stuffing the way an
+    # 0xFF would. A DC difference of zero is the level shift itself, which is
+    # a sample of 128: mid grey.
+    blocks = ((width + 7) // 8) * ((height + 7) // 8)
+    parts.append(bytes((blocks * 2 + 7) // 8))
+    parts.append(b"\xff\xd9")
+    return b"".join(parts)
+
+
+_JPEG = _grey_field(_JPEG_WIDTH, _JPEG_HEIGHT)
 
 
 # -- values -----------------------------------------------------------------
@@ -345,6 +419,9 @@ class Element(object):
         self.state = State.NULL
         self.requested = 0
         self.saw_eos = False
+        # Whether this sink has already been handed its one frame. See
+        # `_buffer` -- a still is one JPEG, not a file of them.
+        self.wrote_frame = False
         for pad in _always_pads(kind):
             self._pad(pad)
 
@@ -481,9 +558,50 @@ class Element(object):
             element = pad.peer.element
         return False
 
+    def _through(self, kind):
+        """Whether this element's chain passes through one of `kind`.
+
+        The same upstream walk `_fed` makes, asking a different question:
+        what is feeding this sink decides what a buffer arriving at it looks
+        like. A `jpegenc` upstream is the still branch and nothing else here
+        builds one.
+        """
+        element = self
+        seen = set()
+        while element is not None and element.name not in seen:
+            seen.add(element.name)
+            if element.kind == kind:
+                return True
+            pad = element.get_static_pad("sink")
+            if pad is None or pad.peer is None:
+                return False
+            element = pad.peer.element
+        return False
+
+    def _buffer(self):
+        """One buffer, as this sink would receive it.
+
+        A dot for a muxed recording, which is all a recording is asked: did
+        this file grow while its branch was linked, and stop when it was not.
+
+        **A whole JPEG, once, for a still.** What a real `jpegenc` hands a
+        filesink is one complete image per buffer, and the host keeps the
+        first buffer through its gate probe and drops every later one — so
+        one frame is what actually lands on a board. Writing a JPEG per tick
+        here would be a file no browser draws past its first image and a byte
+        count that grows for as long as the branch is up, neither of which is
+        what a still is. Empty afterwards: the pump writes nothing.
+        """
+        if not self._through("jpegenc"):
+            return b"."
+        if self.wrote_frame:
+            return b""
+        self.wrote_frame = True
+        return _JPEG
+
     def _write(self, chunk):
         path = self._location()
-        if path is None:
+        if path is None or not chunk:
             return
         try:
             with open(path, "ab") as handle:
@@ -619,7 +737,7 @@ class Pipeline(object):
                 # is what makes a recording a file that grows and a stopped one
                 # a file that does not.
                 if element._writing():
-                    element._write(b".")
+                    element._write(element._buffer())
                 # **A pad whose chain does not reach a source gets no
                 # buffers**, which is plainly true in GStreamer and was not
                 # true here. A branch is built, its probes are added, and
