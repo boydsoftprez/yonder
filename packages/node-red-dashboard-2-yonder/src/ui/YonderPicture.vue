@@ -998,7 +998,7 @@ export default {
     mounted () {
         this.thumbnailDemand = new ThumbnailDemand(undefined, state => {
             const current = this.deliveryState
-            if (!this.signInRequired && state.camera === cameraFor(this.streamPath)
+            if (this.mode === 'stills' && !this.signInRequired && state.camera === cameraFor(this.streamPath)
                 && (!current || current.camera !== state.camera || !Number.isFinite(current.at) || state.at >= current.at)) this.deliveryState = state
         })
         this.thumbnailTimer = setInterval(() => this.refreshThumbnails(), 5000)
