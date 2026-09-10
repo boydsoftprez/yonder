@@ -27,7 +27,7 @@
     <p class="mission-touch-note">Changes return-home and above-home altitude references. In RTL or QRTL it can redirect the aircraft.</p>
     <button type="button" class="mission-touch-wide mission-execute" :disabled="!canSet||busy||loading" @click="review">Set controller home…<small>Review the coordinates and MSL elevation above, then confirm</small></button>
     <p v-if="!canSet" class="mission-touch-note">{{unavailableReason||'Controller-home command support has not been reported. Check the aircraft connection and server version.'}}</p>
-    <p v-if="operation" class="mission-command-result" :class="{rejected:['rejected','failed','unknown'].includes(operation.state)||operation.effect?.state==='mismatch'}" role="status">Last controller-home request: {{operation.effect?.state==='mismatch'?'Home change not verified':operation.state}} · {{operation.message}}</p>
+    <p v-if="operation" class="mission-command-result" :class="{rejected:['rejected','failed','unknown'].includes(operation.state)||operation.effect?.state==='mismatch'}" role="status">{{operation.effect?.state==='mismatch'?'Home change not verified — '+operation.message:operationPresentation(operation).text}}</p>
     <details class="mission-touch-note"><summary>Home reference and GPS</summary><p>The controller may lock an explicitly set home; check its reported value before flight. This does not set an EKF origin or provide a live GPS position. A Do Set Home mission item is a separate action that runs during mission execution.</p></details>
    </form>
   </section>
@@ -40,6 +40,7 @@ import {ref,reactive,computed,onMounted,onBeforeUnmount,nextTick} from 'vue';
 import FlightUnitInput from './FlightUnitInput.vue';
 import {unitText} from './flight-units.mjs';
 import {planningHome,homeDifference} from './mission-home.mjs';
+import {operationPresentation} from './operation-presentation.mjs';
 import {loadMissionTerrain} from './mission-terrain.mjs';
 const props=defineProps({home:Object,controllerHome:Object,initial:Object,options:Object,canSet:Boolean,busy:Boolean,operation:Object,unavailableReason:String,externalError:String,provider:Object,terrainEnabled:Boolean});
 const emit=defineEmits(['close','save','pick','review']);

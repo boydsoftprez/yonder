@@ -1,6 +1,7 @@
 // Operator-authored flight requests and observed-state presentation. No transport or timers.
 // SPDX-License-Identifier: GPL-3.0-or-later
 import {units,unitText} from './flight-units.mjs';
+import {operationPresentation} from './operation-presentation.mjs';
 const finite = value => typeof value === 'number' && Number.isFinite(value);
 const number = (value, label, min, max) => {
   if (value === '' || value === null || value === undefined || !Number.isFinite(Number(value)) || Number(value) < min || Number(value) > max) throw new Error(`${label} must be ${min} to ${max}`);
@@ -91,14 +92,14 @@ export function flightAnnunciation(snapshot = {},options) {
   if (operation) {
     const action = operation.action || {};
     const name = action.kind === 'mode' ? flightModes(snapshot).find(mode => mode.customMode === action.customMode)?.name || `mode ${action.customMode}` : action.kind;
-    request = `Requested ${name || 'action'}`;
+    const presented=operationPresentation(operation,snapshot);
+    request = presented.title;
+    if(action.kind==='mode')request+=` · ${name}`;
     if (action.kind === 'heading') request += ` ${action.headingDeg}° true`;
     if (action.kind === 'altitude') request += options?` ${unitText(action.altitudeM,units(options).altitudeUnit)} ${action.datum}`:` ${action.altitudeM} m ${action.datum}`;
     if (action.kind === 'speed') request += options?` ${unitText(action.airspeedMps,units(options).speedUnit,1)}`:` ${action.airspeedMps} m/s`;
     if (action.kind === 'loiter') request += ` ${action.radiusM} m ${action.direction}`;
-    outcome = operation.state === 'observed' ? 'Observed in telemetry' : operation.ack ? `ACK ${operation.ack.result === 0 ? 'accepted' : `result ${operation.ack.result}`} · ${operation.effect?.state === 'observed' ? 'effect observed' : 'effect not confirmed'}` : operation.state || 'pending';
-    if (['rejected', 'failed', 'unknown'].includes(operation.state) && operation.ack) outcome = `${operation.state} · ${outcome}`;
-    tone = ['rejected', 'failed', 'unknown'].includes(operation.state) ? 'caution' : operation.state === 'observed' ? 'observed' : 'neutral';
+    outcome=presented.detail;tone=presented.tone;
   }
   return {mode: fresh ? telemetry.mode : 'MODE UNAVAILABLE', armed: fresh && typeof telemetry.armed === 'boolean' ? (telemetry.armed ? 'ARMED' : 'DISARMED') : 'ARM STATE UNAVAILABLE', fresh, request, outcome, tone};
 }

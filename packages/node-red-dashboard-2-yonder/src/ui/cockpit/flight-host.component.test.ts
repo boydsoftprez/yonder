@@ -37,7 +37,22 @@ it('keeps fresh zero-age instruments visible between clock ticks and exposes loc
 it('reviews a persistent heading request then sends exactly once on confirmation',async()=>{const w=host();await w.get('[aria-label="Heading"]').trigger('click');await w.get('[aria-label="Requested true heading"]').setValue('125');const api=w.props('api');expect(api.command).not.toHaveBeenCalled();await w.get('.flight-request-form').trigger('submit');expect(w.get('[aria-label="Review aircraft command"]').text()).toContain('125° true');expect(api.command).not.toHaveBeenCalled();await w.get('.cockpit-confirm').trigger('click');expect(api.command).toHaveBeenCalledTimes(1);expect(api.command.mock.calls[0][0].action).toMatchObject({kind:'heading',headingDeg:125,reference:'true'});w.unmount()});
 it('picks a Direct-To map target without creating a local mission draft',async()=>{const w=host();await w.get('[aria-label="Direct-To"]').trigger('click');await w.get('.flight-control-dialog .mission-touch-wide').trigger('click');expect(w.attributes('data-layout')).toBe('map');expect(w.findComponent({name:'YonderCockpitMap'}).props('picking')).toBe(true);w.findComponent({name:'YonderCockpitMap'}).vm.$emit('location',{lat:35.123,lon:-84.456});await w.vm.$nextTick();expect(w.get('[aria-label="Target latitude"]').element.value).toBe('35.123');expect(w.get('[aria-label="Target longitude"]').element.value).toBe('-84.456');expect(w.vm.draft).toBeNull();expect(w.props('api').command).not.toHaveBeenCalled();w.unmount()});
 it('does not send while flight details are recovering and offers camera fallback',async()=>{const w=host();await w.setProps({report:{...w.props('report'),_detailsReady:false}});expect(w.vm.canCommand).toBe(false);w.vm.background='camera';await w.vm.$nextTick();await w.get('[aria-label="Use synthetic terrain"]').trigger('click');expect(w.vm.background).toBe('terrain');expect(w.vm.onlineTerrain).toBe(true);expect(w.props('api').command).not.toHaveBeenCalled();w.unmount()});
-it('replaces its queued notice when the matching aircraft result arrives',async()=>{const w=host();await w.vm.sendReadAction('mission-download');expect(w.vm.error).toContain('queued');await w.setProps({report:{...w.props('report'),operations:[{id:'one',action:{kind:'mission-download'},state:'observed',message:'Complete vehicle mission downloaded'}]}});expect(w.vm.error).toBe('observed · Complete vehicle mission downloaded');w.unmount()});
+it('shows the late arm refusal reason consistently and reveals protocol codes only in details',async()=>{
+ const w=host(),base=w.props('report');
+ const op={id:'arm-ui',vehicleGeneration:base.identity.generation,action:{kind:'arm',armed:true},sentAt:1000,updatedAt:1100,state:'rejected',ack:{command:400,result:4,at:1095},message:'Autopilot refused command (4)'};
+ const state={...base,telemetry:{...base.telemetry,armed:false},operations:[op],statustext:[]};
+ w.vm.pendingOperationId=op.id;w.vm.ingest(state);await w.vm.$nextTick();
+ expect(w.get('.flight-mode-request').text()).toContain('Arming failed');
+ w.vm.ingest({...state,statustext:[{at:1099,severity:2,text:'Arm: Waiting for RC'}]});await w.vm.$nextTick();
+ expect(w.get('.flight-mode-request').text()).toContain('Waiting for radio-control input');
+ expect(w.get('.cockpit-error').text()).toContain('Waiting for radio-control input');
+ await w.get('[aria-label="View aircraft command result"]').trigger('click');
+ expect(w.get('.cockpit-dialog').text()).toContain('Arming failed');
+ expect(w.get('.cockpit-dialog details').text()).toContain('COMMAND_ACK · command 400 · result 4');
+ expect(w.get('.cockpit-dialog details').attributes('open')).toBeUndefined();
+ expect(w.props('api').command).not.toHaveBeenCalled();w.unmount();
+});
+it('replaces its queued notice when the matching aircraft result arrives',async()=>{const w=host();await w.vm.sendReadAction('mission-download');expect(w.vm.error).toContain('queued');await w.setProps({report:{...w.props('report'),operations:[{id:'one',action:{kind:'mission-download'},state:'observed',message:'Complete vehicle mission downloaded'}]}});expect(w.vm.error).toBe('Mission read confirmed — Complete vehicle mission downloaded');w.unmount()});
 it('clears a recovered telemetry outage notice without erasing aircraft command errors',async()=>{
  const w=host(), state=vi.fn();w.vm.source={state};
  state.mockRejectedValueOnce(new Error('Flight service unavailable (HTTP 500)'));await w.vm.poll();clearTimeout(w.vm.pollTimer);

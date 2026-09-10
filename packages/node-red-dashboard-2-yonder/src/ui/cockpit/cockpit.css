@@ -978,7 +978,7 @@
 .y-cockpit .flight-mode-actual strong { display:block; color:#7df1a7; font-size:20px; letter-spacing:1.5px; padding-top:2px }
 .y-cockpit .flight-mode-annunciator .flight-mode-arm { font-size:10px; min-height:23px }
 .y-cockpit .flight-mode-annunciator .flight-mode-fd { color:#ff9eec; font-size:10px; min-height:22px; border-top:1px solid #799b8e66 }
-.y-cockpit .flight-mode-request { grid-column:1/-1; display:flex; justify-content:center; gap:8px; padding:4px 7px; font-size:10px; background:#0a1b27f2; color:#dbe9f0; border-top:1px solid #799b8e66; white-space:normal }
+.y-cockpit .flight-mode-annunciator .flight-mode-request { grid-column:1/-1; display:flex; justify-content:center; gap:8px; padding:4px 7px; font-size:10px; background:#0a1b27f2; color:#dbe9f0; border-top:1px solid #799b8e66; white-space:normal; text-align:left; cursor:pointer }
 .y-cockpit .flight-mode-request small { color:#f4d098; font-size:inherit }
 .y-cockpit .flight-mode-annunciator.unavailable .flight-mode-actual strong,.y-cockpit .flight-mode-annunciator.caution .flight-mode-request { color:#ffcf89 }
 .y-cockpit .flight-control-host { flex:none; position:relative; z-index:30 }
