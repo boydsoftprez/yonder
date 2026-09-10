@@ -1,10 +1,16 @@
 # Yonder architecture
 
-Status: **draft for review** · Last updated: 2026-08-31
+Status: **pre-alpha implementation** · Overview updated: 2026-09-10
 
-Yonder is a companion-computer stack for fixed-wing and multirotor UAS that gives
-unlimited range over 4G/5G. It runs on Raspberry Pi and Radxa boards alongside an
-ArduPilot flight controller, and it works with no internet connection, ever.
+Yonder is a Linux companion-computer stack alongside an ArduPilot flight
+controller. It carries telemetry, video and explicit operator commands over
+Ethernet, Wi-Fi and configured cellular/mesh links. The console runs on the
+board; optional remote access and external geographic data depend on their
+network services. Coverage and capacity bound remote operation.
+
+For the current operator workflow, start with [Getting started](getting-started.md),
+[the user guide](user-guide.md), and [tested hardware](hardware.md). This document
+explains the engineering boundaries; it is not an installation checklist.
 
 This document explains what runs, why, and where the boundaries are. What it must do is
 in [`requirements.md`](requirements.md).
@@ -17,18 +23,21 @@ These are load-bearing. Where a design choice below looks odd, it is usually one
 being enforced.
 
 1. **Offline-first, always.** No component may require a network call to a server we
-   operate. Not at boot, not at first run, not to unlock a feature. If the aircraft is in
-   a field with no signal, everything still works.
+   operate to boot, serve the local console, or unlock an installed feature.
+   Optional online imagery, traffic, remote mesh connectivity and public tests
+   retain their explicit network dependencies.
 2. **The autopilot flies the aircraft.** Yonder is a radio, a camera and a web page. It
    relays commands an operator asked for — mode changes, parameter writes, payload
    outputs — and never originates one. If Yonder stops, the aircraft carries on under the
    autopilot's own logic. That property is never traded away for a feature.
-3. **Unbrickable.** No configuration change may leave the device unreachable. There is
-   always a way back in without a card reader.
+3. **Recoverable configuration.** Risky changes use the rollback engine and
+   access-point fallback to preserve reachability. This is not a guarantee
+   against failed power, storage, an unmanaged radio, or a broken base OS.
 4. **Reviewable by strangers.** Every behaviour lives in source a contributor can read,
    diff and test. Generated blobs are build outputs, never the source of truth.
-5. **One installer.** The installer is the only definition of a working system. Images are
-   produced by running it. There is no hand-made image.
+5. **One installer.** The installer defines the application installation.
+   Future Yonder disk images use that same procedure; no ready-to-flash image
+   is currently published.
 6. **Requirements first.** Every behaviour traces to a numbered requirement, so scope is
    arguable in the open rather than assumed.
 
@@ -36,16 +45,23 @@ being enforced.
 
 ## 2. What runs on the device
 
-Five long-lived processes. Everything else is a library or a system service that ships
-with the distribution.
+The installed system combines Yonder services with OS and media processes.
+Optional components run according to configuration and the attached hardware.
 
-| Process | Role | Licence | Ours? |
-|---|---|---|---|
-| **Node-RED** | Control plane: operator UI, MAVLink logic, orchestration of everything below | Apache-2.0 | Configure + custom nodes |
-| **mavlink-router** | MAVLink fan-out: serial/USB in, UDP + TCP out | Apache-2.0 | Configure |
-| **mediamtx** | Media server: WebRTC, RTSP, SRT, RTMP, HLS from one binary | MIT | Configure |
-| **GStreamer** | One capture/encode pipeline per camera | LGPL-2.1 | Compose pipelines |
-| **NetworkManager + ModemManager** | Interfaces, Wi-Fi AP, cellular | GPL-2.0 | Configure |
+| Process / service | Role | License | Yonder integration |
+| --- | --- | --- | --- |
+| **yonder-core** | Typed network/configuration, telemetry, mission, camera and diagnostic services; private Unix-socket API | GPL-3.0-or-later | Our implementation |
+| **Node-RED + FlowFuse Dashboard** | Authenticated console, wiring and thin adapters; Vue instruments render in the browser | Apache-2.0 | Custom packages and generated configuration |
+| **mavlink-router** | Owns the flight-controller serial link and fans MAVLink out to configured endpoints and the private local reader | Apache-2.0 | Generated configuration |
+| **MediaMTX** | Configured browser/ground-station media endpoints | MIT | Generated configuration and private observer API |
+| **GStreamer / pipeline host** | Per-camera capture, encoding, retuning, recording and stills | Component licenses | Composed pipelines and our control host |
+| **NetworkManager + ModemManager** | Interfaces, Wi-Fi AP and cellular | GPL-2.0 family | OS packages controlled through their native tools |
+| **ZeroTier** | Configured optional mesh connectivity | Upstream package license | Pinned package and lifecycle integration |
+| **Camera-specific helpers** | Pocket 2 accessory transport or prepared Radxa sensor/ISP services | Component licenses | Used only for the relevant camera path |
+
+Application logic lives in reviewable packages. Node-RED flows connect services
+and presentation; they do not contain an independent copy of flight, network or
+camera decision logic. The autopilot owns flight execution.
 
 Two absences are deliberate:
 
@@ -102,12 +118,28 @@ mavlink-router
    ├── UDP  → ground station 1        (default :14551)
    ├── UDP  → ground station 2        (default :14552)
    ├── TCP  server                    (default :5760)
-   └── UDP  → 127.0.0.1:14559         → Node-RED
+   └── UDP  → 127.0.0.1:14559         → yonder-core
 ```
 
 **Raw MAVLink never passes through Node-RED on its way to a ground station.**
 mavlink-router fans it out directly. If Node-RED restarts, Mission Planner does not
-notice. Node-RED is a *consumer* of a loopback copy, plus a producer of commands.
+notice. The control plane is a *consumer* of a loopback copy, plus a producer of commands.
+
+**The router is its own systemd unit, and it ships installed and off.** `mavlink-router` is
+not in Debian, so it is built for the board's architecture and carried in the offline
+payload; the role that installs it leaves the unit stopped and disabled. `yonder-core` starts
+it, and only once detection has found a port and a speed and generated
+`/etc/mavlink-router/main.conf` — because the router opens the serial port and keeps it, and
+detection needs the same port. A unit enabled at install would win that race at every boot.
+Once running, its lifetime is systemd's: a router that dies is restarted by
+`Restart=on-failure`, never by the control plane, which is the other half of the sentence
+above (R-MAV-17).
+
+The end of that loopback copy is a socket in `yonder-core`, not in Node-RED: the daemon
+reads the heartbeats and Node-RED asks it what they said, over the same Unix socket every
+other reading arrives on. **That socket binds `127.0.0.1` and nothing else, and there is no
+setting that can move it** — MAVLink is bidirectional and carries no credential, so the
+address it is bound to is the whole of what keeps it off the network.
 
 Flight-controller detection sweeps the baud rates above in order — these are the rates
 ArduPilot is actually configured for in the field — and reports the port and baud it
@@ -136,16 +168,22 @@ GStreamer: capture → convert → encode (board-specific encoder)
 ```
 
 A single-destination design forces a choice between watching in the browser and feeding
-your ground station. A `tee` costs almost nothing and removes the trade-off: **you get the
-browser preview and the ground-station feed at the same time.**
+your ground station. A `tee` costs almost nothing — measured at two points of one core —
+and removes the *encoding* trade-off: **you get the browser preview and the ground-station
+feed at the same time.** It does not remove the bandwidth one: each consumer that leaves
+over cellular costs its own bitrate, which is why the browser is served a separate, cheaper
+copy by default (R-VID-13) and why every output is reported against the uplink's capacity
+(R-VID-11).
 
-Encoder selection is per board, resolved at install time and recorded in config:
+Encoder selection is per board, probed when the daemon looks (R-CAM-13) and reported on the
+camera page; nothing about it is written to configuration — R-CAM-06 was withdrawn for
+exactly that:
 
 | Board | H.264 | H.265 |
 |---|---|---|
 | Pi Zero 2 W, Pi 3, Pi 4, CM3, CM4 | V4L2 M2M hardware | — |
 | Pi 5, CM5 | **software** (`x264enc`) | — |
-| Radxa (rk35xx) | rkmpp hardware | rkmpp hardware |
+| Radxa (rk35xx) | MPP hardware (`mpph264enc`) | MPP hardware (`mpph265enc`) |
 
 The Pi 5 dropped the hardware H.264 encoder its predecessors had. It works, in software,
 and it runs hotter and slower than a Pi 4 doing the same job.
@@ -367,8 +405,11 @@ installer/install.sh
          └── over Armbian (rk35xx)      → yonder-radxa-<ver>.img.xz
 ```
 
-Radxa hardware encoding needs the board vendor's BSP kernel and the Rockchip MPP
-libraries, which is why Radxa is image-only in practice. The Pi supports both paths.
+Radxa hardware encoding needs the Rockchip MPP library and the GStreamer Rockchip plugin,
+which no repository packages; both are built from pinned commits into the offline payload by
+`installer/make-payload.sh` and installed by a role where `/dev/mpp_service` exists. Armbian
+ships the vendor kernel, so Radxa is installable rather than image-only. The Pi supports
+both paths.
 
 Every release publishes both artifacts and the installer that produced them, so anyone can
 reproduce the image from the same commit.

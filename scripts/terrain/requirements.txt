@@ -1,0 +1,6 @@
+# Optional offline preparation, never aircraft runtime dependencies.
+numpy==2.0.2
+rasterio==1.4.3
+pyproj==3.6.1
+laspy==2.6.1
+lazrs==0.7.0

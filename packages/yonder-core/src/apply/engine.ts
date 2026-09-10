@@ -29,6 +29,8 @@ export interface ApplyEngineOptions {
   configPath: string;
   journalPath: string;
   renderers: Renderer[];
+  /** A theme-only request can render appearance without touching hardware. */
+  appearanceRenderer?: Renderer;
   clock?: Clock;
   timeoutMs?: number;
   /**
@@ -124,6 +126,7 @@ function touchesWifiClient(previous: Config, next: Config): boolean {
 export class ApplyEngine {
   private readonly configPath: string;
   private readonly renderers: Renderer[];
+  private readonly appearanceRenderer?: Renderer;
   private readonly clock: Clock;
   private readonly timeoutMs: number;
   private readonly radioTimeoutMs: number;
@@ -160,6 +163,7 @@ export class ApplyEngine {
   constructor(opts: ApplyEngineOptions) {
     this.configPath = opts.configPath;
     this.renderers = opts.renderers;
+    this.appearanceRenderer = opts.appearanceRenderer;
     this.clock = opts.clock ?? systemClock;
     this.timeoutMs = opts.timeoutMs ?? 120_000;
     this.radioTimeoutMs = opts.radioTimeoutMs ?? 300_000;
@@ -192,7 +196,7 @@ export class ApplyEngine {
    * the loadConfig call below — and `previousIsDefault` is set on both the
    * journal entry and the return value so that substitution is never silent.
    */
-  async apply(next: unknown): Promise<{
+  async apply(next: unknown, options: { appearanceOnly?: boolean; gimbalPresetsOnly?: boolean } = {}): Promise<{
     id: string;
     /**
      * When the change reverts unless confirmed, or **null when there is
@@ -220,7 +224,17 @@ export class ApplyEngine {
       throw new ConfigError(`cannot apply while degraded: ${this.degraded}`);
     }
     if (BUSY.includes(this.state)) {
-      throw new ConfigError("an apply is already pending; confirm or wait for it to revert");
+      // Named by state, because only one of the three can be confirmed. This
+      // used to say *pending; confirm or wait for it to revert* for all three,
+      // and an operator who read that during the tail of a revert went to
+      // confirm a change that no longer existed — K-50, seen on the board.
+      throw new ConfigError(
+        this.state === "pending"
+          ? `an apply (${String(this.id)}) is pending; confirm it, revert it, or wait for it to revert`
+          : this.state === "applying"
+            ? "an apply is still being carried out; wait for it to finish"
+            : "the previous configuration is being put back; wait for it to finish",
+      );
     }
 
     // Given the same tolerance the loader gives a file on disk (R-CFG-09),
@@ -247,6 +261,7 @@ export class ApplyEngine {
     // — M1's network apply takes seconds — and a second apply arriving inside
     // that window would journal the first apply's unconfirmed configuration as
     // its rollback target and orphan its timer.
+    const stateBeforeApply = this.state;
     this.state = "applying";
 
     let previous: Config;
@@ -287,6 +302,21 @@ export class ApplyEngine {
     // two configurations at once.
     if (this.settling !== undefined) await this.settling;
 
+    // The hint only narrows execution if the entire validated configuration
+    // differs in ui.theme alone. It cannot exempt another setting or repair
+    // an unloadable configuration without running its normal renderers.
+    const sameExceptTheme = JSON.stringify({ ...previous, ui: { ...previous.ui, theme: parsed.data.ui.theme } })
+      === JSON.stringify(parsed.data);
+    const withoutPresets = (config: Config) => ({...config,cameras:config.cameras.map(({gimbal_presets,...camera})=>camera)});
+    const onlyPresets = options.gimbalPresetsOnly === true && !previousIsDefault
+      && JSON.stringify(withoutPresets(previous)) === JSON.stringify(withoutPresets(parsed.data));
+    if(options.gimbalPresetsOnly && !onlyPresets){
+      this.state=stateBeforeApply;
+      throw new ConfigError('Configuration changed while saving the preset; try again');
+    }
+    const renderers = onlyPresets ? [] : options.appearanceOnly && !previousIsDefault && sameExceptTheme && this.appearanceRenderer
+      ? [this.appearanceRenderer] : this.renderers;
+
     const id = randomUUID();
     this.id = id;
     this.previous = previous;
@@ -295,7 +325,7 @@ export class ApplyEngine {
     try {
       this.journal.write({ id, previous, previousIsDefault, startedAt: this.clock.now() });
       saveConfig(this.configPath, parsed.data);
-      await this.renderAll(parsed.data);
+      await this.renderAll(parsed.data, renderers);
     } catch (e) {
       // Put everything back before returning the error.
       try {
@@ -314,7 +344,7 @@ export class ApplyEngine {
       // stalled — is K-10, which is also what engine.test.ts cites for this
       // branch.
       if (!(e instanceof RenderTimeoutError)) {
-        await this.renderAll(previous).catch(() => { /* best effort */ });
+        await this.renderAll(previous, renderers).catch(() => { /* best effort */ });
       }
       // finish() must run in a finally: a journal that cannot be cleared
       // (e.g. EIO fsyncing the journal directory) must not leave the
@@ -374,7 +404,7 @@ export class ApplyEngine {
      * field added to the schema later is safe by default rather than silently
      * exempt.
      */
-    if (!affectsReachability(previous, parsed.data)) {
+    if (onlyPresets || !affectsReachability(previous, parsed.data)) {
       // Same order as confirm(): the journal is cleared first, because that
       // is what makes the change permanent.
       this.journal.clear();
@@ -514,7 +544,25 @@ export class ApplyEngine {
     if (BUSY.includes(this.state)) {
       throw new ConfigError("an apply is in flight; the configuration is already being rendered");
     }
-    await this.renderAll(loadConfig(this.configPath));
+    const previousState = this.state;
+    this.state = "applying";
+    try {
+      const config = loadConfig(this.configPath);
+      const failures: string[] = [];
+      // Boot restores an already saved configuration. A modem that is not
+      // ready must not prevent telemetry, media, or the console from being
+      // initialized. Normal apply and rollback retain their fail-fast path.
+      for (const r of this.renderers) {
+        try {
+          await this.withTimeout(r.render(config), this.renderTimeoutMs, `renderer "${r.name}"`);
+        } catch (e) {
+          failures.push(`${r.name}: ${(e as Error).message}`);
+        }
+      }
+      if (failures.length > 0) throw new ConfigError(failures.join("; "));
+    } finally {
+      this.state = previousState;
+    }
   }
 
   /**
@@ -629,8 +677,8 @@ export class ApplyEngine {
     });
   }
 
-  private async renderAll(config: Config): Promise<void> {
-    for (const r of this.renderers) {
+  private async renderAll(config: Config, renderers: Renderer[] = this.renderers): Promise<void> {
+    for (const r of renderers) {
       await this.withTimeout(r.render(config), this.renderTimeoutMs, `renderer "${r.name}"`);
     }
   }

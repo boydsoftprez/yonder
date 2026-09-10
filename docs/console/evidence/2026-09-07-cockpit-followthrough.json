@@ -1,0 +1,332 @@
+{
+  "schema": 1,
+  "requirements": [
+    "R-FLT-03",
+    "R-FLT-07",
+    "R-FLT-08",
+    "R-FLT-12",
+    "R-FLT-13",
+    "R-FLT-15",
+    "R-FLT-17"
+  ],
+  "firmware": "Official ArduPlane 4.7.1",
+  "scope": "Fresh disposable SITL flight and passive local browser profile; no hardware commands",
+  "startedAt": "2026-09-07T21:01:46.437Z",
+  "finishedAt": "2026-09-07T21:05:31.433Z",
+  "outcome": "passed",
+  "stages": [
+    {
+      "action": "stream-setup",
+      "operationState": "accepted",
+      "mode": "Mode 16",
+      "headingDeg": null,
+      "relativeAltitudeM": null,
+      "verticalSpeedFpm": null,
+      "slipSkid": null,
+      "fdReady": false
+    },
+    {
+      "action": "mission-download",
+      "operationState": "observed",
+      "mode": "MANUAL",
+      "headingDeg": 91,
+      "relativeAltitudeM": 0.014,
+      "verticalSpeedFpm": 0,
+      "slipSkid": {
+        "lateralG": 0,
+        "normalG": 1.001,
+        "source": "RAW_IMU",
+        "ageMs": 47
+      },
+      "fdReady": false
+    },
+    {
+      "action": "mission-upload",
+      "operationState": "observed",
+      "mode": "MANUAL",
+      "headingDeg": 90,
+      "relativeAltitudeM": 0.211,
+      "verticalSpeedFpm": 0,
+      "slipSkid": {
+        "lateralG": 0,
+        "normalG": 1.001,
+        "source": "RAW_IMU",
+        "ageMs": 48
+      },
+      "fdReady": false
+    },
+    {
+      "action": "arm",
+      "operationState": "observed",
+      "mode": "MANUAL",
+      "headingDeg": 89,
+      "relativeAltitudeM": -0.167,
+      "verticalSpeedFpm": 3.367661329822322,
+      "slipSkid": {
+        "lateralG": 0,
+        "normalG": 1.001,
+        "source": "RAW_IMU",
+        "ageMs": 51
+      },
+      "fdReady": false
+    },
+    {
+      "action": "continue-auto",
+      "operationState": "observed",
+      "mode": "AUTO",
+      "headingDeg": 89,
+      "relativeAltitudeM": -0.167,
+      "verticalSpeedFpm": 3.315203669151027,
+      "slipSkid": {
+        "lateralG": 0,
+        "normalG": 1.001,
+        "source": "RAW_IMU",
+        "ageMs": 153
+      },
+      "fdReady": true
+    },
+    {
+      "action": "AUTO flight observed",
+      "mode": "AUTO",
+      "headingDeg": 89,
+      "relativeAltitudeM": 20.688,
+      "verticalSpeedFpm": 2012.4365964274034,
+      "slipSkid": {
+        "lateralG": -0.008,
+        "normalG": 1.161,
+        "source": "RAW_IMU",
+        "ageMs": 113
+      },
+      "fdReady": true
+    },
+    {
+      "action": "goto",
+      "operationState": "observed",
+      "mode": "GUIDED",
+      "headingDeg": 89,
+      "relativeAltitudeM": 21.703,
+      "verticalSpeedFpm": 2013.090651805033,
+      "slipSkid": {
+        "lateralG": 0.015,
+        "normalG": 0.883,
+        "source": "RAW_IMU",
+        "ageMs": 15
+      },
+      "fdReady": true
+    },
+    {
+      "action": "heading",
+      "operationState": "accepted",
+      "mode": "GUIDED",
+      "headingDeg": 89,
+      "relativeAltitudeM": 22.718,
+      "verticalSpeedFpm": 1999.2313985749756,
+      "slipSkid": {
+        "lateralG": 0.015,
+        "normalG": 0.883,
+        "source": "RAW_IMU",
+        "ageMs": 118
+      },
+      "fdReady": true
+    },
+    {
+      "action": "one-shot heading measured after 8 seconds",
+      "mode": "GUIDED",
+      "headingDeg": 0,
+      "relativeAltitudeM": 119.841,
+      "verticalSpeedFpm": 37.130927593689755,
+      "slipSkid": {
+        "lateralG": 0.001,
+        "normalG": 0.938,
+        "source": "RAW_IMU",
+        "ageMs": 89
+      },
+      "fdReady": true
+    },
+    {
+      "action": "altitude",
+      "operationState": "accepted",
+      "mode": "GUIDED",
+      "headingDeg": 0,
+      "relativeAltitudeM": 119.854,
+      "verticalSpeedFpm": 19.202711368639893,
+      "slipSkid": {
+        "lateralG": 0.001,
+        "normalG": 0.938,
+        "source": "RAW_IMU",
+        "ageMs": 191
+      },
+      "fdReady": true
+    },
+    {
+      "action": "altitude physically reached",
+      "mode": "GUIDED",
+      "headingDeg": 359,
+      "relativeAltitudeM": 142.066,
+      "verticalSpeedFpm": 556.482855729238,
+      "slipSkid": {
+        "lateralG": -0.011,
+        "normalG": 0.86,
+        "source": "RAW_IMU",
+        "ageMs": 182
+      },
+      "fdReady": true
+    },
+    {
+      "action": "speed",
+      "operationState": "accepted",
+      "mode": "GUIDED",
+      "headingDeg": 0,
+      "relativeAltitudeM": 142.34,
+      "verticalSpeedFpm": 530.205185957788,
+      "slipSkid": {
+        "lateralG": 0.009,
+        "normalG": 0.861,
+        "source": "RAW_IMU",
+        "ageMs": 89
+      },
+      "fdReady": true
+    },
+    {
+      "action": "airspeed physically reached",
+      "mode": "GUIDED",
+      "headingDeg": 0,
+      "relativeAltitudeM": 145.081,
+      "verticalSpeedFpm": 864.8940897363491,
+      "slipSkid": {
+        "lateralG": 0.022,
+        "normalG": 1.77,
+        "source": "RAW_IMU",
+        "ageMs": 1
+      },
+      "fdReady": true
+    },
+    {
+      "action": "loiter",
+      "operationState": "accepted",
+      "mode": "GUIDED",
+      "headingDeg": 0,
+      "relativeAltitudeM": 145.081,
+      "verticalSpeedFpm": 864.8940897363491,
+      "slipSkid": {
+        "lateralG": 0.022,
+        "normalG": 1.77,
+        "source": "RAW_IMU",
+        "ageMs": 105
+      },
+      "fdReady": true
+    },
+    {
+      "action": "ccw loiter geometry",
+      "requestedRadiusM": 180,
+      "meanRadiusM": 195.4757525215223,
+      "rotationDeg": -184.45094995099873
+    },
+    {
+      "action": "loiter",
+      "operationState": "accepted",
+      "mode": "GUIDED",
+      "headingDeg": 193,
+      "relativeAltitudeM": 149.996,
+      "verticalSpeedFpm": -0.08888699400319476,
+      "slipSkid": {
+        "lateralG": 0.117,
+        "normalG": 1.029,
+        "source": "RAW_IMU",
+        "ageMs": 16
+      },
+      "fdReady": true
+    },
+    {
+      "action": "cw loiter geometry",
+      "requestedRadiusM": 180,
+      "meanRadiusM": 195.44466398247755,
+      "rotationDeg": 183.61243213683144
+    },
+    {
+      "action": "continue-auto",
+      "operationState": "observed",
+      "mode": "AUTO",
+      "headingDeg": 96,
+      "relativeAltitudeM": 150.037,
+      "verticalSpeedFpm": 11.925477035871799,
+      "slipSkid": {
+        "lateralG": -0.109,
+        "normalG": 1.03,
+        "source": "RAW_IMU",
+        "ageMs": 117
+      },
+      "fdReady": true
+    },
+    {
+      "action": "mode",
+      "operationState": "observed",
+      "mode": "RTL",
+      "headingDeg": 97,
+      "relativeAltitudeM": 150.041,
+      "verticalSpeedFpm": 0.6631459017819629,
+      "slipSkid": {
+        "lateralG": -0.195,
+        "normalG": 0.955,
+        "source": "RAW_IMU",
+        "ageMs": 22
+      },
+      "fdReady": true
+    }
+  ],
+  "terrain": {
+    "durationMs": 15002,
+    "frames": {
+      "count": 1800,
+      "hz": 120,
+      "medianMs": 8.300000000000182,
+      "p95Ms": 9.099999999998545,
+      "maxMs": 9.700000000000728
+    },
+    "terrain": {
+      "count": 900,
+      "hz": 60,
+      "medianMs": 16.700000047683716,
+      "p95Ms": 25,
+      "maxMs": 27.300000071525574
+    },
+    "attitudeMotion": {
+      "count": 269,
+      "hz": 17.9,
+      "medianMs": 16.600000000000364,
+      "p95Ms": 508.39999999999964,
+      "maxMs": 783.2999999999993
+    },
+    "geometryUploads": {
+      "count": 0,
+      "hz": 0,
+      "medianMs": null,
+      "p95Ms": null,
+      "maxMs": null
+    },
+    "flight": {
+      "count": 58,
+      "hz": 3.9,
+      "medianMs": 255.60000002384186,
+      "p95Ms": 258.5,
+      "maxMs": 258.8000000715256
+    },
+    "longTasks": [],
+    "renderer": "ANGLE (Apple, ANGLE Metal Renderer: Apple M5 Max, Unspecified Version)",
+    "terrainStatus": "Cove terrain · 1 m nearby / 4 m distant · mapped surface · EGM96",
+    "agl": "EST AGL -2 FT",
+    "viewport": {
+      "width": 1440,
+      "height": 900
+    },
+    "uniqueTerrainFiles": 40,
+    "errors": [],
+    "blockedWrites": 0
+  },
+  "traffic": {
+    "provider": "ADSB.lol through explicit ground relay",
+    "status": 200,
+    "targetsWithin10Nm": 4,
+    "checkedAt": "2026-09-07T21:14:19.058Z"
+  }
+}

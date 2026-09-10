@@ -1,0 +1,47 @@
+{
+  "why": [
+    "A camera whose *sensor* turns the picture, so R-CTL-15's other half can be photographed.",
+    "",
+    "R-CTL-15 asks the console to say which of the two is turning the picture, because the two",
+    "are identical in the picture and not in their cost: the board's is processing on every",
+    "frame, the sensor's is free. That is two sentences on the page, and a gate that only ever",
+    "photographs one of them is a gate that would not notice the other going wrong.",
+    "",
+    "**No camera on the bench can draw the sensor's sentence.** The Global Shutter Camera",
+    "implements no `horizontal_flip`, no `vertical_flip` and no `rotate` — that is the recorded",
+    "answer in `camera-globalshutter.json` and it is why `video/orientation.ts` exists at all —",
+    "so the sensor path has no hardware here to exercise it. This file is the only way to draw",
+    "it, and it says so rather than pretending a device answered.",
+    "",
+    "**An overlay, not a second camera.** `capabilities` below replaces those three keys on the",
+    "recorded fixture's own `found[0]` and nothing else: same device, same card, same by-path",
+    "name, same formats, same eighteen other controls. Kept as an overlay so the recorded",
+    "answers stay in exactly one file — a whole second copy would drift from the board's the",
+    "first time either was regenerated, and would do it silently. `verify-pages.sh` is what",
+    "merges the two.",
+    "",
+    "**The ranges are what a UVC camera that implements these controls reports**: each flip is",
+    "a switch (`min=0 max=1 step=1`), and `rotate` is degrees in steps of 90. `current` is 1 on",
+    "`horizontal_flip` because the recorded fixture's camera asks for a mirror, and a control",
+    "the sensor holds is drawn from the device's own read-back rather than from what was stored",
+    "(R-CTL-10) — so a page that drew the stored value instead would photograph identically",
+    "here and differ the moment the two disagree, which is the whole point of the distinction.",
+    "",
+    "Nothing on the bench has answered any of this. It is a shape a camera can have, not a",
+    "measurement, and no page drawn from it may be reported as hardware evidence."
+  ],
+  "capabilities": {
+    "horizontalFlip": {
+      "state": "present",
+      "value": { "min": 0, "max": 1, "step": 1, "default": 0, "current": 1, "inactive": false }
+    },
+    "verticalFlip": {
+      "state": "present",
+      "value": { "min": 0, "max": 1, "step": 1, "default": 0, "current": 0, "inactive": false }
+    },
+    "rotation": {
+      "state": "present",
+      "value": { "min": 0, "max": 270, "step": 90, "default": 0, "current": 0, "inactive": false }
+    }
+  }
+}

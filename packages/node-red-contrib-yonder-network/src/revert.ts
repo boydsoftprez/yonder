@@ -55,12 +55,12 @@ export = function register(RED: RED): void {
             { at: Date.now() },
           );
           node.status({ fill: "red", shape: "ring", text: presentation(status.state).label });
-          send({ payload: status, yonder: status });
+          send({ payload: status, yonder: status, operation: 'revert' });
           done();
           return;
         }
         const status = revertStatus(
-          await node.client.request({ method: "POST", path: "/revert", body: { id } }),
+          await node.client.request({ method: "POST", path: "/revert", body: { id }, timeoutMs: 60000 }),
           Date.now(),
           id,
         );
@@ -69,7 +69,7 @@ export = function register(RED: RED): void {
           shape: status.state === "confirmed" ? "dot" : "ring",
           text: presentation(status.state).label,
         });
-        send({ payload: status, yonder: status });
+        send({ payload: status, yonder: status, operation: 'revert' });
         done();
       })();
     });

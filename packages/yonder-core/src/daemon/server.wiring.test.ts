@@ -1,10 +1,10 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
-import { describe, it, expect, beforeEach, afterEach } from "vitest";
+import { describe, it, expect, beforeEach, afterEach, vi } from "vitest";
 import { mkdtempSync, rmSync, writeFileSync, readFileSync } from "node:fs";
 import { request } from "node:http";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { buildRenderers, consolePathsFromEnv, startServer, SIGNAL_POLL_SECONDS } from "./server.js";
+import { buildRenderers, consolePathsFromEnv, onceAsync, startServer, SIGNAL_POLL_SECONDS } from "./server.js";
 import { SecretStore } from "../secrets/store.js";
 import { AdminCredential, ADMIN_PASSWORD_SECRET } from "../console/credential.js";
 import { hashPassword } from "../console/password.js";
@@ -36,12 +36,261 @@ import {
 } from "../net/profiles.js";
 import { loadConfig } from "../config/load.js";
 import { saveConfig } from "../config/save.js";
-import { DEFAULT_CONFIG } from "../schema/config.js";
+import { DEFAULT_CONFIG, type Camera } from "../schema/config.js";
+import { compose } from "../video/pipeline.js";
+import { noCapabilities, present } from "../video/capability.js";
+import type { ProcessSpawner } from "../video/supervisor.js";
+import { RTSP_BASE } from "../media/ports.js";
+import { probeEncoder, type Encoder } from "../video/probe/encoder.js";
+
+/**
+ * What `buildRenderers` probes for on a board with no `v4l2-ctl` to answer:
+ * the fake runner above returns code 0 and empty output for every candidate
+ * node, so `probeEncoder` falls through to software. The wiring test composes
+ * with the same answer, so the line it starts a pipeline on is the line the
+ * renderer will compose for an unchanged configuration.
+ */
+const WIRED_ENCODER: Encoder = {
+  element: "x264enc", h265: null, decoder: null, device: null, hardware: false,
+  detail: "software H.264 (x264enc) — this board offers no hardware encoder",
+};
+
+function wiredCamera(kbps: number): Camera {
+  return {
+    id: "cam0", name: "Nose", source: "usb",
+    device: "platform-fd500000.pcie-pci-0000:01:00.0-usb-0:1.3:1.0-video-index0",
+    enabled: true, autostart: false,
+    width: 1280, height: 720, framerate: 30, codec: "h264", bitrate_kbps: kbps,
+    preview: {
+      mode: "fixed", size: "auto", ladder_top: "1280x720", ladder_bottom: "640x360",
+      floor_kbps: 300, ceiling_kbps: 2000, bitrate_kbps: 400, framerate: 15,
+    },
+    controls: { brightness: null, contrast: null, rotation: 0 },
+    outputs: [],
+    stream: { mode: "fixed", floor_kbps: kbps, ceiling_kbps: kbps },
+  } as never;
+}
 import type { CommandRunner } from "../net/runner.js";
 
 let dir: string;
 beforeEach(() => { dir = mkdtempSync(join(tmpdir(), "yonder-wire-")); });
 afterEach(() => { rmSync(dir, { recursive: true, force: true }); });
+
+describe("the board's encoder is probed once, not on every poll (K-66)", () => {
+  it("asks the board once however many times the page is read", async () => {
+    let probes = 0;
+    const runner: CommandRunner = async (argv) => {
+      if (argv[0] === "gst-inspect-1.0") {
+        probes += 1;
+        return { code: 1, stdout: "", stderr: "" };
+      }
+      return { code: 1, stdout: "", stderr: "No such file or directory" };
+    };
+    const encoder = onceAsync(() => probeEncoder({ runner }));
+
+    const answers = await Promise.all([encoder(), encoder(), encoder()]);
+
+    expect(probes).toBe(1);
+    expect(answers[0]).toBe(answers[1]);
+    expect(answers[2].element).toBe("x264enc");
+  });
+
+  it("shares one in-flight probe between callers that arrive together", async () => {
+    let started = 0;
+    let release: (() => void) | undefined;
+    const gate = new Promise<void>((resolve) => { release = resolve; });
+    const encoder = onceAsync(async () => {
+      started += 1;
+      await gate;
+      return WIRED_ENCODER;
+    });
+
+    const both = Promise.all([encoder(), encoder()]);
+
+    expect(started).toBe(1);
+    release?.();
+    await both;
+    expect(started).toBe(1);
+  });
+
+  it("does not cache a failure, so a board that answered badly once is asked again", async () => {
+    let calls = 0;
+    const encoder = onceAsync(async () => {
+      calls += 1;
+      if (calls === 1) throw new Error("the runner blew up");
+      return WIRED_ENCODER;
+    });
+
+    await expect(encoder()).rejects.toThrow("the runner blew up");
+    await expect(encoder()).resolves.toMatchObject({ element: "x264enc" });
+    expect(calls).toBe(2);
+  });
+
+  it("wires every camera-page poll to the daemon's one encoder answer", async () => {
+    const socketPath = join(dir, "core.sock");
+    const configPath = join(dir, "config.yaml");
+    const journalPath = join(dir, "apply.json");
+    const secretsPath = join(dir, "secrets.yaml");
+    saveConfig(configPath, { ...DEFAULT_CONFIG, cameras: [wiredCamera(2_000)] } as never);
+    new SecretStore(secretsPath).ensureValue(
+      ADMIN_PASSWORD_SECRET,
+      hashPassword("an operator's password"),
+    );
+    let probes = 0;
+    const runner: CommandRunner = async (argv) => {
+      if (argv[0] === "gst-inspect-1.0") {
+        probes += 1;
+        return { code: 1, stdout: "", stderr: "" };
+      }
+      return { code: 0, stdout: "", stderr: "" };
+    };
+    const server = await startServer({
+      socketPath, configPath, journalPath, secretsPath,
+      renderers: [], runner, counters: noCounters,
+    });
+    try {
+      const answers = await Promise.all([
+        call(socketPath, "GET", "/cameras/cam0"),
+        call(socketPath, "GET", "/cameras/cam0"),
+        call(socketPath, "GET", "/cameras/cam0"),
+      ]);
+
+      expect(answers.map((answer) => answer.status)).toEqual([200, 200, 200]);
+      expect(probes).toBe(1);
+    } finally {
+      await server.close();
+    }
+  });
+
+  it("shares acknowledged rates between manual rendering and the daemon's adaptation channel", async () => {
+    let spawnCount = 0;
+    const built = buildRenderers({
+      secretsPath: join(dir, "secrets.yaml"), remoteStatePath: join(dir, "remote.json"),
+      runner: async () => ({ code: 1, stdout: "", stderr: "" }),
+      spawner: () => {
+        spawnCount++;
+        const inbox: ((line: string) => void)[] = [];
+        return { kill() {}, on() {}, onMessage(fn) { inbox.push(fn); }, send(line) {
+          const command = JSON.parse(line);
+          for (const fn of inbox) fn(JSON.stringify({ id: command.id, pid: 42,
+            observed: Number(command.sets[0].value), continuous: true }));
+        } };
+      },
+    });
+    const camera = wiredCamera(2000);
+    built.supervisor.start(camera.id, compose({ camera, capabilities: noCapabilities(), encoder: WIRED_ENCODER, rtspBase: RTSP_BASE }));
+    try {
+      await built.encoders.retune(camera, "stream", 1300);
+      expect(built.encoders.inForce(camera.id)?.stream).toBe(1300);
+      const changed = wiredCamera(3000);
+      await built.pipelineRenderer.render({ ...DEFAULT_CONFIG, cameras: [changed] } as never);
+      expect(built.encoders.inForce(camera.id)?.stream).toBe(3000);
+      expect(spawnCount).toBe(1);
+    } finally { built.supervisor.stop(camera.id); }
+  });
+
+  it("gives the pipeline renderer the camera routes' encoder answer", async () => {
+    let probes = 0;
+    const runner: CommandRunner = async (argv) => {
+      if (argv[0] === "gst-inspect-1.0") probes += 1;
+      return { code: 1, stdout: "", stderr: "" };
+    };
+    const spawns: string[][] = [];
+    const spawner: ProcessSpawner = (argv) => {
+      spawns.push(argv);
+      return { kill: () => {}, on: () => {} };
+    };
+    const built = buildRenderers({
+      secretsPath: join(dir, "secrets.yaml"),
+      remoteStatePath: join(dir, "remote.json"),
+      runner,
+      spawner,
+    });
+    const camera = wiredCamera(2_000);
+    built.supervisor.start(camera.id, compose({
+      camera, capabilities: noCapabilities(), encoder: WIRED_ENCODER, rtspBase: RTSP_BASE,
+    }));
+    try {
+      await built.encoder();
+      const renderer = built.renderers.find((candidate) => candidate.name === "video");
+      expect(renderer).toBeDefined();
+      await renderer?.render({ ...DEFAULT_CONFIG, cameras: [camera] } as never);
+
+      expect(probes).toBe(1);
+      expect(spawns).toHaveLength(1);
+    } finally {
+      built.supervisor.stop(camera.id);
+    }
+  });
+});
+
+import { buildRenderers, consolePathsFromEnv, mavlinkFromEnv, startServer, SIGNAL_POLL_SECONDS } from "./server.js";
+
+import { createSocket } from "node:dgram";
+
+import { heartbeatV2 } from "../mav/testing.js";
+
+import type { MavlinkStateBody } from "./routes.js";
+
+import type { OpenPort } from "../mav/detect.js";
+
+import { SETTLE_MS } from "../mav/serial.js";
+
+import { DEFAULT_CONFIG } from "../schema/config.js";
+
+/**
+ * The telemetry fixtures. **No test opens a serial port**, so the opener
+ * throws; `MavlinkRenderer` treats a device that will not open as R-MAV-13's
+ * silence for that device and carries on, which is what a board with nothing
+ * plugged into it does too.
+ */
+const neverOpens: OpenPort = async () => { throw new Error("no test opens a serial port"); };
+
+/** A vehicle's heartbeat: ArduPilot on a fixed wing, system 1. */
+const HEARTBEAT = heartbeatV2(1, 1, 3);
+
+/**
+ * A UDP port on loopback that was free a moment ago.
+ *
+ * The listener's own tests bind `0` and read back what they got; a daemon
+ * gives no such handle back, so a test that wants to send it a datagram has
+ * to choose the number first. Asking the kernel for an ephemeral one and
+ * letting it go is how that number is chosen rather than picked.
+ */
+async function freePort(): Promise<number> {
+  const probe = createSocket({ type: "udp4" });
+  const port = await new Promise<number>((resolve) => {
+    probe.bind({ address: "127.0.0.1", port: 0 }, () => { resolve(probe.address().port); });
+  });
+  await new Promise<void>((resolve) => { probe.close(() => { resolve(); }); });
+  return port;
+}
+
+/** One datagram, from a socket of the test's own, to a port on loopback. */
+async function sendTo(port: number, bytes: Uint8Array): Promise<void> {
+  const from = createSocket({ type: "udp4" });
+  await new Promise<void>((resolve, reject) => {
+    from.send(Buffer.from(bytes), port, "127.0.0.1", (error) => {
+      if (error === null) resolve(); else reject(error);
+    });
+  });
+  from.close();
+}
+
+/**
+ * Read until the answer settles, **without consulting the wall clock**:
+ * `setImmediate` spends a turn of the event loop, which is where a loopback
+ * datagram is delivered, so this counts turns rather than milliseconds and
+ * cannot be made to pass or fail by how fast the machine running it is.
+ */
+async function eventually<T>(read: () => Promise<T>, settled: (value: T) => boolean): Promise<T> {
+  let last = await read();
+  for (let turn = 0; turn < 100 && !settled(last); turn += 1) {
+    await new Promise<void>((resolve) => { setImmediate(resolve); });
+    last = await read();
+  }
+  return last;
+}
 
 describe("buildRenderers", () => {
   it("produces a network renderer", () => {
@@ -52,7 +301,7 @@ describe("buildRenderers", () => {
       runner: run,
       remoteStatePath: join(dir, "remote.json"),
     });
-    expect(renderers.map((r) => r.name)).toEqual(["hostname", "network", "remote"]);
+    expect(renderers.map((r) => r.name)).toEqual(["hostname", "network", "remote", "video", "camera-autostart"]);
   });
 
   /**
@@ -69,7 +318,7 @@ describe("buildRenderers", () => {
       remoteStatePath: join(dir, "remote.json"),
     });
     expect(built.consoleRenderer).toBeUndefined();
-    expect(built.renderers.map((r) => r.name)).toEqual(["hostname", "network", "remote"]);
+    expect(built.renderers.map((r) => r.name)).toEqual(["hostname", "network", "remote", "video", "camera-autostart"]);
   });
 
   /**
@@ -87,7 +336,7 @@ describe("buildRenderers", () => {
       remoteStatePath: join(dir, "remote.json"),
       console: { settings: join(dir, "console", "settings.js") },
     });
-    expect(built.renderers.map((r) => r.name)).toEqual(["hostname", "network", "remote", "console"]);
+    expect(built.renderers.map((r) => r.name)).toEqual(["hostname", "network", "remote", "console", "video", "camera-autostart"]);
     expect(built.consoleRenderer).toBeDefined();
   });
 
@@ -99,6 +348,61 @@ describe("buildRenderers", () => {
    * configuration gives it, which is the board most likely to be searched for
    * by name.
    */
+  /**
+   * Absent unless a caller says where the generated file goes, exactly as the
+   * console is. A default here would be a real /etc/mediamtx — a file a test
+   * could write a credential into, or delete, on whatever machine it ran on.
+   */
+  it("produces no media renderer when nobody said where its configuration goes", () => {
+    const run: CommandRunner = async () => ({ code: 0, stdout: "", stderr: "" });
+    const built = buildRenderers({
+      secretsPath: join(dir, "secrets.yaml"),
+      runner: run,
+      remoteStatePath: join(dir, "remote.json"),
+    });
+    expect(built.mediaRenderer).toBeUndefined();
+    expect(built.renderers.map((r) => r.name)).not.toContain("media");
+  });
+
+  /**
+   * Last, and the opposite of the console's reasoning. A failing renderer
+   * stops the ones behind it, so the question is what each is allowed to
+   * prevent: a media server that will not start must not stop the console
+   * being re-rendered, because the console is how an operator fixes a device
+   * and video is not.
+   */
+  it("puts the media renderer behind the console, so video cannot cost the console", () => {
+    const run: CommandRunner = async () => ({ code: 0, stdout: "", stderr: "" });
+    const built = buildRenderers({
+      secretsPath: join(dir, "secrets.yaml"),
+      runner: run,
+      remoteStatePath: join(dir, "remote.json"),
+      console: { settings: join(dir, "console", "settings.js") },
+      mediaConfigPath: join(dir, "mediamtx.yml"),
+    });
+    expect(built.renderers.map((r) => r.name))
+      .toEqual(["hostname", "network", "remote", "console", "media", "video", "camera-autostart"]);
+    expect(built.mediaRenderer).toBeDefined();
+  });
+
+  /**
+   * R-SEC-07. The RTSP credential is generated by the media renderer when a
+   * camera is configured, never seeded at start-up — so a published image,
+   * which is a device with nothing configured, carries no credential material
+   * without anything having to remember to strip one.
+   */
+  it("seeds no RTSP credential, because a device with no camera needs none", () => {
+    const run: CommandRunner = async () => ({ code: 0, stdout: "", stderr: "" });
+    const { secrets, generated } = buildRenderers({
+      secretsPath: join(dir, "secrets.yaml"),
+      runner: run,
+      remoteStatePath: join(dir, "remote.json"),
+      mediaConfigPath: join(dir, "mediamtx.yml"),
+    });
+    expect(secrets.get("rtsp_password")).toBeUndefined();
+    expect(generated).not.toContain("rtsp_password");
+  });
+
   it("puts the hostname renderer in front of everything, because it cannot fail", () => {
     const run: CommandRunner = async () => ({ code: 0, stdout: "", stderr: "" });
     const built = buildRenderers({
@@ -108,6 +412,66 @@ describe("buildRenderers", () => {
       console: { settings: join(dir, "console", "settings.js") },
     });
     expect(built.renderers[0]?.name).toBe("hostname");
+  });
+
+  /**
+   * **The join K-48's fix actually depends on, tested where it lives.**
+   *
+   * `PipelineRenderer` has its own file of tests and every one of them would
+   * stay green with this renderer left out of the sequence, or built over a
+   * second supervisor that holds no running pipeline — which is the shape
+   * this branch has now been bitten by five times, most recently with 1916
+   * tests passing over a feature that did nothing at all. So this asserts the
+   * two facts the class's own tests cannot: that the daemon puts it in the
+   * list, and that the supervisor it drives is the same object the camera
+   * routes are handed.
+   *
+   * The spawner is injected for the reason the runner is: nothing in this
+   * suite may start a real `gst-launch-1.0`.
+   */
+  it("wires the pipeline renderer to the supervisor the camera routes are given", async () => {
+    // Answering gst-inspect-1.0's --exists the same blanket way as v4l2-ctl
+    // (code 0) would tell probeEncoder this board has registered
+    // mpph264enc — the opposite of "no v4l2-ctl to answer" above. Refused
+    // here so the fall-through to software this test relies on still holds.
+    const run: CommandRunner = async (argv) =>
+      argv[0] === "gst-inspect-1.0" ? { code: 1, stdout: "", stderr: "" } : { code: 0, stdout: "", stderr: "" };
+    const spawned: string[][] = [];
+    const killed: number[] = [];
+    let pid = 0;
+    const built = buildRenderers({
+      secretsPath: join(dir, "secrets.yaml"),
+      runner: run,
+      remoteStatePath: join(dir, "remote.json"),
+      spawner: (argv) => {
+        const mine = ++pid;
+        spawned.push([...argv]);
+        return { kill: () => { killed.push(mine); }, on: () => { /* never exits */ } };
+      },
+    });
+
+    const video = built.renderers.find((r) => r.name === "video");
+    expect(video).toBeDefined();
+    // Video is followed only by background camera startup, which cannot fail an apply.
+    expect(built.renderers[built.renderers.length - 2]).toBe(video);
+    expect(built.renderers.at(-1)).toBe(built.cameraAutostart);
+
+    // A camera on the air, started the way POST /cameras/:id/run starts one:
+    // through the supervisor buildRenderers returned and the routes are
+    // handed, composed against the same RTSP base the route composes with.
+    const cam = wiredCamera(2000);
+    built.supervisor.start("cam0", compose({
+      camera: cam, capabilities: noCapabilities(), encoder: WIRED_ENCODER, rtspBase: RTSP_BASE,
+    }));
+    expect(spawned).toHaveLength(1);
+    expect(spawned[0]!.join(" ")).toContain("x264enc name=enc-stream bitrate=2000");
+
+    // The operator halves it and the apply lands.
+    await video!.render({ ...DEFAULT_CONFIG, cameras: [wiredCamera(1000)] } as never);
+
+    expect(killed).toEqual([1]);
+    expect(spawned).toHaveLength(2);
+    expect(built.supervisor.argv("cam0")?.join(" ")).toContain("x264enc name=enc-stream bitrate=1000");
   });
 });
 
@@ -201,6 +565,29 @@ describe("consolePathsFromEnv", () => {
     const second = buildRenderers({ secretsPath, runner: run, remoteStatePath: join(dir, "remote.json") });
     expect(second.secrets.get("ap_psk")).toBe(value);
     expect(second.generated).toEqual([]);
+  });
+
+  /**
+   * The supervisor is built here, and it is not a renderer.
+   *
+   * Here, because a Node-RED redeploy destroys and recreates every node: a
+   * supervisor inside one would drop every camera's pipeline the moment
+   * somebody edited a flow — including, on a flying aircraft, the feed a
+   * ground station is watching.
+   *
+   * Not a renderer, because starting and stopping a stream is a runtime action
+   * that survives no apply and no reboot (R-CTL-01), and the renderer sequence
+   * exists to make a configuration true.
+   */
+  it("builds one supervisor, and does not put it in the renderer sequence", () => {
+    const run: CommandRunner = async () => ({ code: 0, stdout: "", stderr: "" });
+    const built = buildRenderers({
+      secretsPath: join(dir, "secrets.yaml"),
+      runner: run,
+      remoteStatePath: join(dir, "remote.json"),
+    });
+    expect(built.supervisor.all()).toEqual([]);
+    expect(built.renderers.map((r) => r.name)).not.toContain("supervisor");
   });
 
   it("keeps a passphrase the operator has changed", () => {
@@ -328,6 +715,30 @@ describe("the daemon serves what M3a assembles", () => {
       // Nothing has probed anything, so nothing is stood down and the answer
       // is the safe one. See ReachMonitor.carrying.
       expect(state.carrying).toBe(true);
+    } finally {
+      await server.close();
+    }
+  });
+
+  it("shares identical pending CLI observations within one reach-state read, then reads fresh", async () => {
+    const config = structuredClone(DEFAULT_CONFIG);
+    config.network.modem.enabled = true;
+    config.network.modem.mode = "auto";
+    saveConfig(configPath, config);
+    const seen: string[][] = [];
+    const server = await serve(seen);
+    try {
+      // Start-up rendering uses the direct clients. Count only route observations.
+      seen.length = 0;
+      expect((await call(socketPath, "GET", "/reach/state")).status).toBe(200);
+      const count = (word: string) => seen.filter((argv) => argv.join(" ") === word).length;
+      const devices = "nmcli -t -f DEVICE,TYPE,STATE,CONNECTION device status";
+      const modems = "mmcli -L --output-keyvalue";
+      const modem = "mmcli -m /org/freedesktop/ModemManager1/Modem/0 --output-keyvalue";
+      expect([count(devices), count(modems), count(modem)]).toEqual([1, 1, 1]);
+
+      expect((await call(socketPath, "GET", "/reach/state")).status).toBe(200);
+      expect([count(devices), count(modems), count(modem)]).toEqual([2, 2, 2]);
     } finally {
       await server.close();
     }
@@ -530,7 +941,7 @@ describe("the daemon serves what M3a assembles", () => {
       await call(socketPath, "GET", "/modem/state");
       await call(socketPath, "GET", "/reach/state");
       expect(seen.some((a) => a[0] === "mmcli")).toBe(true);
-      expect(seen.every((a) => ["mmcli", "nmcli", "rfkill", "hostnamectl", "curl"].includes(a[0] ?? ""))).toBe(true);
+      expect(seen.every((a) => ["mmcli", "nmcli", "rfkill", "hostnamectl", "curl", "ip"].includes(a[0] ?? ""))).toBe(true);
     } finally {
       await server.close();
     }
@@ -611,6 +1022,7 @@ describe("the daemon drives the reach watch", () => {
     const names = new Set<string>();
     return async (argv): Promise<CommandResult> => {
       seen.push(argv);
+      if (argv[0] === "ip") return { code: 0, stdout: JSON.stringify([{dst:"default",dev:"wwan0",metric:700}]), stderr: "" };
       if (argv[0] === "curl") return { code: reaches() ? 0 : 7, stdout: "", stderr: "" };
       if (argv[0] === "nmcli" && argv.includes("NAME,UUID,TYPE,DEVICE")) {
         return {
@@ -803,6 +1215,7 @@ describe("the daemon drives the reach watch", () => {
     const names = new Set<string>([ETHERNET_CONNECTION, MODEM_CONNECTION]);
     return async (argv): Promise<CommandResult> => {
       seen.push(argv);
+      if (argv[0] === "ip") return { code: 0, stdout: JSON.stringify([{dst:"default",dev:"eth0",metric:100},{dst:"default",dev:"wwan0",metric:700}]), stderr: "" };
       // Ethernet works and the modem does not — the board in §2, one layer
       // up. Ethernet reaching something is what keeps the alternatives loop
       // out of this: any `curl` on wwan0 below is there because of a re-dial
@@ -936,5 +1349,1017 @@ describe("the daemon drives the reach watch", () => {
     } finally {
       await server.close();
     }
+  });
+});
+
+/**
+ * **The stream address, at the socket, on the board this join was wrong on**
+ * (R-UI-24, R-VID-15).
+ *
+ * `answerableAddresses()` decides which path each address is on and
+ * `dial-in.test.ts` holds it to that over readings *it* supplies;
+ * `renderReceive()` chooses from the path the verdict rests on and
+ * `receive.test.ts` holds it to that over a set *it* supplies. Neither is
+ * worth anything if the one production assembly hands them the wrong
+ * readings — and it did: it compared each address's interface against the
+ * modem's *net* port, `wwan0`, while NetworkManager binds the address to the
+ * *control* port, `cdc-wdm0`, so the comparison was trivially true and the
+ * CGNAT address came back dialable on every board in auto mode.
+ *
+ * `server.ts` is the only caller. Turning the exclusion off entirely left the
+ * whole suite green, because nothing tested `addresses` at the assembly. This
+ * is that test: a real daemon, a real router, and the same fixtures the mmcli
+ * client's own tests read.
+ */
+describe("the stream address is built from an address a peer can dial", () => {
+  let socketPath: string, configPath: string, journalPath: string, secretsPath: string;
+  const noop: Renderer = { name: "noop", async render() {} };
+
+  /** What `nmcli -t -f GENERAL.DEVICE,IP4.ADDRESS device show` reports here. */
+  const DEVICE_SHOW = [
+    // Real captures lead with loopback — `fixtures/device-show-ip4.txt` does.
+    "GENERAL.DEVICE:lo",
+    "IP4.ADDRESS[1]:127.0.0.1/8",
+    "",
+    // The modem, under the name NetworkManager binds it to. First of the real
+    // addresses, which is what makes this the one a flat list would print.
+    "GENERAL.DEVICE:cdc-wdm0",
+    "IP4.ADDRESS[1]:10.31.95.33/30",
+    "",
+    "GENERAL.DEVICE:eth0",
+    "IP4.ADDRESS[1]:192.168.1.8/24",
+    "",
+    // The radio, serving the access point, holding its address for ever.
+    "GENERAL.DEVICE:wlan0",
+    "IP4.ADDRESS[1]:192.168.77.1/24",
+    "",
+  ].join("\n");
+
+  beforeEach(() => {
+    socketPath = join(dir, "core.sock");
+    configPath = join(dir, "config.yaml");
+    journalPath = join(dir, "apply.json");
+    secretsPath = join(dir, "secrets.yaml");
+    const config = structuredClone(DEFAULT_CONFIG);
+    // Auto mode: the operator has not named an adapter, so the two names have
+    // to be reconciled. Appliance mode is the case that never needed it.
+    config.network.modem.enabled = true;
+    config.network.modem.apn = "ereseller";
+    config.cameras = [{
+      id: "cam0",
+      name: "Nose",
+      source: "usb",
+      device: "platform-fd500000.pcie-pci-0000:01:00.0-usb-0:1.3:1.0-video-index0",
+      outputs: [
+        { kind: "rtp", host: "192.168.1.50", port: 5600 },
+        { kind: "rtsp", password: { secret: "rtsp_password" } },
+      ],
+    }] as unknown as typeof config.cameras;
+    saveConfig(configPath, config);
+    new SecretStore(secretsPath).ensureValue(ADMIN_PASSWORD_SECRET, hashPassword("an operator's password"));
+  });
+
+  async function serve(): Promise<{ close(): Promise<void> }> {
+    const seen: string[][] = [];
+    const board = boardRunner(seen);
+    const runner: CommandRunner = async (argv) => {
+      if (argv[0] === "nmcli" && argv.includes("device") && argv.includes("show")) {
+        return { code: 0, stdout: DEVICE_SHOW, stderr: "" };
+      }
+      return board(argv);
+    };
+    return startServer({
+      socketPath, configPath, journalPath, renderers: [noop], secretsPath,
+      runner, counters: noCounters,
+      cameraLayer: {
+        cameras: {
+          detect: async () => ({ found: [], rejected: [] }),
+          probe: async (node: string, card: string) => ({ device: node, card, reason: "not in this fixture" }),
+        },
+        encoder: async () => ({
+          element: "v4l2h264enc", h265: null, decoder: null, device: "/dev/video11", hardware: true,
+          detail: "hardware H.264",
+        }),
+        rtspPassword: () => "FIXTURE-NOT-A-REAL-PASSWORD",
+      },
+    });
+  }
+
+  async function url(): Promise<{ body: string; usable: boolean; note: string }> {
+    const res = await call(socketPath, "GET", "/cameras/cam0/stream-address");
+    expect(res.status).toBe(200);
+    const found = (res.body as { renderings: { kind: string; body: string; usable: boolean; note: string }[] })
+      .renderings.find((r) => r.kind === "url");
+    if (found === undefined) throw new Error("no RTSP rendering");
+    return found;
+  }
+
+  it("never builds it from the modem's address, whichever of its two names holds it", async () => {
+    const server = await serve();
+    try {
+      // The ethernet path is probed on demand, so the verdict has something
+      // to rest on rather than the daemon's untested start-up state.
+      expect((await call(socketPath, "POST", "/reach/test", { path: "ethernet" })).body)
+        .toEqual({ path: "ethernet", reached: true });
+      const line = await url();
+      expect(line.usable, "ethernet is reaching, so a peer on it can dial the listener").toBe(true);
+      expect(line.body).toContain("@192.168.1.8:8554/cam0");
+      // The two that must never be chosen: the modem's, which nothing dials,
+      // and the access point's, which no LAN or mesh peer is on.
+      expect(line.body, "the CGNAT address is not one a peer can dial").not.toContain("10.31.95.33");
+      expect(line.body, "the access point is not a LAN").not.toContain("192.168.77.1");
+    } finally {
+      await server.close();
+    }
+  });
+
+  /**
+   * With no path up the line is unusable either way — but it still prints an
+   * address, and *which* one is where the two modem names become load-bearing
+   * again: a modem address recognised as the modem's is skipped, and one this
+   * assembly failed to recognise is printed. Dropping `alsoKnownAs` here
+   * leaves the daemon serving `10.31.95.33`, which is the finding.
+   */
+  it("prints the least-wrong address when no path is up, and never the modem's", async () => {
+    const server = await serve();
+    try {
+      const line = await url();
+      expect(line.usable).toBe(false);
+      expect(line.note).toMatch(/^unusable — /);
+      // The console arrived on the modem's address and it is first in the
+      // list; the ethernet address is what a person could conceivably use.
+      expect(line.body).toContain("@192.168.1.8:8554/cam0");
+      expect(line.body, "the modem's address is known never to be dialable")
+        .not.toContain("10.31.95.33");
+      // A real `device show` leads with loopback, and it used to be
+      // `addresses[0]` — the address this device claimed to answer on.
+      expect(line.body).not.toContain("127.0.0.1");
+    } finally {
+      await server.close();
+    }
+  });
+});
+
+/**
+ * The video layer's runtime half, assembled in `startServer` and nowhere
+ * else (R-VID-07, R-VID-11; spec §8.1, §8.2).
+ *
+ * **This is the join that was missing, asserted where it can actually be
+ * broken.** `video/rate.ts` was built, proved on a board and left with no
+ * production caller at all: nothing constructed a controller, nothing gave it
+ * a link measurement, nothing ticked it. Every layer beneath kept passing —
+ * which is the whole point of a test at this level, and the reason the rest
+ * of this file exists.
+ *
+ * So the journey here starts where a browser's own statistic starts, at this
+ * daemon's socket, and ends inside the `extra-controls` property of a
+ * `v4l2h264enc` that is already playing.
+ */
+describe("the daemon runs the rate controller", () => {
+  let socketPath: string, configPath: string, journalPath: string, secretsPath: string;
+  const noop: Renderer = { name: "noop", async render() {} };
+
+  const ADAPTIVE = {
+    id: "cam0", name: "Nose", source: "usb",
+    device: "platform-fd500000.pcie-pci-0000:01:00.0-usb-0:1.3:1.0-video-index0",
+    enabled: true, autostart: false,
+    width: 1280, height: 720, framerate: 30, codec: "h264", bitrate_kbps: 2000,
+    preview: {
+      mode: "adaptive", size: "auto", ladder_top: "1280x720", ladder_bottom: "640x360",
+      floor_kbps: 300, ceiling_kbps: 2000, bitrate_kbps: 400, framerate: 15,
+    },
+    controls: { brightness: null, contrast: null, rotation: 0 },
+    outputs: [],
+    stream: { mode: "adaptive", floor_kbps: 500, ceiling_kbps: 4000 },
+  } as unknown as Camera;
+
+  interface Sent {
+    id: number;
+    op: string;
+    sets: { element: string; property: string; value: string }[];
+  }
+
+  /** Timers this daemon armed, fired only when the test says so: nothing here
+   *  waits on a wall clock, and no assertion below depends on one. */
+  let now: number;
+  let timers: { at: number; fn: () => void }[];
+  let sent: Sent[];
+  let spawns: string[][];
+  let pids: number[];
+
+  const clock: Clock = {
+    now: () => now,
+    setTimer: (ms, fn) => { const t = { at: now + ms, fn }; timers.push(t); return t; },
+    clearTimer: (h) => { const i = timers.indexOf(h as never); if (i >= 0) timers.splice(i, 1); },
+  };
+  function advance(ms: number): void {
+    now += ms;
+    for (const t of [...timers]) if (t.at <= now) { timers.splice(timers.indexOf(t), 1); t.fn(); }
+  }
+
+  beforeEach(() => {
+    socketPath = join(dir, "core.sock");
+    configPath = join(dir, "config.yaml");
+    journalPath = join(dir, "apply.json");
+    secretsPath = join(dir, "secrets.yaml");
+    now = 1_000_000;
+    timers = [];
+    sent = [];
+    spawns = [];
+    pids = [];
+    saveConfig(configPath, { ...DEFAULT_CONFIG, cameras: [ADAPTIVE] } as never);
+    new SecretStore(secretsPath).ensureValue(ADMIN_PASSWORD_SECRET, hashPassword("an operator's password"));
+  });
+
+  /** A pipeline that answers, the way `installer/payload/yonder-pipeline`
+   *  does: it takes a property write while playing, echoes the rate it ended
+   *  up at, and keeps the same process id — which is what makes "the picture
+   *  did not restart" a fact rather than an assumption. */
+  const spawner: ProcessSpawner = (argv) => {
+    spawns.push([...argv]);
+    const mine = 5000 + spawns.length;
+    pids.push(mine);
+    const inbox: ((line: string) => void)[] = [];
+    return {
+      kill: () => {}, on: () => {},
+      onMessage: (fn: (line: string) => void) => { inbox.push(fn); },
+      send: (line: string) => {
+        const command = JSON.parse(line) as Sent;
+        sent.push(command);
+        const kbps = Number(/video_bitrate=(\d+)/.exec(command.sets[0]?.value ?? "")?.[1] ?? 0) / 1000;
+        for (const fn of inbox) {
+          fn(JSON.stringify({ id: command.id, pid: mine, continuous: true, observed: kbps }));
+        }
+      },
+    } as never;
+  };
+
+  async function serve(rtspObservation: Parameters<typeof startServer>[0]['rtspObservation'] = {
+    sessions: async () => ({ items: [] }), tcp: async () => '', localAddresses: () => [],
+  }): Promise<{ close(): Promise<void> }> {
+    return startServer({
+      socketPath, configPath, journalPath, renderers: [noop], secretsPath,
+      rtspObservation,
+      runner: async () => ({ code: 0, stdout: "", stderr: "" }),
+      counters: noCounters,
+      clock,
+      spawner,
+      cameraLayer: {
+        cameras: {
+          detect: async () => ({
+            found: [{
+              device: "/dev/video0",
+              card: "Global Shutter Camera: Global S",
+              byPath: ADAPTIVE.device,
+              byPathStable: true,
+              capabilities: {
+                ...noCapabilities(),
+                formats: present([{ fourcc: "MJPG", width: 1280, height: 720, rates: [30, 24, 15] }]),
+              },
+            }],
+            rejected: [],
+          }),
+          probe: async (node: string, card: string) => ({ device: node, card, reason: "not re-probed here" }),
+        },
+        encoder: async () => ({
+          element: "v4l2h264enc", h265: null, decoder: null, device: "/dev/video11", hardware: true,
+          detail: "hardware H.264 on /dev/video11",
+        }),
+        rtspPassword: () => null,
+      },
+    });
+  }
+
+  const retunes = (): Sent[] =>
+    sent.filter((s) => s.op === "retune" && s.sets[0]?.element === "enc-preview");
+
+  it("moves a running encoder from a statistic that arrived on this socket", async () => {
+    const server = await serve();
+    try {
+      // The camera on the air, exactly the way the console starts one.
+      expect((await call(socketPath, "POST", "/cameras/cam0/run", { action: "start" })).status).toBe(200);
+      expect(spawns).toHaveLength(1);
+      expect(spawns[0].join(" ")).toContain("bitrate=2000");
+      expect(retunes()).toEqual([]);
+
+      // A browser opens the picture and posts what its own WebRTC statistics
+      // say the path is carrying — the shape `console/middleware.ts`'s viewer
+      // id addresses, and the only measurement of that path anything has.
+      const answer = await call(socketPath, "POST", "/cameras/cam0/viewers/1f2e3d4c5b6a7089", {
+        want: "video",
+        stats: { rtt: 38, loss: 0, egress: 900, capacity: 40_000, frameAge: 90 },
+      });
+      expect(answer.status).toBe(200);
+      expect(answer.body).toMatchObject({
+        camera: "cam0", viewer: "1f2e3d4c5b6a7089",
+        mine: { delivery: "video", source: "cam0-preview" },
+      });
+
+      // Fresh delivery over the probe dwell, on the real socket path.
+      for (let i=0;i<=6;i++) {
+        await call(socketPath,'POST','/cameras/cam0/viewers/1f2e3d4c5b6a7089',{want:'video',stats:{rtt:38,loss:0,egress:900,capacity:40000}});
+        advance(1000);await Promise.resolve();
+      }
+
+      const moved = retunes();
+      expect(moved).toHaveLength(1);
+      // Its own applied ceiling, not the link's 40 Mb/s.
+      expect(moved[0].sets[0].value).toContain("video_bitrate=450000");
+      // And the picture never restarted: one process, one launch line, one pid.
+      expect(spawns).toHaveLength(1);
+      expect(new Set(pids).size).toBe(1);
+      expect((await call(socketPath, "GET", "/cameras/cam0")).body)
+        .toMatchObject({ run: { restarts: 0 } });
+    } finally {
+      await server.close();
+    }
+  });
+
+  it("does nothing at all until a browser has measured something", async () => {
+    const server = await serve();
+    try {
+      await call(socketPath, "POST", "/cameras/cam0/run", { action: "start" });
+      for (let i = 0; i < 10; i += 1) advance(1_000);
+      expect(retunes()).toEqual([]);
+    } finally {
+      await server.close();
+    }
+  });
+
+  it('adapts the main stream from external RTSP delivery without any browser report', async () => {
+    saveConfig(configPath, { ...DEFAULT_CONFIG, cameras: [{ ...ADAPTIVE,
+      outputs: [{ kind: 'rtsp', enabled: true, password: { secret: 'rtsp_password' } }],
+    }] } as never);
+    const reads = vi.fn(async () => ({ items: [{
+      id: '11111111-1111-1111-1111-111111111111', state: 'read', path: 'cam0',
+      remoteAddr: '10.20.0.2:45000', transport: 'TCP',
+      outboundBytes: now * 100, outboundRTPPackets: now,
+      outboundRTPPacketsReportedLost: 0, outboundRTPPacketsDiscarded: 0, inboundRTCPPackets: 0,
+    }] }));
+    const server = await serve({ sessions: reads, localAddresses: () => [],
+      tcp: async () => 'ESTAB 0 200000 10.20.0.1:8554 10.20.0.2:45000\n cubic rtt:40/2 bytes_acked:'
+        + now * 62.5 + ' notsent:190000\n' });
+    try {
+      await call(socketPath, 'POST', '/cameras/cam0/run', { action: 'start' });
+      for (let i = 0; i < 9; i++) {
+        advance(1000);
+        await call(socketPath, 'GET', '/cameras/cam0');
+      }
+      const main = sent.filter(s => s.op === 'retune' && s.sets[0]?.element === 'enc-stream');
+      expect(main.length).toBeGreaterThan(0);
+      expect(main.at(-1)?.sets[0].value).toContain('video_bitrate=500000');
+      expect(spawns).toHaveLength(1);
+      expect((await call(socketPath, 'GET', '/cameras/cam0')).body).toMatchObject({
+        deck: { runtime: { rtspFeedback: { readers: 1, status: 'active' }, streamKbps: 500 } },
+      });
+    } finally { await server.close(); }
+    const stoppedAt = reads.mock.calls.length;
+    advance(2000); await Promise.resolve();
+    expect(reads).toHaveBeenCalledTimes(stoppedAt);
+  });
+
+  it("stops deciding when the daemon closes", async () => {
+    const server = await serve();
+    await call(socketPath, "POST", "/cameras/cam0/run", { action: "start" });
+    await call(socketPath, "POST", "/cameras/cam0/viewers/1f2e3d4c5b6a7089", {
+      want: "video",
+      stats: { rtt: 38, loss: 0, egress: 900, capacity: 40_000 },
+    });
+    for (let i=0;i<=6;i++) {
+      await call(socketPath,'POST','/cameras/cam0/viewers/1f2e3d4c5b6a7089',{want:'video',stats:{rtt:38,loss:0,egress:900,capacity:40000}});
+      advance(1000);await Promise.resolve();
+    }
+    const moved = retunes().length;
+    expect(moved).toBe(1);
+
+    await server.close();
+    // A rate controller outliving its daemon would go on writing bitrates
+    // into a running pipeline on behalf of a process that has let go of its
+    // socket — and, unlike every other timer here, it would be commanding
+    // hardware while it did it.
+    for (let i = 0; i < 10; i += 1) advance(1_000);
+    expect(retunes()).toHaveLength(moved);
+  });
+
+  it("refuses a viewer report about a camera this device does not have", async () => {
+    const server = await serve();
+    try {
+      const answer = await call(socketPath, "POST", "/cameras/nope/viewers/1f2e3d4c5b6a7089", {
+        want: "video",
+      });
+      expect(answer.status).toBe(404);
+    } finally {
+      await server.close();
+    }
+  });
+});
+
+
+/*
+ * The telemetry branch's own tests for this file, appended whole on merge
+ * rather than interleaved: both branches grew this file by adding to it,
+ * and a line-level merge cuts through test bodies. Each block below is
+ * that branch's, unedited, with the describe-level setup it was written
+ * against.
+ */
+describe("buildRenderers", () => {
+
+
+
+
+
+
+
+
+
+  /**
+   * In front of the network, and for the mirror image of the reason the
+   * console is behind it. K-19: a failing renderer stops the ones behind it.
+   * HostnameRenderer cannot fail, so nothing is put at risk by going first —
+   * and a board whose NetworkManager is wedged still gets the name its
+   * configuration gives it, which is the board most likely to be searched for
+   * by name.
+   */
+  /**
+   * Last, and behind the console: telemetry rides on a network that has
+   * already settled, and this is the renderer that can spend longest — a full
+   * sweep is four speeds on each of two devices.
+   */
+  it("puts the telemetry renderer last, when it is given a way to open a serial port", () => {
+    const run: CommandRunner = async () => ({ code: 0, stdout: "", stderr: "" });
+    const built = buildRenderers({
+      secretsPath: join(dir, "secrets.yaml"),
+      runner: run,
+      remoteStatePath: join(dir, "remote.json"),
+      console: { settings: join(dir, "console", "settings.js") },
+      mavlink: {
+        open: async () => { throw new Error("no test opens a serial port"); },
+        confPath: join(dir, "mavlink", "main.conf"),
+        hintPath: join(dir, "mavlink-link.json"),
+      },
+    });
+    // `video` joins the list on merge: the camera pipelines are pushed last
+    // and unconditionally, behind telemetry, because a pipeline is composed
+    // from what the renderers above it have already settled.
+    expect(built.renderers.map((r) => r.name))
+      .toEqual(["hostname", "network", "remote", "console", "mavlink", "video", "camera-autostart"]);
+    expect(built.mavlinkRenderer).toBeDefined();
+  });
+
+  /**
+   * And when it is not, the operator has to be told. `detect()` needs an
+   * `OpenPort`; `mav/serial.ts` implements one against real hardware and
+   * `main()` passes it, so anything reaching this branch is a caller that
+   * supplied none — a test, or a new construction site that forgot.
+   * Configuring no telemetry silently means an apply that sets three ground
+   * stations succeeds, writes no main.conf, starts no router, and says
+   * nothing anywhere about why the Telemetry page is empty.
+   */
+  it("says so when it has no way to configure telemetry at all", () => {
+    const run: CommandRunner = async () => ({ code: 0, stdout: "", stderr: "" });
+    const said: string[] = [];
+    const built = buildRenderers({
+      secretsPath: join(dir, "secrets.yaml"),
+      runner: run,
+      remoteStatePath: join(dir, "remote.json"),
+      log: (line) => { said.push(line); },
+    });
+    expect(built.mavlinkRenderer).toBeUndefined();
+    expect(said.join("\n")).toMatch(/telemetry is not configured on this device/);
+    expect(said.join("\n")).toMatch(/serial port/);
+  });
+
+  it("says nothing of the sort when telemetry is configured", () => {
+    const run: CommandRunner = async () => ({ code: 0, stdout: "", stderr: "" });
+    const said: string[] = [];
+    buildRenderers({
+      secretsPath: join(dir, "secrets.yaml"),
+      runner: run,
+      remoteStatePath: join(dir, "remote.json"),
+      log: (line) => { said.push(line); },
+      mavlink: {
+        open: async () => { throw new Error("no test opens a serial port"); },
+        confPath: join(dir, "mavlink", "main.conf"),
+        hintPath: join(dir, "mavlink-link.json"),
+      },
+    });
+    expect(said.join("\n")).not.toMatch(/telemetry is not configured/);
+  });
+
+  /**
+   * R-MAV-05's other end. The generated router configuration always emits
+   * `[UdpEndpoint yonder]` at `LOOPBACK_PORT`; this is the socket that reads
+   * it. Assembled only alongside the renderer, because without one no
+   * main.conf is written and no router is started, so nothing anywhere sends
+   * to that port — a socket held for a feed that cannot exist.
+   */
+  it("produces a loopback listener exactly when it produces a telemetry renderer", () => {
+    const run: CommandRunner = async () => ({ code: 0, stdout: "", stderr: "" });
+    const without = buildRenderers({
+      secretsPath: join(dir, "secrets.yaml"),
+      runner: run,
+      remoteStatePath: join(dir, "remote.json"),
+    });
+    expect(without.mavlinkListener).toBeUndefined();
+
+    const withOne = buildRenderers({
+      secretsPath: join(dir, "secrets.yaml"),
+      runner: run,
+      remoteStatePath: join(dir, "remote.json"),
+      mavlink: {
+        open: neverOpens,
+        confPath: join(dir, "mavlink", "main.conf"),
+        hintPath: join(dir, "mavlink-link.json"),
+        loopbackPort: 0,
+      },
+    });
+    expect(withOne.mavlinkListener).toBeDefined();
+  });
+
+  /**
+   * **One tracker, two writers**, asserted by making one of them write.
+   *
+   * The renderer supplies the sweep's outcome and the router's counters; the
+   * listener supplies heartbeats off the loopback copy. If they held trackers
+   * of their own, `GET /mav/state` would have to stitch two halves together —
+   * and a heartbeat sent here would reach a state object nothing serves.
+   * Rather than compare object identity, this sends a real datagram and reads
+   * the answer out of the *renderer*.
+   */
+  it("gives the listener and the telemetry renderer the same link tracker", async () => {
+    const run: CommandRunner = async () => ({ code: 0, stdout: "", stderr: "" });
+    const built = buildRenderers({
+      secretsPath: join(dir, "secrets.yaml"),
+      runner: run,
+      remoteStatePath: join(dir, "remote.json"),
+      mavlink: {
+        open: neverOpens,
+        confPath: join(dir, "mavlink", "main.conf"),
+        hintPath: join(dir, "mavlink-link.json"),
+        loopbackPort: 0,
+      },
+    });
+    const listener = built.mavlinkListener;
+    const renderer = built.mavlinkRenderer;
+    expect(listener).toBeDefined();
+    expect(renderer).toBeDefined();
+    if (listener === undefined || renderer === undefined) return;
+
+    await listener.start();
+    try {
+      // R-MAV-07, at the one place production actually binds it.
+      expect(listener.bound?.address).toBe("127.0.0.1");
+      await sendTo(listener.bound?.port ?? 0, HEARTBEAT);
+      const state = await eventually(
+        async () => Promise.resolve(renderer.state()),
+        (s) => s.lastHeardMs !== null,
+      );
+      expect(state.lastHeardMs).not.toBeNull();
+    } finally {
+      listener.close();
+      renderer.close();
+    }
+  });
+
+});
+
+describe("mavlinkFromEnv", () => {
+
+
+
+  /**
+   * **This block is what makes telemetry happen at all.** Before it, every
+   * caller of `buildRenderers` passed no `mavlink`, so a real board assembled
+   * no `MavlinkRenderer`, answered 503 on every `/mav/*` route and started no
+   * router. `main()` cannot be called from a test, so the values it decides
+   * are asserted here instead — the same reason `consolePathsFromEnv` exists.
+   */
+  it("names the installed router configuration and puts the hint beside the journal", () => {
+    const { confPath, hintPath } = mavlinkFromEnv(async () => ({ code: 0, stdout: "", stderr: "" }), {});
+    expect(confPath).toBe("/etc/mavlink-router/main.conf");
+    expect(hintPath).toBe("/var/lib/yonder/mavlink-link.json");
+  });
+
+  it("keeps the hint with the journal when the state directory is moved", () => {
+    // One variable for the daemon's state, so a board running out of an
+    // alternate directory does not leave the hint behind in /var/lib/yonder,
+    // where nothing would ever read it and every boot would sweep afresh.
+    const { hintPath } = mavlinkFromEnv(
+      async () => ({ code: 0, stdout: "", stderr: "" }),
+      { YONDER_JOURNAL: "/srv/yonder/apply.json" },
+    );
+    expect(hintPath).toBe("/srv/yonder/mavlink-link.json");
+  });
+
+  it("hands back an opener that runs stty through the runner it was given", async () => {
+    // The ADR-0006 seam, asserted where it is actually established: the
+    // opener `main()` builds shells out only through the injected runner, so
+    // a test that hands it a fake reaches no real `stty` and no real /dev.
+    const calls: string[][] = [];
+    const { open } = mavlinkFromEnv(async (argv) => { calls.push(argv); return { code: 0, stdout: "", stderr: "" }; }, {});
+    // A path that is not there: the opener fails before it ever runs the
+    // command, which is itself the assertion that nothing here touches /dev.
+    await expect(open(join(dir, "ttyNOPE"), 115200)).rejects.toThrow(/ENOENT/);
+    expect(calls).toEqual([]);
+  });
+
+  /**
+   * **The clock and the journal reach the opener too, or nothing can test it.**
+   *
+   * `openPortWith` settles for 50 ms and polls every 10 ms *on an injected
+   * clock*, and it has one thing to say — a flush that hit its bound, which
+   * means bytes from the previous speed surviving into this speed's window.
+   * With no way through this function, the first test that wires the
+   * production opener up sleeps on real time and hears none of that. `main()`
+   * passes the daemon's own.
+   */
+  it("passes the clock and the journal down to the opener it builds", async () => {
+    const waits: number[] = [];
+    const said: string[] = [];
+    const clock: Clock = {
+      now: () => 0,
+      setTimer: (ms, fn) => { waits.push(ms); queueMicrotask(fn); return waits.length; },
+      clearTimer: () => {},
+    };
+    const path = join(dir, "ttyFAKE0");
+    // More than the flush's 64 x 8 KiB bound, so the one line the opener has
+    // to say is actually said and the journal seam is proven, not assumed.
+    writeFileSync(path, "x".repeat(600 * 1024));
+
+    const { open } = mavlinkFromEnv(
+      async () => ({ code: 0, stdout: "", stderr: "" }),
+      {},
+      { clock, log: (line) => { said.push(line); } },
+    );
+    const port = await open(path, 115200);
+    await port.settleAndFlush();
+    await port.close();
+
+    // The settle came off this clock and not the wall clock.
+    expect(waits[0]).toBe(SETTLE_MS);
+    expect(said.join("\n")).toMatch(/would not go quiet/);
+  });
+
+});
+
+/**
+ * The whole telemetry path, at the socket: a datagram on the loopback feed,
+ * through the listener, into the one `LinkTracker`, out of the renderer and
+ * onto `GET /mav/state` over the Unix socket the console talks to.
+ *
+ * Task 10 left this untestable — `buildRenderers` needed an `OpenPort` and no
+ * test could hand it one usefully — and it is the assertion that says the
+ * pieces are joined rather than merely present.
+ */
+describe("the daemon serves the telemetry it measures", () => {
+  let socketPath: string, configPath: string, journalPath: string, secretsPath: string;
+  const noop: Renderer = { name: "noop", async render() {} };
+
+  beforeEach(() => {
+    socketPath = join(dir, "core.sock");
+    configPath = join(dir, "config.yaml");
+    journalPath = join(dir, "apply.json");
+    secretsPath = join(dir, "secrets.yaml");
+    saveConfig(configPath, DEFAULT_CONFIG);
+    new SecretStore(secretsPath).ensureValue(ADMIN_PASSWORD_SECRET, hashPassword("an operator's password"));
+  });
+
+  /** Every command answers, and none of them is real. */
+  const quiet: CommandRunner = async () => ({ code: 0, stdout: "", stderr: "" });
+
+  async function serveTelemetry(loopbackPort: number): Promise<{ close(): Promise<void> }> {
+    return startServer({
+      socketPath, configPath, journalPath, secretsPath,
+      renderers: [noop], runner: quiet, counters: noCounters,
+      mavlink: {
+        open: neverOpens,
+        confPath: join(dir, "mavlink", "main.conf"),
+        hintPath: join(dir, "mavlink-link.json"),
+        loopbackPort,
+      },
+    });
+  }
+
+
+
+
+  it("carries a heartbeat off the loopback feed all the way to GET /mav/state", async () => {
+    const port = await freePort();
+    const server = await serveTelemetry(port);
+    try {
+      await sendTo(port, HEARTBEAT);
+      const res = await eventually(
+        async () => call(socketPath, "GET", "/mav/state"),
+        (r) => (r.body as MavlinkStateBody | undefined)?.link.lastHeardMs != null,
+      );
+      expect(res.status).toBe(200);
+      const body = res.body as MavlinkStateBody;
+      expect(body.link.lastHeardMs).not.toBeNull();
+      // R-MAV-10's other half, and the field a flat body would have dropped.
+      expect(typeof body.telemetryRunning).toBe("boolean");
+    } finally {
+      await server.close();
+    }
+  });
+
+  it("serves the path check beside it (R-DIA-04)", async () => {
+    const port = await freePort();
+    const server = await serveTelemetry(port);
+    try {
+      const res = await call(socketPath, "GET", "/mav/check");
+      expect(res.status).toBe(200);
+      expect(Object.keys(res.body as object).sort()).toEqual(["autopilot", "inbound", "outbound"]);
+    } finally {
+      await server.close();
+    }
+  });
+
+  /**
+   * Rule 6, and the one thing this route must never do: a daemon that cannot
+   * do telemetry at all — every device built to date — still serves, still
+   * has a console, and says plainly why the Telemetry page is empty.
+   */
+  it("says so, and serves anyway, on a device with no way to do telemetry", async () => {
+    const server = await startServer({
+      socketPath, configPath, journalPath, secretsPath,
+      renderers: [noop], runner: quiet, counters: noCounters,
+    });
+    try {
+      const res = await call(socketPath, "GET", "/mav/state");
+      expect(res.status).toBe(503);
+      expect((await call(socketPath, "GET", "/config")).status).toBe(200);
+    } finally {
+      await server.close();
+    }
+  });
+
+  /**
+   * A listener outliving its daemon would hold `:14559` against the next one
+   * to start — which, under `Restart=always`, is a restart loop with a
+   * Telemetry page that never fills in again.
+   */
+  it("lets go of the loopback socket when the daemon closes", async () => {
+    const port = await freePort();
+    const server = await serveTelemetry(port);
+    await server.close();
+
+    const after = createSocket({ type: "udp4" });
+    const bound = await new Promise<boolean>((resolve) => {
+      after.once("error", () => { resolve(false); });
+      after.bind({ address: "127.0.0.1", port }, () => { resolve(true); });
+    });
+    if (bound) after.close();
+    expect(bound).toBe(true);
+  });
+
+});
+
+/**
+ * The daemon takes stills for whoever is on them (R-VID-14, R-VID-11,
+ * R-STO-01; spec §8.6).
+ *
+ * The chain, end to end and on this socket: a browser says it wants stills,
+ * the daemon's own clock ticks, one `still` reaches one pipeline for that
+ * camera however many browsers asked, and the frame comes back out of
+ * `GET /cameras/:id/still` with its age — each answer counted as a copy.
+ */
+describe("the daemon takes stills for whoever is on them", () => {
+  let socketPath: string, configPath: string, journalPath: string, secretsPath: string, stillsRoot: string;
+  const noop: Renderer = { name: "noop", async render() {} };
+  // A JPEG's magic number and enough behind it to cost something at the
+  // interval — ten bytes every five seconds rounds to 0 kb/s.
+  const JPEG = Buffer.concat([
+    Buffer.from([0xff, 0xd8, 0xff, 0xe0, 0x00, 0x10, 0x4a, 0x46, 0x49, 0x46]),
+    Buffer.alloc(20_000, 0x2e),
+  ]);
+
+  const NOSE = {
+    id: "cam0", name: "Nose", source: "usb",
+    device: "platform-fd500000.pcie-pci-0000:01:00.0-usb-0:1.3:1.0-video-index0",
+    enabled: true, autostart: false,
+    width: 1280, height: 720, framerate: 30, codec: "h264", bitrate_kbps: 2000,
+    preview: {
+      mode: "adaptive", size: "auto", ladder_top: "1280x720", ladder_bottom: "640x360",
+      floor_kbps: 300, ceiling_kbps: 2000, bitrate_kbps: 400, framerate: 15,
+    },
+    controls: { brightness: null, contrast: null, rotation: 0 },
+    outputs: [],
+    stream: { mode: "adaptive", floor_kbps: 500, ceiling_kbps: 4000 },
+  } as unknown as Camera;
+  const TAIL = {
+    ...NOSE, id: "cam1", name: "Tail",
+    device: "platform-fd500000.pcie-pci-0000:01:00.0-usb-0:1.4:1.0-video-index0",
+  } as unknown as Camera;
+
+  interface Sent { id: string | number; op: string; camera?: string; path?: string }
+
+  let now: number;
+  let timers: { at: number; fn: () => void }[];
+  let sent: Sent[];
+  const clock: Clock = {
+    now: () => now,
+    setTimer: (ms, fn) => { const t = { at: now + ms, fn }; timers.push(t); return t; },
+    clearTimer: (h) => { const i = timers.indexOf(h as never); if (i >= 0) timers.splice(i, 1); },
+  };
+  /** Move the clock and let what it started settle over the socket. */
+  async function advance(ms: number): Promise<void> {
+    now += ms;
+    for (const t of [...timers]) if (t.at <= now) { timers.splice(timers.indexOf(t), 1); t.fn(); }
+    for (let i = 0; i < 8; i += 1) await new Promise((r) => { setImmediate(r); });
+  }
+
+  beforeEach(() => {
+    socketPath = join(dir, "core.sock");
+    configPath = join(dir, "config.yaml");
+    journalPath = join(dir, "apply.json");
+    secretsPath = join(dir, "secrets.yaml");
+    stillsRoot = join(dir, "stills");
+    now = 1_000_000;
+    timers = [];
+    sent = [];
+    saveConfig(configPath, { ...DEFAULT_CONFIG, cameras: [NOSE, TAIL] } as never);
+    new SecretStore(secretsPath).ensureValue(ADMIN_PASSWORD_SECRET, hashPassword("an operator's password"));
+  });
+
+  /** A pipeline that answers a `still` the way `yonder-pipeline` does: it
+   *  writes a JPEG where it was told to and reports the frame's shape. */
+  const spawner: ProcessSpawner = () => {
+    const inbox: ((line: string) => void)[] = [];
+    return {
+      kill: () => {}, on: () => {},
+      onMessage: (fn: (line: string) => void) => { inbox.push(fn); },
+      send: (line: string) => {
+        const command = JSON.parse(line) as Sent;
+        sent.push(command);
+        if (command.op === "still" && typeof command.path === "string") {
+          writeFileSync(command.path, JPEG);
+          const observed = { path: command.path, bytes: JPEG.length, width: 1280, height: 720 };
+          for (const fn of inbox) fn(JSON.stringify({ id: command.id, pid: 7, continuous: true, observed }));
+        }
+      },
+    } as never;
+  };
+
+  async function serve(): Promise<{ close(): Promise<void> }> {
+    return startServer({
+      socketPath, configPath, journalPath, renderers: [noop], secretsPath,
+      runner: async () => ({ code: 0, stdout: "", stderr: "" }),
+      counters: noCounters,
+      clock,
+      spawner,
+      stillsRoot,
+      cameraLayer: {
+        cameras: {
+          detect: async () => ({
+            found: [NOSE, TAIL].map((c, i) => ({
+              device: `/dev/video${String(i)}`,
+              card: c.name,
+              byPath: c.device,
+              byPathStable: true,
+              capabilities: {
+                ...noCapabilities(),
+                formats: present([{ fourcc: "MJPG", width: 1280, height: 720, rates: [30, 24, 15] }]),
+              },
+            })),
+            rejected: [],
+          }),
+          probe: async (node: string, card: string) => ({ device: node, card, reason: "not re-probed here" }),
+        },
+        encoder: async () => ({
+          element: "v4l2h264enc", device: "/dev/video11", hardware: true,
+          codec: "h264" as const, detail: "hardware H.264 on /dev/video11",
+        }),
+        rtspPassword: () => null,
+      },
+    });
+  }
+
+  const stillsFor = (camera: string): Sent[] =>
+    sent.filter((s) => s.op === "still" && s.camera === camera);
+
+  function callBytes(path: string): Promise<{ status: number; headers: Record<string, string | string[] | undefined>; body: Buffer }> {
+    return new Promise((resolve, reject) => {
+      const req = request({ socketPath, method: "GET", path }, (res) => {
+        const chunks: Buffer[] = [];
+        res.on("data", (c: Buffer) => chunks.push(c));
+        res.on("end", () => {
+          resolve({ status: res.statusCode ?? 0, headers: res.headers, body: Buffer.concat(chunks) });
+        });
+      });
+      req.on("error", reject);
+      req.end();
+    });
+  }
+
+  it("takes one frame per watched camera on its own clock, and serves it with its age", async () => {
+    const server = await serve();
+    try {
+      for (const id of ["cam0", "cam1"]) {
+        expect((await call(socketPath, "POST", `/cameras/${id}/run`, { action: "start" })).status).toBe(200);
+      }
+      // Let the supervisor's observed running state settle before the still
+      // timer is due; a starting pipeline is not yet a source of frames.
+      await advance(2_000);
+      // The selected viewer keeps live video while its active thumbnail asks
+      // for the shared still; another viewer uses stills as its delivery.
+      const active = await call(socketPath, "POST", "/cameras/cam0/viewers/1f2e3d4c5b6a7089", {
+        want: "video", stills: true,
+      });
+      expect(active.status).toBe(200);
+      expect(active.body).toMatchObject({ mine: { delivery: "video" } });
+      const liveOnly = (active.body as { cost: { mine: number } }).cost.mine;
+      const fallback = await call(socketPath, "POST", "/cameras/cam0/viewers/aaaa1111bbbb2222", {
+        want: "stills",
+      });
+      expect(fallback.status).toBe(200);
+      expect(fallback.body).toMatchObject({ mine: { delivery: "stills", interval: 5_000, frameAge: null } });
+      // Nothing before the first tick, and nothing yet to serve — said in words.
+      const early = await callBytes("/cameras/cam0/still?viewer=1f2e3d4c5b6a7089");
+      expect(early.status).toBe(404);
+      expect(early.body.toString("utf8")).toContain("no still of cam0 yet");
+
+      await advance(3_000);
+      // **One frame for cam0**, for its two viewers; none for cam1.
+      expect(stillsFor("cam0")).toHaveLength(1);
+      expect(stillsFor("cam1")).toHaveLength(0);
+      // On the tmpfs stand-in, never the card.
+      expect(readFileSync(join(stillsRoot, "cam0.jpg"))).toEqual(JPEG);
+
+      await advance(1_500);
+      const served = await callBytes("/cameras/cam0/still?viewer=1f2e3d4c5b6a7089");
+      expect(served.status).toBe(200);
+      expect(served.headers["content-type"]).toBe("image/jpeg");
+      expect(served.body).toEqual(JPEG);
+      expect(served.headers["x-yonder-still-at"]).toBe(String(now - 1_500));
+      expect(served.headers["x-yonder-still-age"]).toBe("1500");
+
+      // The copy was counted for the viewer that fetched it, and the state
+      // it is told carries the frame's age (R-VID-11, R-VID-14).
+      const state = await call(socketPath, "POST", "/cameras/cam0/viewers/1f2e3d4c5b6a7089", {});
+      expect(state.body).toMatchObject({
+        mine: { delivery: "video" },
+      });
+      expect((state.body as { cost: { mine: number } }).cost.mine).toBeGreaterThan(liveOnly);
+      // The other viewer, sent nothing yet, is charged nothing yet.
+      const other = await call(socketPath, "POST", "/cameras/cam0/viewers/aaaa1111bbbb2222", {});
+      expect((other.body as { cost: { mine: number } }).cost.mine).toBe(0);
+
+      // And the camera page carries the strip: cam1 has no still to show
+      // until somebody is on its stills; cam0 is the active one.
+      const page = (await call(socketPath, "GET", "/cameras/cam0")).body as {
+        picture: { cameras: { id: string; active: boolean; thumbSrc: string | null; stopped: boolean }[]; downlink: string };
+      };
+      expect(page.picture.cameras.map((c) => [c.id, c.active, c.thumbSrc, c.stopped])).toEqual([
+        ["cam0", true, expect.stringMatching(/^\/video\/cam0\/still\?at=\d+$/), false],
+        ["cam1", false, null, false],
+      ]);
+      expect(page.picture.downlink).toMatch(/^\d+ kb\/s of stills · counted in Path total$/);
+      expect(page.picture.downlink).not.toMatch(/^0 kb/);
+
+      // A browser adds cam1 to its strip: the next tick takes cam1's frame
+      // and the page draws it as a still with an address of its own.
+      await call(socketPath, "POST", "/cameras/cam1/viewers/1f2e3d4c5b6a7089", { want: "stills" });
+      await advance(5_000);
+      expect(stillsFor("cam1")).toHaveLength(1);
+      const later = (await call(socketPath, "GET", "/cameras/cam0")).body as {
+        picture: { cameras: { id: string; thumbSrc: string | null; ageSeconds: number | null }[] };
+      };
+      expect(later.picture.cameras[1]).toMatchObject({ id: "cam1", ageSeconds: 0 });
+      expect(later.picture.cameras[1]?.thumbSrc).toMatch(/^\/video\/cam1\/still\?at=\d+$/);
+    } finally {
+      await server.close();
+    }
+  });
+
+  it("takes no frame at all while nobody is on stills", async () => {
+    const server = await serve();
+    try {
+      await call(socketPath, "POST", "/cameras/cam0/run", { action: "start" });
+      await call(socketPath, "POST", "/cameras/cam0/viewers/1f2e3d4c5b6a7089", { want: "video" });
+      for (let i = 0; i < 4; i += 1) await advance(5_000);
+      expect(stillsFor("cam0")).toHaveLength(0);
+    } finally {
+      await server.close();
+    }
+  });
+
+  it("answers a stopped camera in words, and stops taking frames when the daemon closes", async () => {
+    const server = await serve();
+    await call(socketPath, "POST", "/cameras/cam0/viewers/1f2e3d4c5b6a7089", { want: "stills" });
+    const stopped = await callBytes("/cameras/cam0/still?viewer=1f2e3d4c5b6a7089");
+    expect(stopped.status).toBe(404);
+    expect(stopped.body.toString("utf8")).toContain("cam0 is not running");
+
+    await call(socketPath, "POST", "/cameras/cam0/run", { action: "start" });
+    await advance(2_000);
+    await advance(3_000);
+    const taken = stillsFor("cam0").length;
+    expect(taken).toBe(1);
+
+    await server.close();
+    // A generator outliving its daemon would go on hanging branches off a
+    // running pipeline's tee for a process that has let go of its socket.
+    for (let i = 0; i < 4; i += 1) await advance(5_000);
+    expect(stillsFor("cam0")).toHaveLength(taken);
   });
 });

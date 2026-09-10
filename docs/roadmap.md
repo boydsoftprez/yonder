@@ -1,5 +1,17 @@
 # Roadmap
 
+**Current integration — 2026-09-10:** the pre-alpha console includes cellular
+and ZeroTier networking, MAVLink telemetry, the Flight PFD/MFD and reviewed
+command workflows, camera/video control, diagnostics, settings and branding.
+Pi 4 and Radxa Zero 3W bench evidence is linked in [tested hardware](hardware.md).
+Tailscale and a published disk image remain future work. Implementation is not
+the same as satisfying each milestone’s hardware exit criterion; outstanding
+cold-flash, power-cycle and flight acceptance stays explicit below.
+
+For operation and installation, use [Getting started](getting-started.md),
+[the user guide](user-guide.md), and [the Flight guide](cockpit-user-guide.md).
+
+
 [`requirements.md`](requirements.md) says what Yonder must do. This says in what order.
 
 **Ordering principle: build the front door first, then add rooms behind it.**
@@ -343,13 +355,17 @@ number below came from.
 So **the Raspberry Pi encoder work moves into M4** and multi-camera stays in M6. The
 encoder is a property of the board, not of how many cameras are attached; deferring it
 means shipping a video milestone that works on one board and revisiting every pipeline site
-later. Radxa stays out — it is P2 and needs the vendor BSP kernel, which makes it image-only
-until M8.
+later. Radxa arrived after all: Armbian ships the vendor kernel and the MPP path is carried
+in the payload, so M6's Rockchip line was pulled into M4 (see the Rockchip design and its
+2026-09-07 revision).
 
 - USB UVC capture, including cameras that emit compressed video — R-CAM-02
 - **Detect cameras on demand, and say what was rejected and why** — R-CAM-12
 - **Capabilities built from what the device answers, never from a stored list** — R-CAM-14
 - Stable camera identity, so the detected camera is the configured one — R-CAM-05
+- **Every configured camera on the list, present or not**, and a way to take one off it —
+  R-CAM-20, R-CAM-21. Both are the same fact seen twice: identity is the socket, so moving a
+  camera between ports leaves an entry behind that nothing removed and nothing drew
 - **Encoder chosen by probing the board** — R-CAM-13, R-CAM-07
 - The Raspberry Pi family: hardware H.264, and software where the board has none — R-HW-01, R-HW-02
 - RTP/UDP H.264 to a ground station, and the document that configures one — R-VID-01, R-VID-10
@@ -361,6 +377,25 @@ until M8.
 - **The rest of the camera controls** — image controls apply live, stream controls restart
   the picture, and the page says which is which — R-CTL-04 … R-CTL-09
 - Fixed bitrate, for operators who want determinism — R-VID-08
+- **A separate, cheaper copy for the browser**, because the `tee` removes the encoding
+  trade-off and not the bandwidth one — R-VID-13. **Entry gate: passed.** Measured as the
+  marginal cost of the branch — the composed pipeline with and without it — at **12% of one
+  core and 3% of the board**, carrying 374 kb/s against the main path's 1,888. Taken on a
+  supply that held: `throttled=0x0` before *and* after every run, with the board's uptime
+  unbroken across all of them, so the final read of the latched bits proves no undervoltage
+  occurred while any measurement was being taken. The 11% that stood in for it before was
+  the whole 640×480 pipeline including a JPEG decode this branch never performs, taken on a
+  board that was browning out (K-41) — near enough by accident, from a pipeline sharing
+  almost no term with the branch it stood for. This is the only P1 in the camera set and the
+  exit criterion rests on it
+- Stills where live video cannot be established, and as a choice on a link that cannot
+  carry video — R-VID-14
+- The receive command in the interface, generated from the running configuration — R-VID-15
+- Nothing silently missing: a capability the camera lacks is stated, never blank — R-UI-20
+- **A stated posture for every media listener** — the browser's picture behind the console's
+  own credential, a per-device credential for the ground-station listener, and the protocols
+  nothing uses switched off. Here because *from another network* is this milestone's exit
+  criterion — R-SEC-13
 - **Supply-voltage reporting** — R-SYS-09. Here rather than with the other status readings
   because encoding video is what pushes the draw up, so M4 is the milestone that provokes it
 
@@ -377,25 +412,41 @@ code and unit tests and an explicit note that it has never run on hardware.
 
 ## M5 — Telemetry
 
+**2026-09-07 cockpit integration:** R-FLT-01…10 brings the existing authored PFD,
+mission editor, map and terrain into the native console, with field-age-aware
+MAVLink telemetry, optional public data, and the fixed-camera display seam. This
+implementation is verified in browser fixtures and isolated ArduPlane SITL;
+physical camera calibration and aircraft checks remain separate. See the
+[cockpit guide](cockpit-user-guide.md) and [control evidence](cockpit-control-integration-audit.md).
+
 *Now attach an aircraft.*
 
 - MAVLink routing configured from the config file — R-MAV-03, R-MAV-04, R-MAV-05
 - Ground-station traffic on a path a control-plane restart cannot interrupt — R-MAV-06
+- The router carried in the offline payload, installed off, started by the control plane —
+  R-MAV-17, R-CFG-07
 - Flight-controller autodetect by baud sweep — R-MAV-01, R-MAV-02
+- The header UART freed by the installer on both boot layouts, Armbian included — R-MAV-02,
+  R-HW-04
 - Three ground-station endpoints, settable from the console — R-MAV-03
 - Loopback-only ingest by default — R-MAV-07
 - Autocast: telemetry up at boot with no operator action — R-MAV-08, R-MAV-09
+- **An ordinary apply never interrupts telemetry, and a telemetry fault never fails an apply**
+  — R-MAV-16
 - Link state reporting — R-MAV-10
 - Attitude, heading, altitude, GPS, speeds, mode, arm state — R-TEL-01 … R-TEL-07
 - Per-cell voltage — R-TEL-08
 - **Telemetry overlay on the video** — R-TEL-12
 - Moving map, fullscreen, and inset swap — R-TEL-11, R-TEL-13, R-TEL-14
 - MAVLink path verification — R-DIA-04
-- **A camera that is itself a USB host — the DJI Pocket 2** — R-CAM-15. Here rather than
+- **A camera that is itself a USB host — the DJI Pocket 2** — R-CAM-15. **Integration resumed on 2026-09-08.** The protocol, expiring intent, Linux transport, guarded gimbal, measured native controls, card recording/photo and console integration are implemented and reviewed. The dev Pi detects and adopts the Pocket 2; its integrated native endpoint passed 45 seconds/1,338 frames. The unified camera workspace and native control fixes are deployed; live preview and active-camera thumbnails have been seen, and production rate/release/expiry checks have run. Final usability, Apply/Keep/Revert and physical browser-loss acceptance remain open, so this requirement is not yet closed. Existing hardware remains the target. See [the resumed evidence](hardware/pocket2-resume-2026-09-08.md). Here rather than
   in M9 because the bench settled it in an evening: with the board playing the phone, the
   camera streams 720p H.264 unprompted and its gimbal is commands on the same link, which
   is a real gimbal for the Cockpit this milestone builds. See
   [`hardware/dji-pocket-2-over-usb.md`](hardware/dji-pocket-2-over-usb.md)
+- **Recording and stills as capabilities** — the camera's own card where it has one, the
+  board's where it does not — R-CAM-17, R-CAM-18; bounded so a recording cannot fill the
+  card — R-STO-06. Here because this is the first camera with a recorder of its own
 
 **Done when:** a ground station has telemetry and video over cellular from beyond line of
 sight, with the HUD drawn over the picture.
@@ -414,7 +465,7 @@ capture stack, and the boards M4 could not be shown on.*
 - Independent pipeline per camera — R-CAM-09
 - Per-board limits enforced in validation — R-CAM-10, R-HW-05
 - HDMI input with EDID push — R-CAM-03
-- Rockchip boards: hardware H.264 and H.265 — R-HW-03, R-CAM-08, R-VID-02
+- ~~Rockchip boards: hardware H.264 and H.265~~ — R-HW-03, R-CAM-08, R-VID-02 — **done, pulled into M4**
 - The rest of R-HW-01 and R-HW-02 on real hardware — every Pi M4 could only unit-test
 - Second Ethernet and USB gadget — R-NET-04, R-NET-05
 - One image per board family, no overclocking by default — R-HW-04, R-HW-06
@@ -426,6 +477,12 @@ board in the matrix boots and streams.
 
 ## M7 — Commanding and the rest of the console
 
+The cockpit integration now supplies explicit reviewed ArduPlane mode/arm/GUIDED
+requests, mission transfer/readback, and six immediate command forms. Its 55-form
+mission catalog does not prove peripheral support. Dynamic advertised command
+discovery, signed MAVLink, other vehicle command families and direct terrain-datum
+GUIDED targets remain outside that verified slice; these do not mark M7 complete.
+
 - **Command safety in place before any command ships** — R-CMD-04 … R-CMD-09
 - Flight-mode set and the autopilot's advertised command set — R-CMD-01 … R-CMD-03
 - Full parameter get/set with search — R-PAR-01 … R-PAR-04
@@ -435,6 +492,8 @@ board in the matrix boots and streams.
 - Restart and shutdown — R-SYS-03
 - Remaining camera controls — R-CTL-04 … R-CTL-09
 - Gimbal camera control — R-CAM-11
+- Cameras announced over MAVLink, and camera and gimbal commands relayed from a ground
+  station — R-VID-12, R-CAM-16
 - Disable Wi-Fi for flight; hostname discovery — R-NET-08, R-NET-09
 - Throughput reporting, bandwidth test, link-loss response — R-NET-10, R-NET-11, R-DIA-03
 - Support bundle with secrets removed — R-DIA-06

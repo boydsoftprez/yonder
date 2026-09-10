@@ -1,0 +1,72 @@
+{
+  "platform": "linux",
+  "viewport": {
+    "w": 1280,
+    "h": 900
+  },
+  "widgets": [
+    {
+      "key": "nrdb-ui-group#0",
+      "box": {
+        "x": 268,
+        "y": 76,
+        "w": 1000,
+        "h": 505
+      }
+    },
+    {
+      "key": "nrdb-ui-widget.nrdb-ui-yonder-index",
+      "box": {
+        "x": 285,
+        "y": 93,
+        "w": 966,
+        "h": 471
+      }
+    },
+    {
+      "key": "nrdb-ui-group#1",
+      "box": {
+        "x": 268,
+        "y": 593,
+        "w": 1000,
+        "h": 142
+      }
+    },
+    {
+      "key": "nrdb-ui-widget.nrdb-ui-yonder-budget",
+      "box": {
+        "x": 285,
+        "y": 610,
+        "w": 966,
+        "h": 108
+      }
+    },
+    {
+      "key": "nrdb-ui-group.yonder-rail",
+      "box": {
+        "x": 268,
+        "y": 747,
+        "w": 1000,
+        "h": 82
+      }
+    },
+    {
+      "key": "nrdb-ui-widget.nrdb-ui-yonder-softkeys",
+      "box": {
+        "x": 285,
+        "y": 764,
+        "w": 966,
+        "h": 48
+      }
+    },
+    {
+      "key": "d-none.nrdb-ui-widget.nrdb-ui-yonder-softkeys.yonder-pending",
+      "box": {
+        "x": 0,
+        "y": 0,
+        "w": 0,
+        "h": 0
+      }
+    }
+  ]
+}

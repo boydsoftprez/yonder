@@ -68,6 +68,22 @@ every quantity was the mistake this decision replaces.
 | **Data bar** | facts | Label in small caps, value beside it, on one row. Six facts fit where one stock widget held one string |
 | **Soft keys** | every action | A rail along the foot of the display. The *select* tone for a command, the *irreversible* tone for one that takes the page away. **No action lives anywhere else on a page** (R-UI-10) |
 
+**A stock button is a soft key in a different container, and that is deliberate.** The rule
+above says every action is a soft key, and the shipped console has nine `ui-button` nodes —
+Refresh, Scan, Join, Use access point, Leave, and the four on the Telemetry page. That is not
+drift. A soft-key rail is a *rail*: it belongs at the foot of a surface and carries the
+actions of that whole surface. An action that belongs to one group inside a page — Scan
+belongs to the Wi-Fi form, Check the path to the path check — has no rail to sit on, and
+inventing one per group would be nine rails on five pages.
+
+So `theme.ts` gives a stock button the key's own treatment, and says so where it does it: a
+machined face, a hard edge, an engraved label in letterspaced caps, sized to its words. The
+two are one object in two containers. What the rule is really protecting is stated in R-UI-10
+and holds either way: **no action is full-width, and a page has at most one primary action.**
+
+This was written down here after a review pointed out that the ADR said one thing and the
+stylesheet did another, with only the stylesheet's comment to reconcile them.
+
 ### The rules that follow
 
 **Navigation is not in the rail**, though an earlier draft of this table said
@@ -171,6 +187,47 @@ watching:
   *pressing the key* rather than by posting to the socket — which makes the one
   step it had to take anyway into the only end-to-end proof that a control on this
   console does something.
+
+## Resolved — where an action lives
+
+**Answered by building both camera pages out of the instruments and finding that
+R-UI-10, read literally, put the wrong controls in the wrong place.**
+
+R-UI-10 said *size a control to what it says*, and the flows enforced it with a
+rule of their own: *every action on this page is on the rail, and only there*.
+That was right about the rail and wrong about everything else. A camera deck is
+twenty-one controls composed from what the device answered, and several of them
+*are* actions — an output stopped or started, Apply and Discard over a staged
+draft, Record under the picture, Recentre beside the gimbal. Herding those onto
+one rail at the foot of the page means an operator watching a picture has to look
+away from it to press the key that acts on it, at exactly the moment they are
+watching.
+
+So the rule splits in two, and both halves keep the sizing rule R-UI-10 was
+written for:
+
+- **An action lives beside the thing it acts on, where that thing is on the
+  page.** Record is under the picture it records, in the deck's own Capture
+  column. Recentre is on the Aim panel, beside the gimbal it moves. An output's
+  on/off is in the row that states that output's cost and reachability. Apply and
+  Discard are at the foot of the deck whose draft they act on. Each is drawn by
+  the component that owns the thing, so it cannot drift away from it.
+- **The rail carries the page's own actions** — the ones whose subject is the
+  page rather than any one control on it: start and stop the pipeline, flip
+  between Live and Setup, re-probe, show the stream address, hold the full rate.
+  The rail is also where an irreversible action goes, because it is the one strip
+  an operator reads before leaving a page.
+
+Neither half licenses a control that spans its surface. R-UI-10's own sentence —
+*no action occupies the full width of the surface it sits on* — is unchanged, is
+checked in the DOM by the capture gate rather than over the flows (a width of
+`auto` that CSS then stretches is exactly what a JSON check cannot see), and now
+applies to a deck's own keys as much as to a rail's.
+
+The requirement text is amended to say both halves. `R-UI-26` (Task 42) states
+the first half as a requirement in its own right and names Record and Recentre as
+the two worked examples; `flows.test.ts` holds the rails to it from the other
+direction, by asserting that neither of those two ever appears on one.
 
 ## Open
 

@@ -1,0 +1,13 @@
+<!-- SPDX-License-Identifier: GPL-3.0-or-later -->
+<script type="text/html" data-template-name="ui-yonder-deck">
+  <div class="form-row"><label for="node-input-group">Group</label><input id="node-input-group" type="text" /></div>
+  <div class="form-row"><label for="node-input-name">Name</label><input id="node-input-name" type="text" /></div>
+  <div class="form-tips">One camera workspace: immediate camera controls, staged stream/picture/output settings, and authoritative Keep/Revert in one persistent area. Feed complete snapshots from yonder-camera-workspace.</div>
+</script>
+<script type="text/html" data-help-name="ui-yonder-deck">
+  <p>Camera controls act immediately. Stream, picture and output edits stay in the existing per-camera draft until Apply; Discard edits affects only that local draft. Pending configuration is read from the authoritative pending adapter and offers Keep/Revert without changing page.</p>
+  <p>Emits native/control, apply, shutter, captures, transaction, video, refresh and connection actions. It does not render Aim or a second layout mode.</p>
+</script>
+<script type="text/javascript">
+  RED.nodes.registerType('ui-yonder-deck', { category:'dashboard 2', color:'#c7e0d4', defaults:{ name:{value:''}, group:{type:'ui-group',required:true}, order:{value:0}, width:{value:0}, height:{value:0} }, inputs:1, outputs:1, icon:'font-awesome/fa-video-camera', paletteLabel:'yonder camera controls', label:function(){return this.name || 'camera controls';} });
+</script>

@@ -54,6 +54,83 @@ function changed(): Config {
 }
 
 describe("ApplyEngine", () => {
+  it("keeps Day/Night requests within the appearance renderer even when hardware is unavailable", async () => {
+    const appearance = renderer("console");
+    const hardware = { name: "network", render: vi.fn(async () => { throw new Error("modem unavailable"); }) };
+    const e = new ApplyEngine({ configPath, journalPath, renderers: [hardware, appearance], appearanceRenderer: appearance });
+    const c = structuredClone(DEFAULT_CONFIG); c.ui.theme = "night";
+    await e.apply(c, { appearanceOnly: true });
+    expect(loadConfig(configPath).ui.theme).toBe("night");
+    expect(e.status().state).toBe("confirmed");
+    expect(hardware.render).not.toHaveBeenCalled();
+    expect(appearance.calls.map(c => c.ui.theme)).toEqual(["night"]);
+    await e.apply(c, { appearanceOnly: true }); // Same choice can repair a stale stylesheet.
+    expect(hardware.render).not.toHaveBeenCalled();
+  });
+  it("does not let the appearance hint skip a network or other configuration change", async () => {
+    const appearance = renderer("console");
+    const hardware = { name: "network", render: vi.fn(async () => { throw new Error("hardware failure"); }) };
+    const e = new ApplyEngine({ configPath, journalPath, renderers: [hardware, appearance], appearanceRenderer: appearance });
+    await expect(e.apply(changed(), { appearanceOnly: true })).rejects.toThrow("hardware failure");
+    expect(hardware.render).toHaveBeenCalled();
+    expect(loadConfig(configPath).system.hostname).toBe(DEFAULT_CONFIG.system.hostname);
+  });
+  it("rolls back a failed appearance write within the same renderer scope", async () => {
+    const hardware = renderer("network"); const seen: string[] = [];
+    const appearance = { name: "console", render: async (c: Config) => { seen.push(c.ui.theme); if (c.ui.theme === "night") throw new Error("theme write failed"); } };
+    const e = new ApplyEngine({ configPath, journalPath, renderers: [hardware, appearance], appearanceRenderer: appearance });
+    const c = structuredClone(DEFAULT_CONFIG); c.ui.theme = "night";
+    await expect(e.apply(c, { appearanceOnly: true })).rejects.toThrow("theme write failed");
+    expect(seen).toEqual(["night", "day"]);
+    expect(hardware.calls).toEqual([]);
+    expect(loadConfig(configPath).ui.theme).toBe("day");
+    expect(e.status().state).toBe("idle");
+  });
+  it("initializes telemetry and video at boot even when the network render fails", async () => {
+    const telemetry = renderer("telemetry");
+    const video = renderer("video");
+    const e = new ApplyEngine({ configPath, journalPath, renderers: [
+      { name: "network", async render() { throw new Error("modem activation failed"); } },
+      telemetry, video,
+    ] });
+    await expect(e.renderCurrent()).rejects.toThrow(/modem activation failed/);
+    expect(telemetry.calls).toHaveLength(1);
+    expect(video.calls).toHaveLength(1);
+    expect(loadConfig(configPath)).toEqual(DEFAULT_CONFIG);
+    expect(existsSync(journalPath)).toBe(false);
+    expect(e.status().state).toBe("idle");
+  });
+
+  it("continues boot initialization after a renderer times out", async () => {
+    const { clock, advance } = fakeClock();
+    const telemetry = renderer("telemetry");
+    const e = new ApplyEngine({ configPath, journalPath, clock, renderTimeoutMs: 100,
+      renderers: [{ name: "network", render: () => new Promise(() => {}) }, telemetry],
+    });
+    const boot = e.renderCurrent();
+    const failure = expect(boot).rejects.toThrow(/network.*timed out/);
+    advance(101);
+    await failure;
+    expect(telemetry.calls).toHaveLength(1);
+  });
+
+  it("reserves the configuration while boot renderers are running", async () => {
+    let release!: () => void;
+    const gate = new Promise<void>((resolve) => { release = resolve; });
+    let calls = 0;
+    const { clock } = fakeClock();
+    const e = new ApplyEngine({ configPath, journalPath, clock,
+      renderers: [{ name: "slow", render: () => ++calls === 1 ? gate : Promise.resolve() }],
+    });
+    const boot = e.renderCurrent();
+    try {
+      await expect(e.apply(changed())).rejects.toThrow(/still being carried out/);
+      await expect(e.renderCurrent()).rejects.toThrow(/in flight/);
+    } finally { release(); await boot; }
+    expect(loadConfig(configPath)).toEqual(DEFAULT_CONFIG);
+    expect(e.status().state).toBe("idle");
+  });
+
   it("starts idle", () => {
     const { clock } = fakeClock();
     const e = new ApplyEngine({ configPath, journalPath, renderers: [renderer()], clock });
@@ -215,7 +292,7 @@ describe("ApplyEngine", () => {
     const { clock } = fakeClock();
     const e = new ApplyEngine({ configPath, journalPath, renderers: [renderer()], clock });
     await e.apply(changed());
-    await expect(e.apply(changed())).rejects.toThrow(/already pending/);
+    await expect(e.apply(changed())).rejects.toThrow(/is pending; confirm it/);
   });
 
   it("reverts when a renderer throws, and reports the failure", async () => {
@@ -312,7 +389,7 @@ describe("ApplyEngine", () => {
 
     const other = structuredClone(DEFAULT_CONFIG);
     other.system.hostname = "second";
-    await expect(e.apply(other)).rejects.toThrow(/already pending/);
+    await expect(e.apply(other)).rejects.toThrow(/still being carried out/);
 
     release();
     await first;
@@ -1140,4 +1217,20 @@ describe("an apply that cannot cost reachability", () => {
     expect(result.expiresAt, "a radio move still waits").not.toBeNull();
     expect(e.status().state).toBe("pending");
   });
+});
+
+it('persists preset-only edits immediately without invoking hardware renderers',async()=>{
+  const {Camera}=await import('../schema/config.js');const original=structuredClone(DEFAULT_CONFIG);
+  original.cameras=[Camera.parse({id:'cam1',name:'Pocket',source:'accessory',device:'pocket2:test'})];saveConfig(configPath,original);
+  const hardware=renderer('hardware'),e=new ApplyEngine({configPath,journalPath,renderers:[hardware]});
+  const next=structuredClone(original);next.cameras[0].gimbal_presets={revision:1,slots:[{slot:1,name:'Front',frame:'hg211-joints-v1',mode:1,pan:0,tilt:0,savedAt:1}]};
+  expect(await e.apply(next,{gimbalPresetsOnly:true})).toMatchObject({expiresAt:null});expect(e.status().state).toBe('confirmed');expect(hardware.calls).toHaveLength(0);
+  expect(loadConfig(configPath).cameras[0].gimbal_presets).toEqual(next.cameras[0].gimbal_presets);
+});
+
+it('refuses a preset-only hint if any other setting changed and releases the reservation',async()=>{
+  const hardware=renderer('hardware'),e=new ApplyEngine({configPath,journalPath,renderers:[hardware]});const before=e.status().state;
+  await expect(e.apply(changed(),{gimbalPresetsOnly:true})).rejects.toThrow('Configuration changed');
+  expect(e.status().state).toBe(before);expect(hardware.calls).toHaveLength(0);expect(loadConfig(configPath)).toEqual(DEFAULT_CONFIG);
+  expect(await e.apply(DEFAULT_CONFIG,{gimbalPresetsOnly:true})).toMatchObject({expiresAt:null});
 });

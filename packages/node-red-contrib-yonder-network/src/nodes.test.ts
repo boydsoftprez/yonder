@@ -38,6 +38,7 @@ const revertNode = (await import("./revert.js")).default ?? await import("./reve
 const pendingNode = (await import("./pending.js")).default ?? await import("./pending.js");
 const waybackNode = (await import("./wayback.js")).default ?? await import("./wayback.js");
 const joinNode = (await import("./join.js")).default ?? await import("./join.js");
+const watchNode = (await import("./watch.js")).default ?? await import("./watch.js");
 
 const ok = (body: unknown): DaemonReply => ({ ok: true, status: 200, body });
 const unreachable: DaemonReply = {
@@ -357,7 +358,7 @@ describe("yonder-revert", () => {
     // what it was asked.
     expect(msg.yonder?.state).toBe("confirmed");
     expect(msg.yonder?.message).toContain("previous configuration");
-    expect(asked).toEqual([{ method: "POST", path: "/revert", body: { id: "abc" } }]);
+    expect(asked).toEqual([{ method: "POST", path: "/revert", body: { id: "abc" }, timeoutMs: 60000 }]);
   });
 
   it("takes the id from the payload as well, because a flow may carry it there", async () => {
@@ -422,10 +423,10 @@ describe("yonder-pending", () => {
     // the list is the ordinary pair, which is what the rail's own
     // configuration says too.
     expect(msg.payload).toEqual({
-      pending: false, id: "", what: "", why: "",
+      pending: false, id: "", what: "", why: "", engineState: "idle", observedAt: expect.any(Number),
       keys: [
-        { label: "CONFIRM", action: "confirm", tone: "warn" },
-        { label: "REVERT NOW", action: "revert", tone: "act" },
+        { label: "KEEP", action: "confirm", tone: "warn" },
+        { label: "REVERT", action: "revert", tone: "act" },
       ],
     });
     expect(asked[0]).toEqual({ method: "GET", path: "/status" });
@@ -447,7 +448,7 @@ describe("yonder-pending", () => {
     const msg = await fromPoller({}, (m) => (m.payload as { pending?: boolean }).pending === true);
     const payload = msg.payload as
       { keys: { label: string; action: string }[]; what: string; why: string };
-    expect(payload.keys).toEqual([{ label: "REVERT NOW", action: "revert", tone: "act" }]);
+    expect(payload.keys).toEqual([{ label: "REVERT", action: "revert", tone: "act" }]);
     expect(payload.keys.map((k) => k.action)).not.toContain("confirm");
     expect(payload.what).toMatch(/confirming it for itself/);
     expect(msg.yonder?.movesRadio).toBe(true);
@@ -461,7 +462,7 @@ describe("yonder-pending", () => {
     expect(payload.pending).toBe(true);
     expect(payload.id).toBe("a1");
     expect(payload.what).not.toBe("");
-    expect(payload.why).toMatch(/gets you back in/);
+    expect(payload.why).toMatch(/restore the previous settings/);
     // An ordinary change is still the operator's to keep, and the rail says so.
     expect((payload as unknown as { keys: { action: string }[] }).keys.map((k) => k.action))
       .toEqual(["confirm", "revert"]);
@@ -572,5 +573,97 @@ describe("yonder-wayback", () => {
     const msg = await fromPoller({}, (m) => (m.payload as { join?: string }).join === "yonder");
     // The only message that arrived is the one from the reply that succeeded.
     expect((msg.payload as { join: string }).join).toBe("yonder");
+  });
+});
+
+/**
+ * `yonder-config-watch` — R-UI-20.
+ *
+ * The console read `config.yaml` once, when the flows were deployed, and
+ * never again: an operator who opened MAVLink ingest went on being told the
+ * board accepted it from itself alone (R-MAV-07). The fix could not simply be
+ * a repeating read, because the same document seeds ten boxes an operator
+ * types into. So the read repeats and the message does not.
+ */
+describe("yonder-config-watch", () => {
+  /**
+   * The node polls and has no input, so a test drives it by scripting replies
+   * and collecting whatever arrives inside a window rather than by sending it
+   * a message.
+   *
+   * **The windows are wall-clock and they are long on purpose.** The seeding
+   * read is a second after deployment and R-UI-06's two-second floor is
+   * enforced in `yonder-core`, so reads land at roughly 1 s, 3 s and 5 s. A
+   * test that wanted them sooner would have to reach around the floor, and
+   * the floor still applying is one of the things worth knowing.
+   */
+  const SEED = 1_600;
+  const TICKS = 5_600;
+  function collected(ms: number): Promise<Received[]> {
+    const flow = [
+      { id: "n1", type: "yonder-config-watch", interval: 2, wires: [["n2"]] },
+      { id: "n2", type: "helper" },
+    ];
+    const seen: Received[] = [];
+    return new Promise((resolve) => {
+      void helper.load(watchNode, flow, () => {
+        const sink = helper.getNode("n2") as unknown as {
+          on(event: string, fn: (msg: Received) => void): void;
+        };
+        sink.on("input", (msg) => { seen.push(msg); });
+        setTimeout(() => { resolve(seen); }, ms);
+      });
+    });
+  }
+
+  /**
+   * The first read is the seed (R-UI-17). Waiting a poll interval for it
+   * would put an empty form in front of whoever opened the console first.
+   */
+  it("reads the configuration on registration and sends it", async () => {
+    const config = { version: 1, mavlink: { ingest: { loopback_only: true } } };
+    replies.push(ok(config));
+    const seen = await collected(SEED);
+    expect(asked[0]).toEqual({ method: "GET", path: "/config" });
+    expect(seen[0]?.payload).toEqual(config);
+  });
+
+  /**
+   * **The constraint the one-shot inject existed to honour.** Ten
+   * `ui-text-input` boxes hang off this. A second identical message would
+   * overwrite whatever an operator had typed into one of them.
+   */
+  it("says nothing more while the document has not moved", { timeout: 15_000 }, async () => {
+    const config = { version: 1, network: { modem: { apn: "ereseller" } } };
+    for (let i = 0; i < 6; i += 1) replies.push(ok(structuredClone(config)));
+    const seen = await collected(TICKS);
+    expect(asked.length, "the read is supposed to repeat").toBeGreaterThan(1);
+    expect(seen).toHaveLength(1);
+  });
+
+  /**
+   * The defect, in the shape it was found in: the daemon accepted a change to
+   * where MAVLink is accepted from, and the page had to stop saying
+   * `Loopback only`.
+   */
+  it("sends again the moment the ingest setting moves", { timeout: 15_000 }, async () => {
+    const closed = { mavlink: { ingest: { loopback_only: true } } };
+    const open = { mavlink: { ingest: { loopback_only: false } } };
+    replies.push(ok(closed), ok(open), ok(structuredClone(open)), ok(structuredClone(open)));
+    const seen = await collected(TICKS);
+    expect(seen.map((m) => (m.payload as typeof closed).mavlink.ingest.loopback_only))
+      .toEqual([true, false]);
+  });
+
+  /**
+   * A dropped socket must leave a form full of an operator's settings alone.
+   * Blanking one looks exactly like a device that has forgotten them — which
+   * is why this sends nothing rather than sending `payload: null` the way
+   * `yonder-config` does for a button that is waiting on an answer.
+   */
+  it("sends nothing at all when the daemon does not answer", async () => {
+    replies.push(unreachable, unreachable);
+    const seen = await collected(SEED);
+    expect(seen).toEqual([]);
   });
 });

@@ -1,0 +1,266 @@
+body { margin:0; background: var(--yonder-background, #0a0c0f); color: var(--yonder-value, #fff);
+       font-family: var(--yonder-font, ui-sans-serif, system-ui); }
+.g-page { padding: 22px 26px 60px; }
+.g-head h1 { font-size: 19px; margin: 0 0 4px; letter-spacing: .01em; }
+.g-head p { margin: 0 0 14px; color: var(--yonder-label, #7f8a95); font-size: 12.5px; max-width: 70ch; }
+.g-tabs { display:flex; gap:6px; margin-bottom: 22px; }
+.g-tab { background: transparent; color: var(--yonder-label, #7f8a95); font: inherit; font-size: 10px;
+  letter-spacing: .18em; text-transform: uppercase; padding: 7px 14px; cursor: pointer;
+  border: 1px solid var(--yonder-divider, #2b333c); border-radius: 2px; }
+.g-tab.on { color: var(--yonder-select, #2ad4f0); border-color: var(--yonder-select, #2ad4f0); }
+.g-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(330px, 1fr)); gap: 16px; }
+.g-cell { border: 1px solid var(--yonder-divider, #2b333c); border-radius: 3px; overflow: hidden;
+  background: var(--yonder-pane, #090d12); }
+.g-cap { font-size: 9.5px; letter-spacing: .16em; text-transform: uppercase;
+  color: var(--yonder-label, #7f8a95); padding: 9px 13px 0; }
+.g-sub { font-size: 11px; color: var(--yonder-label, #7f8a95); opacity: .8; padding: 3px 13px 0; }
+.g-stage { padding: 15px 13px 17px; background: var(--yonder-display, #04060a); margin-top: 10px;
+  min-height: 62px; display: flex; align-items: center; }
+
+/* ---- the draft deck ------------------------------------------------ */
+/* No `overflow:hidden` here any more. It used to clip `.d-rail` to this
+   panel's own box for corner-rounding — but that box has no fixed height,
+   so it also clipped the rail's *sticky* travel to nothing: a sticky
+   element can only move within a containing block taller than itself, and
+   `overflow:hidden` on the panel made the panel itself that containing
+   block. Corner-rounding moved to `.d-rail`, the element actually sitting at
+   the bottom edge; nothing above it needs to clip anything. */
+.d-panel { border:1px solid var(--yonder-divider,#2b333c); border-radius:5px;
+  background: var(--yonder-background,#0a0c0f); }
+.d-placard { display:flex; justify-content:space-between; padding:7px 15px;
+  font-size:10px; letter-spacing:.2em; text-transform:uppercase; color: var(--yonder-label,#7f8a95); }
+.d-placard b { color: var(--yonder-value,#fff); font-weight:600; }
+.d-display { background: var(--yonder-display,#04060a); border-top:1px solid var(--yonder-divider,#2b333c); }
+.d-strip { display:flex; gap:22px; align-items:center; flex-wrap:wrap; padding:9px 15px;
+  border-top:1px solid var(--yonder-divider,#2b333c); }
+/* Fixed slots (round 2 correction), not CSS-balanced columns. deck.js
+   assigns every group to one of a fixed number of slots (`SLOTS`); this
+   just lays those slots out side by side and lets each grow or shrink on
+   its own — a slot's height never depends on any other slot's content, so
+   toggling a control moves nothing outside its own group. `flex-wrap`
+   reduces the slot count at narrower widths (§5's tablet row), which is a
+   *container-width* reflow, not the *content-height* one this replaced. */
+.d-cols { display:flex; flex-wrap:wrap; align-items:flex-start;
+  border-top:1px solid var(--yonder-divider,#2b333c); }
+.d-cols__slot { flex:1 1 252px; min-width:220px; border-left:1px solid var(--yonder-divider,#2b333c); }
+.d-cols__slot:first-child { border-left:0; }
+.d-cols :deep(.d-field) { margin-bottom:13px; }
+.d-outs { border-top:1px solid var(--yonder-divider,#2b333c); }
+.d-out { display:grid; grid-template-columns: 118px 74px 1fr auto; gap:12px; align-items:center;
+  padding:7px 0; border-top:1px solid color-mix(in srgb, var(--yonder-divider,#2b333c) 55%, transparent); }
+.d-out:first-of-type { border-top:0; }
+.d-out .n { font-size:9.5px; letter-spacing:.1em; text-transform:uppercase; color: var(--yonder-label,#7f8a95); }
+.d-out .c { font-size:12px; font-weight:600; font-variant-numeric:tabular-nums; color: var(--yonder-value,#fff); }
+.d-out .r { font-size:10.5px; color: var(--yonder-label,#7f8a95); }
+.d-out .r.ok { color: var(--yonder-good,#35d06a); }
+.d-out .r.warn { color: var(--yonder-waiting,#ffcf28); }
+/* The sticky rail (§5: "The rail remains reachable while the deck scrolls").
+   Sticks to the bottom of the viewport for as long as `.d-display` (its
+   containing block) is still in view, settling at its normal flow position
+   — flush with the panel's own bottom edge — once the page is scrolled all
+   the way to the end. Its own background makes it opaque while stuck, so
+   scrolled column content does not show through the padding around the
+   keys; its own bottom radius is what used to be the panel's, now that
+   nothing clips it there for free. */
+.d-rail { border-top:1px solid var(--yonder-divider,#2b333c); padding:10px 15px;
+  position:sticky; bottom:0; z-index:2; background: var(--yonder-display,#04060a);
+  border-radius:0 0 4px 4px; }
+.d-wide { grid-column: 1 / -1; }
+.g-wide { grid-column: 1 / -1; margin-bottom: 16px; }
+.g-stage--deck { display:block; padding:0; background:transparent; }
+
+/* Two earlier mechanisms lived here and are both outranked now. Equal flex
+   thirds put Aim alone on a second row stretched across the whole width;
+   CSS multi-column flow (the fixed `column-width` this replaced) balanced
+   column heights by repacking every group whenever any one group's height
+   changed, which read as controls moving around underneath an operator's
+   hands. `.d-cols`/`.d-cols__slot` above is the third: a fixed assignment,
+   uneven column heights, nothing moves for a reason two columns away. */
+.d-aim-dead { opacity:.62; filter:saturate(.4); pointer-events:none; }
+.d-why { font-size:10px; margin-top:6px; line-height:1.4; }
+.why-advertised { color: var(--yonder-waiting,#ffcf28); }
+.g-switch { display:flex; gap:6px; margin:0 0 14px; }
+.g-switch button { background:transparent; font:inherit; font-size:10px; letter-spacing:.16em;
+  text-transform:uppercase; padding:7px 14px; cursor:pointer; border-radius:2px;
+  border:1px solid var(--yonder-divider,#2b333c); color:var(--yonder-label,#7f8a95); }
+.g-switch button.on { color:var(--yonder-select,#2ad4f0); border-color:var(--yonder-select,#2ad4f0); }
+
+/* ---- the harness around the console --------------------------------- */
+.g-root { min-height:100vh; }
+.g-bar { display:flex; align-items:center; justify-content:space-between; gap:20px;
+  flex-wrap:wrap; padding:10px 16px; background:#0b0e12; border-bottom:1px solid #232a32; }
+.g-bar__t { font-size:11px; letter-spacing:.14em; text-transform:uppercase; color:#6f7a85; }
+.g-bar__c { display:flex; gap:18px; flex-wrap:wrap; }
+.g-switch { display:flex; gap:5px; margin:0; }
+.d-two { display:flex; }
+.d-half { flex:1; padding:14px 16px; border-left:1px solid var(--yonder-divider,#2b333c); }
+.d-half:first-child { border-left:0; }
+.d-grp2 { font-size:9.5px; letter-spacing:.16em; text-transform:uppercase;
+  color: var(--yonder-label,#7f8a95); margin-bottom:12px; }
+.d-fine2 { font-size:10px; color: var(--yonder-label,#7f8a95); margin-top:9px; }
+
+/* R-UI-20's fact: a stated sentence where the control would have been. It
+   stacks, because a long reason right-aligned against a wrapping label is two
+   columns of text colliding. */
+.d-fact { max-width:230px; margin-bottom:13px; }
+.d-fact .l { display:block; font-size:9.5px; letter-spacing:.11em; text-transform:uppercase;
+  color: var(--yonder-label,#7f8a95); margin-bottom:4px; }
+.d-fact .v { display:block; font-size:12px; line-height:1.45;
+  color: var(--yonder-neutral,#7d7869); }
+.d-fact2 { font-size:9.5px; letter-spacing:.1em; text-transform:uppercase; color: var(--yonder-label,#7f8a95); }
+.d-fact2 b { color: var(--yonder-value,#fff); font-weight:600; letter-spacing:.02em;
+  text-transform:none; font-size:11.5px; margin-left:5px; }
+.d-capkey { margin-bottom:13px; }
+.d-capkey__b { font: inherit; font-size:10.5px; letter-spacing:.13em; text-transform:uppercase;
+  padding:9px 18px; border-radius:2px; cursor:pointer; background:transparent;
+  border:1px solid var(--yonder-divider,#2b333c); color: var(--yonder-value,#fff); }
+.d-capkey__b.rec { border-color: var(--yonder-bad,#ff4034); color: var(--yonder-bad,#ff4034); }
+.d-capkey__n { display:block; font-size:10px; margin-top:5px; color: var(--yonder-waiting,#ffcf28); }
+.d-wrapped { position:relative; }
+.d-unproven { position:absolute; right:0; top:0; font-size:8.5px; letter-spacing:.1em;
+  text-transform:uppercase; color:#ff5fa8; border:1px dashed #ff5fa8; padding:1px 5px; border-radius:2px; }
+
+/* the aim column's readouts belong beside the dial, not at the pane's edge */
+.d-cols .d-aim { max-width: 230px; }
+/* The rest of the viewport-contract trim (see DraftShell.vue's `.d-main`):
+   Capture is first specifically so it is above the fold at 1440×900, and
+   its own column's top padding and heading margin were the remaining 18px
+   of the gap the fold measurement found. */
+.d-cols .d-col { padding-top: 9px; }
+.d-cols .d-h { margin-bottom: 8px; }
+.d-cols .d-shutter { margin-bottom: 9px; }
+.d-capkey { margin-bottom:16px; }
+.d-capkey__n { max-width:230px; line-height:1.4; }
+.d-unproven { position:static; display:inline-block; margin-top:4px; }
+.d-wrapped { margin-bottom:16px; }
+.d-wrapped .d-field { margin-bottom:5px; }
+
+/* ---- Live: picture and aim side by side where there is room -------- */
+.d-stage { display:flex; align-items:stretch; }
+/* The Aim panel sets the row's height and the picture fills it at its own
+   aspect — so there is never a band above or below, only carbon beside it
+   when the row is taller than 16:9 allows. */
+.d-stage__pic { flex:1 1 auto; min-width:0; display:flex; align-items:stretch; justify-content:center;
+  background: var(--yonder-display,#04060a); }
+.d-stage__pic .d-vid { height:100%; width:auto; max-width:100%; max-height:none; aspect-ratio:16/9; }
+.d-aimpanel { flex:0 0 252px; padding:12px 16px 14px; border-left:1px solid var(--yonder-divider,#2b333c); }
+.d-aimpanel.dead .d-aim__dial { opacity:.55; filter:saturate(.3); pointer-events:none; }
+.d-aimpanel .d-h { display:flex; justify-content:space-between; font-size:11px; letter-spacing:.16em;
+  text-transform:uppercase; color: var(--yonder-label,#7f8a95); margin-bottom:14px; }
+.d-aimpanel .d-h em { font-style:normal; }
+.d-aimpanel .d-aim { flex-direction:column; align-items:center; gap:10px; }
+.d-aimpanel .d-aim__rows { width:100%; }
+@media (max-width: 1100px) {
+  .d-stage { flex-direction:column; }
+  .d-aimpanel { flex:none; border-left:0; border-top:1px solid var(--yonder-divider,#2b333c); }
+}
+.q-select { color: var(--yonder-select,#2ad4f0); } .q-waiting { color: var(--yonder-waiting,#ffcf28); }
+
+/* the flying row */
+.d-fly { display:flex; flex-wrap:wrap; gap:0 36px; padding:14px 18px 2px;
+  border-top:1px solid var(--yonder-divider,#2b333c); }
+.d-fly__i { flex:0 0 auto; }
+
+/* outputs, in one line on Live */
+.d-outline { display:flex; flex-wrap:wrap; align-items:baseline; gap:8px 26px; padding:12px 18px;
+  border-top:1px solid var(--yonder-divider,#2b333c); font-size:12.5px; }
+.d-outline .d-h { font-size:11px; letter-spacing:.16em; text-transform:uppercase; color: var(--yonder-label,#7f8a95); }
+.d-outline .o { color: var(--yonder-label,#7f8a95); }
+.d-outline .o b { color: var(--yonder-value,#fff); font-weight:600; }
+.d-outline .o.ok b { color: var(--yonder-good,#35d06a); }
+.d-outline .o.warn b { color: var(--yonder-waiting,#ffcf28); }
+.d-outline .o.goto { margin-left:auto; color: var(--yonder-select,#2ad4f0); }
+
+/* the strip and the rail, sized to match */
+.d-strip { gap:26px; padding:12px 18px; }
+.d-fact2 { font-size:11px; } .d-fact2 b { font-size:13px; }
+.d-rail { padding:12px 18px; }
+
+/* one shutter key, red when it is recording */
+/* `position:relative`: the captures popover (DraftCaptures.vue) anchors to
+   this, not to some distant ancestor — it needs a positioned container no
+   further away than the key it is reachable "beside". */
+.d-shutter { margin-bottom:13px; position:relative; }
+.d-shutter__b { display:inline-flex; align-items:center; gap:9px; font:inherit; font-size:11.5px;
+  letter-spacing:.13em; text-transform:uppercase; padding:0 18px; min-height:38px; border-radius:3px;
+  cursor:pointer; background:transparent; border:1px solid var(--yonder-divider,#2b333c);
+  color: var(--yonder-value,#fff); }
+.d-shutter__dot { width:10px; height:10px; border-radius:50%; border:1.5px solid var(--yonder-bad,#ff4034);
+  background:transparent; }
+.d-shutter__b.rec { border-color: var(--yonder-bad,#ff4034); color: var(--yonder-bad,#ff4034);
+  font-variant-numeric:tabular-nums; }
+.d-shutter__b.rec .d-shutter__dot { background: var(--yonder-bad,#ff4034); box-shadow:0 0 8px var(--yonder-bad,#ff4034); }
+.d-shutter__b.photo { border-color: var(--yonder-select,#2ad4f0); color: var(--yonder-select,#2ad4f0); }
+.d-shutter__n { display:block; font-size:10.5px; margin-top:6px; max-width:230px; line-height:1.4;
+  color: var(--yonder-label,#7f8a95); }
+.d-shutter__n.warn { color: var(--yonder-waiting,#ffcf28); }
+.d-recentre { margin-top:12px; font:inherit; font-size:11px; letter-spacing:.13em; text-transform:uppercase;
+  padding:0 16px; min-height:34px; border-radius:3px; cursor:pointer; background:transparent;
+  border:1px solid var(--yonder-divider,#2b333c); color: var(--yonder-value,#fff); }
+.d-recentre:hover { border-color: var(--yonder-select,#2ad4f0); color: var(--yonder-select,#2ad4f0); }
+
+/* the captures panel's own reveal — beside Capture, on Live and Setup */
+.d-caps-toggle { display:block; margin-top:9px; font:inherit; font-size:10.5px; letter-spacing:.08em;
+  text-transform:uppercase; padding:0; cursor:pointer; background:transparent; border:0;
+  color: var(--yonder-select,#2ad4f0); }
+.d-caps-toggle:hover { text-decoration:underline; }
+
+/* Setup's pending-changes listing (§7's shared draft) */
+.d-pending { border-top:1px solid var(--yonder-divider,#2b333c); padding:13px 18px; }
+.d-pending .d-h { display:flex; justify-content:space-between; gap:10px; font-size:11px; letter-spacing:.16em;
+  text-transform:uppercase; color: var(--yonder-label,#7f8a95); margin-bottom:10px; }
+.d-pending .d-h em { font-style:normal; letter-spacing:.06em; }
+.d-pending__row { display:flex; align-items:baseline; gap:14px; padding:5px 0; font-size:12.5px;
+  border-top:1px solid color-mix(in srgb, var(--yonder-divider,#2b333c) 55%, transparent); flex-wrap:wrap; }
+.d-pending__row:first-of-type { border-top:0; }
+.d-pending__row .l { flex:0 0 180px; font-size:10.5px; letter-spacing:.08em; text-transform:uppercase;
+  color: var(--yonder-label,#7f8a95); }
+.d-pending__row .v { flex:0 0 auto; font-weight:600; font-variant-numeric:tabular-nums; color: var(--yonder-select,#2ad4f0); }
+.d-pending__row .i { flex:1 1 220px; font-size:11px; color: var(--yonder-label,#7f8a95); text-align:right; }
+
+.d-fact2.over b { color: var(--yonder-waiting,#ffcf28); }
+.d-fact2 em { font-style:normal; text-transform:none; letter-spacing:0; font-size:11px; color: var(--yonder-waiting,#ffcf28); }
+.d-rail--two { display:flex; gap:14px; align-items:stretch; }
+.d-rail--two > :first-child { flex:1; }
+.d-hold { flex:0 0 auto; display:flex; flex-direction:column; justify-content:center; gap:3px; padding:6px 16px;
+  border:1px dashed var(--yonder-divider,#2b333c); border-radius:3px; cursor:pointer; user-select:none; touch-action:none; }
+.d-hold b { font-size:11px; letter-spacing:.14em; text-transform:uppercase; color: var(--yonder-value,#fff); }
+.d-hold span { font-size:10.5px; color: var(--yonder-label,#7f8a95); font-variant-numeric:tabular-nums; }
+.d-hold.on { border-style:solid; border-color: var(--yonder-select,#2ad4f0); }
+.d-hold.on b { color: var(--yonder-select,#2ad4f0); }
+
+/* the other cameras, under the picture */
+.d-thumbs { display:flex; align-items:center; gap:12px; padding:10px 18px;
+  border-top:1px solid var(--yonder-divider,#2b333c); }
+.d-thumb { display:flex; flex-direction:column; gap:5px; padding:4px; background:transparent; border:1px solid transparent;
+  border-radius:3px; cursor:pointer; font:inherit; text-align:left; }
+.d-thumb.on { border-color: var(--yonder-select,#2ad4f0); cursor:default; }
+.d-thumb:not(.on):hover { border-color: var(--yonder-divider,#2b333c); }
+.d-thumb__pic { display:block; width:112px; height:63px; border-radius:2px;
+  background:linear-gradient(#8fb4d0 0 38%, #7d8a4e 38% 100%); }
+.d-thumb:not(.on) .d-thumb__pic { filter:saturate(.5) brightness(.85); }
+.d-thumb__pic.tele { background:linear-gradient(#9dbdd6 0 30%, #8b9a5e 30% 100%); }
+.d-thumb__tag { display:flex; justify-content:space-between; gap:8px; font-size:10.5px; padding:0 2px; }
+.d-thumb__tag b { color: var(--yonder-value,#fff); font-weight:600; }
+.d-thumb__tag em { font-style:normal; color: var(--yonder-label,#7f8a95); }
+.d-thumb.on .d-thumb__tag em { color: var(--yonder-good,#35d06a); }
+.d-thumbs__cost { margin-left:auto; text-align:right; font-size:12px; color: var(--yonder-label,#7f8a95); }
+.d-thumbs__cost em { font-style:normal; font-size:10px; letter-spacing:.12em; text-transform:uppercase; display:block; }
+.d-thumbs__cost b { color: var(--yonder-value,#fff); font-variant-numeric:tabular-nums; }
+.d-thumbs__cost span em { display:inline; letter-spacing:0; text-transform:none; font-size:12px; }
+.g-blank { padding:40px; color: var(--yonder-label,#7f8a95); font-size:13px; }
+
+.d-modenote { font-size:11px; color: var(--yonder-label,#7f8a95); margin:-6px 0 0; }
+.q-label { color: var(--yonder-label,#7f8a95); }
+.d-aimpanel .d-aim { gap:8px; }
+
+/* the alternative's badge: outlined, a square dot, small caps */
+.d-badge { display:inline-flex; align-items:center; gap:6px; font-size:9.5px; letter-spacing:.14em; text-transform:uppercase;
+  padding:3px 8px; border-radius:2px; border:1px solid var(--yonder-divider,#2b333c); color: var(--yonder-label,#7f8a95); }
+.d-badge i { width:5px; height:5px; border:1px solid currentColor; }
+.d-badge.warn { border-color: var(--yonder-waiting,#ffcf28); color: var(--yonder-waiting,#ffcf28); }
+.d-aimpanel .d-h em { font-style:normal; }
+/* sentence case for the panel's sub-labels */
+.d-aimpanel .d-lbl, .d-aimpanel .d-field .d-lbl { text-transform:none; letter-spacing:0; font-size:12px; }
+.d-modenote { font-size:12px; }
+.d-recentre--soft { text-transform:none; letter-spacing:0; font-size:13px; padding:0 18px; min-height:38px; border-radius:4px; }

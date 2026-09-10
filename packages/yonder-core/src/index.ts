@@ -1,5 +1,5 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
-export const VERSION = "0.1.0";
+export const VERSION = "2026.9.0";
 export { ConfigSchema, DEFAULT_CONFIG, type Config, type SecretRef } from "./schema/config.js";
 export {
   RETIRED_KEYS,
@@ -29,6 +29,8 @@ export {
   type ReadingBounds,
   type ReadingTone,
 } from "./console/reading.js";
+export { groupThousands } from "./console/digits.js";
+export { ConfigWatch, configFingerprint } from "./console/changed.js";
 export { startServer } from "./daemon/server.js";
 export {
   systemRunner,
@@ -179,6 +181,14 @@ export {
   type SetupMiddlewareDeps,
   type ConsoleMiddlewareDeps,
 } from "./console/middleware.js";
+export {
+  captureHandler,
+  captureRequestFor,
+  CAPTURE_TIMEOUT_MS,
+  type CaptureAnswer,
+  type CaptureHandler,
+  type CaptureRequest,
+} from "./console/capture.js";
 export { renderPage, pageSource, escapeHtml, type PageName } from "./console/assets.js";
 export {
   renderSettings,
@@ -257,7 +267,12 @@ export {
   type ActivityLogOptions,
 } from "./log/activity.js";
 export { scanForNetworks, type ScanResult } from "./net/scan.js";
-export type { DiagProbes, SystemReport, WayBackIn } from "./daemon/routes.js";
+export type {
+  DiagProbes, SystemReport, WayBackIn,
+  // What the Telemetry page binds. `MavlinkStateBody` is deliberately two
+  // named halves rather than one flat record — see its own docstring.
+  MavlinkControl, MavlinkStateBody, MavlinkDetectBody,
+} from "./daemon/routes.js";
 export { HostnameRenderer, HOSTNAME_FILE, type HostnameRendererOptions } from "./system/hostname.js";
 export {
   idle,
@@ -313,6 +328,21 @@ export {
   type BoardDisplay,
 } from "./system/format.js";
 export {
+  absentIdentityWords,
+  cameraStrip,
+  capabilityFacts,
+  identityWords,
+  removalRefusal,
+  uplinkBudget,
+  atIp,
+  IP_OVERHEAD,
+  ASSUMED_UPLINK_KBPS,
+  type BudgetSegment,
+  type CameraStrip,
+  type CapabilityFact,
+  type UplinkBudget,
+} from "./video/present.js";
+export {
   PALETTES,
   DEFAULT_THEME,
   themeCss,
@@ -339,3 +369,34 @@ export { ssidOptions, type DropdownOption } from "./net/scan.js";
 export { joinSucceeded, type JoinedResult } from "./net/joined.js";
 export { STATIC_ROOT, THEME_FILE, THEME_HREF, CONSOLE_HOME } from "./console/settings.js";
 export { remoteState, readRemoteState, type RemoteState, type RemotePhase } from "./remote/state.js";
+export {
+  MavlinkRenderer,
+  linkFromConf,
+  ROUTER_UNIT,
+  ROUTER_CONF_PATH,
+  MAVLINK_DEVICES,
+  DETECT_RETRY_MS,
+  STATS_INTERVAL_MS,
+  STATS_LINES,
+  type MavlinkRendererOptions,
+} from "./mav/renderer.js";
+export { LinkTracker, type LinkState } from "./mav/link.js";
+export { detect, type DetectOutcome, type OpenPort, type SerialPort } from "./mav/detect.js";
+export { openPortWith, SETTLE_MS } from "./mav/serial.js";
+export { HeartbeatScanner, describeVehicle, type Heartbeat } from "./mav/frame.js";
+export { readHint, writeHint, forgetHint, type LinkHint } from "./mav/hint.js";
+export {
+  routerConfig,
+  LOOPBACK_PORT,
+  RESERVED_ENDPOINT_NAMES,
+  AUTOPILOT_ENDPOINT_NAME,
+} from "./mav/router/config.js";
+export { parseStats, type EndpointStats } from "./mav/router/stats.js";
+export { LoopbackListener, LOOPBACK_ADDRESS, type LoopbackListenerOptions } from "./mav/listener.js";
+export {
+  pathCheck,
+  HEARTBEAT_STALE_MS,
+  type PathCheck,
+  type CheckLink,
+  type PathCheckInput,
+} from "./mav/check.js";

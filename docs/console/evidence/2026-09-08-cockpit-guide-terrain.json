@@ -1,0 +1,15 @@
+{
+  "source": "USGS 2016 Cove terrain pack through ground-only local relay; synthetic fixture flight",
+  "profile": "Native terrain and mapped surface samples · ground 100% · surface 97%",
+  "probe": "Inspect along route\n0.75 NM · 311 FT AGL · 303 FT above mapped surface",
+  "checks": [
+    "native ground and surface profile",
+    "slider clearance",
+    "profile altitude edit",
+    "unknown datum suppresses AGL",
+    "complete pack preload",
+    "offline reselection after reload with zero relay requests",
+    "zero aircraft requests"
+  ],
+  "errors": []
+}

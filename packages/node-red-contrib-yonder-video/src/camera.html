@@ -1,0 +1,47 @@
+<!-- SPDX-License-Identifier: GPL-3.0-or-later -->
+<!--
+  The editor half of read camera. A form and a registration, nothing else.
+-->
+<script type="text/html" data-template-name="yonder-camera">
+  <div class="form-row">
+    <label for="node-input-name"><i class="fa fa-tag"></i> Name</label>
+    <input type="text" id="node-input-name" placeholder="Name" />
+  </div>
+  <div class="form-row">
+    <label for="node-input-camera"><i class="fa fa-video-camera"></i> Camera</label>
+    <input type="text" id="node-input-camera" placeholder="cam0" />
+  </div>
+</script>
+
+<script type="text/html" data-help-name="yonder-camera">
+<p>Reads <code>GET /cameras/&lt;id&gt;</code> when a plain message arrives and
+emits the camera, its capabilities as the device answers them now, and the run
+state the daemon observed.</p>
+<p>By default this is a read only: settings shown are read back from the
+device, never echoed from what was sent, and a payload on a plain message is
+ignored. A camera's <em>stored</em> settings still only change through
+<code>yonder-apply</code>, so they inherit the confirmation window.</p>
+<p>Set <code>msg.topic</code> to <code>probe</code> to re-read that one device
+— the Camera page's Refresh camera control.</p>
+<p>Set <code>msg.topic</code> to <code>controls</code> and <code>msg.payload</code>
+to an object naming <code>brightness</code>, <code>contrast</code> or
+<code>rotation</code> to change them live on the running stream
+(<code>POST /cameras/&lt;id&gt;/controls</code>). This never touches
+config.yaml — it is runtime only, like Start and Stop — and the reply carries
+what was applied, what was refused and why, and the device's own reading
+afterward.</p>
+<p>The camera is taken from <code>msg.camera</code> if the message carries one,
+otherwise from the id set on this node.</p>
+</script>
+
+<script type="text/javascript">
+  RED.nodes.registerType("yonder-camera", {
+    category: "yonder",
+    color: "#c7d4e0",
+    defaults: { name: { value: "" }, camera: { value: "" } },
+    inputs: 1,
+    outputs: 1,
+    icon: "font-awesome/fa-video-camera",
+    label: function () { return this.name || this.camera || "read camera"; },
+  });
+</script>

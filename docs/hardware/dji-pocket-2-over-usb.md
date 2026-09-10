@@ -1,5 +1,10 @@
 # A DJI Pocket 2 on the USB port
 
+**2026-09-08 resume:** the camera is back on the dev Pi. See the
+[resumed bench evidence](pocket2-resume-2026-09-08.md) for measured stop timing,
+mode trajectories, shutter/focus readbacks, and the unresolved card detection.
+The dated evidence there supersedes older untried rows below where stated.
+
 The Pocket 2 is on the compatibility list and it is not a UVC camera. This note records
 what the device told us, what the manufacturer's own software told us about how to talk to
 it, and what happened when Yonder's board did. **The last section is a decoded frame.**
@@ -94,7 +99,7 @@ Two routes were seen, and they are two channels:
 | Route | Carries | Observed |
 |---|---|---|
 | `49 57` | DUML command frames, several back to back | 2,676 envelopes, 14–562 bytes, in a 7 s session |
-| `4a 57` | **H.264 video** | 313 envelopes, almost all 8,192 bytes; 1.55 MB in 7 s |
+| `4a 57` | **H.264 and AAC media records** | 313 envelopes, almost all 8,192 bytes; 1.55 MB in 7 s |
 
 Zero bytes fell outside an envelope in 2.2 MB of capture. The board sends on route
 `49 57`; the camera answered every frame sent that way.
@@ -131,8 +136,8 @@ the payload was expected to carry something — and it did not matter for the pi
 
 **No live-view subscribe was sent.** The video route began within a second of the
 accessory being enabled, and again on every subsequent run. Each video segment is preceded
-by a 16-byte record beginning `00 00 01 ff` — a frame header, contents not yet decoded —
-followed by Annex-B H.264 in 8 KB chunks. The stream carries an SPS (`67 64 00 28`:
+by a 16-byte record beginning `00 00 01 ff` — a frame header, decoded below — followed by
+media payload in 8 KB chunks. H.264 records carry an SPS (`67 64 00 28`:
 High profile, level 4.0), PPS, access-unit delimiters, SEI, and an IDR roughly every two
 seconds. Average rate about 1.7 Mb/s, with bursts to 8 Mb/s at a keyframe.
 
@@ -375,21 +380,26 @@ and the right payload is not derivable from the library — it has no symbol tab
 setters the SDK names cannot be traced to their wire structs without a decompiler. The
 board's transcode is the plan; this is the optimisation left on the table.
 
-### The video frame record, decoded
+### The media frame record, decoded
 
-Every access unit on the video route is preceded by a 16-byte record. From 104 of them:
+Every access unit on the media route is preceded by a 16-byte record. A later capture
+confirmed the layout across 284 complete records: 114 H.264 and 170 AAC.
 
 ```
-00 00 01 ff | u16 length | u16 0x00ff | u32 varies | u32 timestamp
+00 00 01 ff | u16 length low | ff | u8 length high | u8 | u8 kind | u16 | u32 timestamp
 ```
 
-- `length` is the size of the H.264 that follows, to the byte (63,291 for the first
-  record, which held SPS, PPS and the IDR; 512–630 for ordinary P-frames).
+- `length` is the 24-bit size of the payload that follows: little-endian bytes 4–5 plus
+  byte 7 as the high byte. It reaches 105,081 bytes in the capture; eight keyframes are
+  larger than 64 KiB, and records with a zero low word remain non-empty when byte 7 is set.
+- Header byte 6 is always `ff`. Byte 9 identifies H.264 as `11` and AAC as `24`; H.264
+  begins with an Annex-B start code and AAC with an ADTS header.
 - `timestamp` advances 21–34 ms per record — a 30 fps clock in milliseconds.
-- the third field changes irregularly and is not yet understood; `0x00ff` never changes.
+- The other header bytes change and are retained raw until their meaning is known.
 
-So the daemon's job on this route is: read 16 bytes, read `length` bytes of Annex-B,
-repeat — and it has the presentation time for free.
+So the daemon's job on this route is: read 16 bytes, read the full 24-bit `length`, emit
+only kind `11` to the H.264 path, and consume kind `24` separately. The timestamp comes
+with each record.
 
 ### The pitch run, and what it cost
 
@@ -661,3 +671,57 @@ board; the operator plugs one cable.
   the real struct needs a decompiler pass or a capture. Not needed while the board transcodes.
 - **Power draw** on the link. Not measured.
 - **The side port**, the phone adapter, and the original Osmo Pocket (`HG210`).
+
+---
+
+## The bench queue — everything one mounted session should close
+
+The camera has been off the bench more often than on it, and every question
+below has waited for it separately. They are gathered here so that the next
+time it is mounted, one session closes the lot rather than five sessions each
+closing one. Ordered so that an early answer cannot invalidate a later one.
+
+**Ask this one first, because it is the only one that can be answered in a
+minute and it decides whether a live defect is reachable.** Does this camera
+offer `horizontal_flip`, `vertical_flip` or `rotate`?
+
+```sh
+v4l2-ctl -d /dev/videoN --list-ctrls-menus | grep -E 'horizontal_flip|vertical_flip|rotate'
+```
+
+The bench ELP offers none of the three, which is why the board learned to turn
+the picture itself (R-CTL-05, `video/orientation.ts`). If the Pocket 2 offers
+one of them **and an operator sets it**, it reaches a known defect recorded in
+`video/renderer.ts` and pinned by `pipeline.test.ts`: the apply renderer
+composes with `noCapabilities()` while the start route composes with what it
+probed, so the two disagree. The pipeline is restarted once for a configuration
+that did not change, and comes back turning the picture **twice** — once at the
+sensor and once on the board.
+
+Nothing on the bench can reach it today. If this camera can, it stops being a
+latent defect and the fix — a capability answer both composers share, without
+putting a `v4l2` sweep inside the confirmation window — needs doing before the
+Pocket 2 work goes further. If it cannot, say so here and the defect stays
+latent with one more camera's worth of evidence behind that claim.
+
+**Bring:** the camera mounted as it will fly, not handle-up; a card in it; the
+board on header power with `dr_mode=peripheral` (see [The bench
+procedure](#the-bench-procedure)); and a way to see the picture, because half
+of these are confirmed by watching rather than by a reply.
+
+| # | Question | Why it is blocking | Closes |
+|---|---|---|---|
+| 1 | **Which limit bit is which axis.** `gimbal/0x05` byte 10, one axis at a time to its stop | The whole guard turns on it. Byte 10 bit 1 is confirmed as *a* limit flag; the public dissector calls the byte "limit/status flags for pitch, roll, yaw" and which is which was never separated | The guard's shape, Task 38 |
+| 2 | **The stop bound after the last frame.** Browser intent to observed rest, five runs, browser disconnected with USB intact | Sets the command lease. The device timeout alone is not the end-to-end bound, and an over-long lease is travel nobody asked for | Task 2, sizes Task 36 |
+| 3 | **Recentre from a limit pose** | The one recorded stall. Whether it is safe with the flag watched, or must be refused | The guard's refusal rule |
+| 4 | **Standalone work mode** `gimbal/0x44`, and selfie `0x4C`/`0x14 ±180°` | Both untried; both are motion commands the guard must cover | Task 37 |
+| 5 | **Shutter `camera/0x28`** | Exposure mode, ISO and EV are proven and shutter is not, so the console cannot yet offer a manual shutter on this camera | Task 39, the Pocket 2's gates |
+| 6 | **Photo `camera/0x01`**, and **record `camera/0x02` confirmed with a card in** | Record was acknowledged but unconfirmable with no card. R-CAM-17 and R-CAM-18 both turn on it | Task 39, the captures panel |
+| 7 | **Focus AFC/AFS/spot** `0x24`, `0x30`, `0x32`; **record format** `0x18`; **sensor size** `0x12`; **colour and filter** `0x3e`, `0x42` | Ids known, none driven. Each is drawn in the blueprint and none may ship live until it has been | Task 39 |
+| 8 | **Decode the camera state pushes** `0x80`, `0x81`, `0x87`, `0x88` | Arriving at 10–20 Hz and never decoded. They carry mode, recording time, battery and card — everything the deck's placard claims to show | Task 39 |
+| 9 | **Whether flip, mirror and rotation exist at all on this camera** | Newly asked (R-CTL-05). Nothing in the recovered SDK surface suggests a command, so the working answer is that the board does it — but ask the camera before assuming | Phase 8, Task 45's labelling |
+
+**Nothing marked untried above may ship as a live control** until it has been
+driven here and the effect recorded, which is this plan's own rule. The
+console draws them; whether they are offered is decided by what this session
+answers.

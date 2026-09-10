@@ -2,8 +2,8 @@
 [Unit]
 Description=Yonder core configuration service
 Documentation=https://github.com/boydsoftprez/yonder
-After=local-fs.target NetworkManager.service
-Wants=NetworkManager.service
+After=local-fs.target NetworkManager.service systemd-modules-load.service sys-kernel-config.mount
+Wants=NetworkManager.service sys-kernel-config.mount
 
 [Service]
 Type=simple
@@ -41,7 +41,32 @@ ProtectSystem=strict
 # needed it decided nothing and has been removed (K-15). Nothing this daemon does
 # writes under /etc/NetworkManager any more — NetworkManager's own keyfiles are
 # written by NetworkManager, on this daemon's behalf, over D-Bus.
-ReadWritePaths=/etc/yonder /var/lib/yonder
+# /etc/mediamtx is the media server's generated configuration, and it is here
+# for want of anywhere else this daemon may write that mediamtx may read. That
+# file carries the RTSP credential, so it must not be world-readable; the
+# media server runs as its own unprivileged account, so it cannot traverse
+# /etc/yonder (0750 root:root, it holds secrets.yaml) and must not be put in
+# group `yonder`, which owns the daemon's control socket. One narrow
+# purpose-made directory is the smaller of the two widenings.
+# assert_daemon_can_write in 50-mediamtx.sh checks this line against
+# MEDIA_CONFIG_PATH, so the two cannot drift apart.
+#
+# /etc/mavlink-router is where MavlinkRenderer generates the router's own
+# configuration (src/mav/renderer.ts, R-MAV-01). Without it the first real
+# render fails EROFS with no other clue — the class of defect that only ever
+# appears on a board.
+#
+# **The leading `-` is load-bearing.** systemd fails a unit outright when a
+# path named here does not exist, and this directory is created by the role
+# that installs mavlink-router — so on a board flashed before that role
+# existed, an unprefixed entry would stop yonder-core starting at all: no
+# console, no access point, no way in. A `-` makes a missing path ignored
+# instead, which is the safe direction for a directory the daemon writes only
+# when telemetry is installed at all.
+# The installer loads libcomposite and mounts configfs before this namespace
+# is constructed. Missing kernel support costs the camera, never core startup.
+# FunctionFS mounts and flock files stay inside RuntimeDirectory=yonder.
+ReadWritePaths=/etc/yonder /var/lib/yonder /etc/mediamtx -/etc/mavlink-router -/sys/kernel/config/usb_gadget
 ProtectHome=yes
 NoNewPrivileges=yes
 PrivateTmp=yes

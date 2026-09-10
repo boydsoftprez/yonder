@@ -1,0 +1,281 @@
+<style>
+  .options.y-list { display:block }
+  .options.y-list > .option { display:block; background:none; border:0; padding:0; margin:0 0 30px; border-radius:0; cursor:pointer }
+  .options.y-list > .option:hover { border-color:transparent }
+  .options.y-list > .option.selected { background:none }
+  .options.y-list > .option.selected .y-panel { outline:2px solid #2ad4f0; outline-offset:5px }
+  .options.y-list > .option .content { flex:none }
+
+  .y-wrap { --display:#04060a; --divider:#2b333c; --label:#7f8a95; --value:#e8ecf0;
+            --track:#161b21; --select:#2ad4f0; --good:#35d06a; --waiting:#ffcf28;
+            --bad:#ff4034; --neutral:#6b7580;
+            font-family: ui-sans-serif, system-ui, -apple-system, "Segoe UI", Roboto, sans-serif }
+  .y-panel {
+    background-color:#12151a;
+    background-image:
+      radial-gradient(120% 80% at 22% 0%, rgba(255,255,255,0.07), transparent 62%),
+      repeating-linear-gradient(45deg, rgba(255,255,255,0.03) 0 1px, transparent 1px 3px),
+      linear-gradient(45deg,#1e242b 25%,transparent 25%,transparent 75%,#1e242b 75%),
+      linear-gradient(45deg,#1e242b 25%,transparent 25%,transparent 75%,#1e242b 75%),
+      linear-gradient(135deg,#0d1014 25%,transparent 25%,transparent 75%,#0d1014 75%),
+      linear-gradient(135deg,#0d1014 25%,transparent 25%,transparent 75%,#0d1014 75%);
+    background-size:100% 100%,4px 4px,10px 10px,10px 10px,10px 10px,10px 10px;
+    background-position:0 0,0 0,0 0,5px 5px,0 0,5px 5px;
+    padding:14px 15px 15px; border-radius:5px; position:relative;
+    box-shadow: inset 0 1px 0 rgba(255,255,255,.06), 0 12px 30px rgba(0,0,0,.5) }
+  .y-fastener { position:absolute; width:6px; height:6px; border-radius:50%;
+    background:radial-gradient(circle at 35% 30%, #6a737d, #23282e 70%) }
+  .y-fastener.tl{top:5px;left:5px}.y-fastener.tr{top:5px;right:5px}
+  .y-fastener.bl{bottom:5px;left:5px}.y-fastener.br{bottom:5px;right:5px}
+  .y-placard { font-size:9.5px; letter-spacing:.19em; text-transform:uppercase;
+    color:#8b949e; margin:0 2px 9px; display:flex; justify-content:space-between; gap:8px }
+  .y-placard b { color:#ccd4dc; font-weight:600; letter-spacing:.19em }
+  .y-placard u { text-decoration:none; text-transform:none; letter-spacing:.02em }
+  .y-display { background:var(--display); border:1px solid var(--divider); border-radius:3px; overflow:hidden }
+
+  .y-vid { position:relative; overflow:hidden; background:#0a0d12 }
+  .y-sky { position:absolute; left:0; right:0; top:0; height:26%;
+    background:linear-gradient(to bottom,#78a3c8 0%,#9dbcd4 55%,#c8d4d8 100%) }
+  .y-gnd { position:absolute; left:0; right:0; top:26%; bottom:0;
+    background-color:#7a8550;
+    background-image:
+      linear-gradient(to bottom, rgba(206,214,204,.75) 0, rgba(206,214,204,0) 9%),
+      radial-gradient(135% 95% at 50% 132%, transparent 28%, rgba(0,0,0,.48)),
+      repeating-linear-gradient(104deg, rgba(122,134,80,.68) 0 46px, rgba(168,156,104,.56) 46px 86px, rgba(82,98,58,.62) 86px 124px),
+      repeating-linear-gradient(21deg, rgba(66,56,32,.2) 0 60px, transparent 60px 156px) }
+  .y-pic { position:absolute; inset:0 }
+  .y-pic.soft { filter:blur(1.1px) saturate(.94) }
+  .y-pic.held { filter:grayscale(.35) brightness(.62) }
+  .y-pic.dark { filter:grayscale(.9) brightness(.2) }
+  .y-flash { position:absolute; inset:0; background:#fff; opacity:.55 }
+
+  .y-badge { position:absolute; top:9px; left:9px; font-size:9.5px; letter-spacing:.12em;
+    text-transform:uppercase; padding:5px 9px; border-radius:2px; color:#dbe3ea;
+    background:rgba(3,5,8,.82); border:1px solid rgba(255,255,255,.24);
+    box-shadow:0 2px 10px rgba(0,0,0,.55); display:flex; align-items:center; gap:7px }
+  .y-badge b { text-transform:none; letter-spacing:0; color:#fff; font-variant-numeric:tabular-nums }
+  .y-badge.wait { border-color:rgba(255,207,40,.75); color:#ffdd6e }
+  .y-badge.wait b { color:#ffdd6e }
+  .y-badge i { width:6px; height:6px; border-radius:50%; background:#35d06a; display:block;
+    box-shadow:0 0 6px #35d06a }
+  .y-badge.wait i { background:#ffcf28; box-shadow:0 0 6px #ffcf28 }
+  .y-badge.off i { background:#6b7580; box-shadow:none }
+  .y-osd { position:absolute; font-size:9.5px; letter-spacing:.05em; color:#fff;
+    background:rgba(3,5,8,.8); border:1px solid rgba(255,255,255,.2);
+    border-radius:2px; padding:5px 8px; line-height:1.75; font-variant-numeric:tabular-nums }
+  .y-osd .k{color:#a9b5bf; margin-right:9px}
+  /* time to the next still, as a ring */
+  .y-ring { position:absolute; right:9px; top:9px; width:34px; height:34px }
+  .y-stampc { position:absolute; top:50%; left:50%; transform:translate(-50%,-50%);
+    text-align:center; white-space:nowrap }
+  .y-stampc .big { font-size:13px; letter-spacing:.19em; text-transform:uppercase; font-weight:700; color:#ffcf28 }
+  .y-stampc .sub { font-size:9.5px; letter-spacing:.08em; color:#c2ccd4; margin-top:6px; font-variant-numeric:tabular-nums }
+
+  .y-bar2 { display:flex; align-items:center; gap:11px; padding:8px 11px;
+    border-top:1px solid var(--divider); flex-wrap:wrap }
+  .y-fact { font-size:9px; letter-spacing:.11em; color:var(--label); text-transform:uppercase }
+  .y-fact b { color:var(--value); font-weight:600; font-variant-numeric:tabular-nums;
+    margin-left:5px; text-transform:none; letter-spacing:0 }
+  .y-seg { display:flex; gap:4px; max-width:280px }
+  .y-seg b { flex:1; text-align:center; font-size:9.5px; font-weight:500; padding:6px 0;
+    border:1px solid var(--divider); color:var(--label); border-radius:2px }
+  .y-seg b.on { border-color:var(--select); color:var(--select); background:rgba(42,212,240,.1) }
+  .y-seg b.warn { border-color:var(--waiting); color:var(--waiting); background:rgba(255,207,40,.11) }
+  .y-keys { display:flex; gap:6px; border-top:1px solid var(--divider); padding:9px 11px;
+    background:rgba(255,255,255,.015); flex-wrap:wrap }
+  .y-keys b { font-size:9.5px; font-weight:600; letter-spacing:.09em; text-transform:uppercase;
+    padding:8px 12px; border:1px solid var(--divider); color:var(--neutral); border-radius:2px }
+  .y-keys b.live { border-color:var(--select); color:var(--select); background:rgba(42,212,240,.07) }
+  .y-keys .sp { flex:1 }
+
+  .y-trio { display:grid; grid-template-columns:repeat(3,1fr); gap:14px; max-width:1000px }
+  .y-duo  { display:grid; grid-template-columns:repeat(2,1fr); gap:16px; max-width:1000px }
+  .y-cap2 { font-size:11px; letter-spacing:.14em; text-transform:uppercase; color:#8b949e; margin:0 0 7px 2px }
+  .y-note { font-size:13.5px; color:var(--text-secondary); margin:13px 2px 0; line-height:1.6; max-width:1000px }
+  .y-head { display:flex; align-items:center; gap:12px; margin:0 0 11px; flex-wrap:wrap }
+  .y-head h3 { margin:0; font-size:17px }
+  .y-head .tag2 { font-size:10px; letter-spacing:.13em; text-transform:uppercase;
+    color:#04060a; background:#2ad4f0; padding:3px 8px; border-radius:2px; font-weight:700 }
+  .y-rule { border:0; border-top:1px solid #2b333c; margin:38px 0 26px; max-width:1000px }
+</style>
+
+<h2>Stills, and the snapshot key</h2>
+<p class="subtitle" style="max-width:1000px">The same mechanism does three jobs: it draws the other cameras in the strip, it is what a browser gets when WebRTC will not establish, and on a link that cannot carry video it is a mode an operator would <em>choose</em>. So it is not a failure state — it is the picture's second setting.</p>
+
+<h3 style="font-size:16px; margin-bottom:4px">The picture has three settings</h3>
+<p class="subtitle" style="max-width:1000px">Live, Stills, Off — with what each costs on the badge, because the reason to pick the cheap one is always the uplink.</p>
+
+<div class="y-wrap y-trio">
+  <div><div class="y-cap2">Live</div>
+  <div class="y-panel">
+    <i class="y-fastener tl"></i><i class="y-fastener tr"></i><i class="y-fastener bl"></i><i class="y-fastener br"></i>
+    <div class="y-placard"><span><b>Nose</b></span><span><u>400 kb/s</u></span></div>
+    <div class="y-display">
+      <div class="y-vid" style="height:154px">
+        <div class="y-pic soft"><div class="y-sky"></div><div class="y-gnd"></div></div>
+        <div class="y-badge"><i></i>Live <b>640×360</b></div>
+        <div class="y-osd" style="left:9px;bottom:9px"><span class="k">PAN</span>+04.5°<span class="k" style="margin-left:10px">TILT</span>−18.0°</div>
+      </div>
+      <div class="y-bar2">
+        <div class="y-seg"><b class="on">Live</b><b>Stills</b><b>Off</b></div>
+        <span class="y-fact" style="margin-left:auto">Costs<b>400 kb/s</b></span>
+      </div>
+    </div>
+  </div></div>
+
+  <div><div class="y-cap2">Stills</div>
+  <div class="y-panel">
+    <i class="y-fastener tl"></i><i class="y-fastener tr"></i><i class="y-fastener bl"></i><i class="y-fastener br"></i>
+    <div class="y-placard"><span><b>Nose</b></span><span><u>12 kb/s</u></span></div>
+    <div class="y-display">
+      <div class="y-vid" style="height:154px">
+        <div class="y-pic held"><div class="y-sky"></div><div class="y-gnd"></div></div>
+        <div class="y-badge wait"><i></i>Stills <b>every 2 s</b></div>
+        <svg class="y-ring" viewBox="0 0 34 34">
+          <circle cx="17" cy="17" r="14" fill="rgba(3,5,8,.8)" stroke="rgba(255,255,255,.22)" stroke-width="1"/>
+          <circle cx="17" cy="17" r="11" fill="none" stroke="#2a323a" stroke-width="3"/>
+          <circle cx="17" cy="17" r="11" fill="none" stroke="#ffcf28" stroke-width="3"
+                  stroke-dasharray="69.1" stroke-dashoffset="24" transform="rotate(-90 17 17)" stroke-linecap="round"/>
+          <text x="17" y="20.5" text-anchor="middle" font-size="9" fill="#e8ecf0"
+                font-family="ui-sans-serif,system-ui">1.2</text>
+        </svg>
+        <div class="y-osd" style="left:9px;bottom:9px"><span class="k">THIS FRAME</span>0.8 s old</div>
+      </div>
+      <div class="y-bar2">
+        <div class="y-seg"><b>Live</b><b class="warn">Stills</b><b>Off</b></div>
+        <span class="y-fact" style="margin-left:auto">Costs<b>12 kb/s</b></span>
+      </div>
+    </div>
+  </div></div>
+
+  <div><div class="y-cap2">Off</div>
+  <div class="y-panel">
+    <i class="y-fastener tl"></i><i class="y-fastener tr"></i><i class="y-fastener bl"></i><i class="y-fastener br"></i>
+    <div class="y-placard"><span><b>Nose</b></span><span><u>0 kb/s</u></span></div>
+    <div class="y-display">
+      <div class="y-vid" style="height:154px">
+        <div class="y-pic dark"><div class="y-sky"></div><div class="y-gnd"></div></div>
+        <div class="y-badge off"><i></i>Picture off</div>
+        <div class="y-stampc"><div class="big" style="color:#8b949e">Not requested</div>
+          <div class="sub">last frame 3 m 12 s ago</div></div>
+      </div>
+      <div class="y-bar2">
+        <div class="y-seg"><b>Live</b><b>Stills</b><b class="on">Off</b></div>
+        <span class="y-fact" style="margin-left:auto">Ground station<b>still fed</b></span>
+      </div>
+    </div>
+  </div></div>
+</div>
+
+<p class="y-note"><b>Off is not the same as the link being down,</b> and it must not look like it. It is grey rather than red, it says <em>not requested</em> rather than <em>no contact</em>, and the strip beside it says the ground station is still being fed — because turning off your own view changes nothing about what the aircraft is sending anyone else. That distinction is the whole reason Off earns a setting rather than being something you achieve by closing the tab.</p>
+
+<hr class="y-rule">
+
+<h3 style="font-size:16px; margin-bottom:4px">Arriving at stills without asking</h3>
+
+<div class="options y-list">
+<div class="option" data-choice="auto-fallback" onclick="toggleSelect(this)">
+  <div class="y-head"><h3>Fall back on its own, say so, offer the way back</h3><span class="tag2">Recommended</span></div>
+  <div class="y-wrap y-duo">
+    <div><div class="y-cap2">WebRTC will not establish</div>
+    <div class="y-panel">
+      <i class="y-fastener tl"></i><i class="y-fastener tr"></i><i class="y-fastener bl"></i><i class="y-fastener br"></i>
+      <div class="y-placard"><span><b>Nose</b></span><span><u>12 kb/s</u></span></div>
+      <div class="y-display">
+        <div class="y-vid" style="height:172px">
+          <div class="y-pic held"><div class="y-sky"></div><div class="y-gnd"></div></div>
+          <div class="y-badge wait"><i></i>Stills — live video did not connect</div>
+          <div class="y-osd" style="left:9px;bottom:9px"><span class="k">THIS FRAME</span>1.4 s old</div>
+          <div class="y-osd" style="right:9px;bottom:9px" title="reason"><span class="k">WHY</span>no media path after 12 s</div>
+        </div>
+        <div class="y-keys">
+          <b class="live">Try live again</b><b>Stills</b><b>Off</b><span class="sp"></span><b>Snapshot</b>
+        </div>
+      </div>
+    </div></div>
+
+    <div><div class="y-cap2">Live comes back</div>
+    <div class="y-panel">
+      <i class="y-fastener tl"></i><i class="y-fastener tr"></i><i class="y-fastener bl"></i><i class="y-fastener br"></i>
+      <div class="y-placard"><span><b>Nose</b></span><span><u>400 kb/s</u></span></div>
+      <div class="y-display">
+        <div class="y-vid" style="height:172px">
+          <div class="y-pic soft"><div class="y-sky"></div><div class="y-gnd"></div></div>
+          <div class="y-badge"><i></i>Live <b>640×360</b></div>
+          <div class="y-osd" style="left:9px;bottom:9px"><span class="k">PAN</span>+04.5°<span class="k" style="margin-left:10px">TILT</span>−18.0°</div>
+        </div>
+        <div class="y-keys">
+          <b class="live">Live</b><b>Stills</b><b>Off</b><span class="sp"></span><b>Snapshot</b>
+        </div>
+      </div>
+    </div></div>
+  </div>
+  <p class="y-note"><b>A picture beats an error.</b> Twelve seconds without a media path and it drops to stills by itself rather than showing a dialog — you still see the aircraft, at 12&#8239;kb/s, while it keeps trying. The badge says <em>why</em> it is on stills rather than only that it is, because "did not connect" and "you chose this" want different reactions from you. <em>Try live again</em> is on the rail, not a link in a message.<br><br>The reason line matters more than it looks: a browser blocked by a corporate network, a carrier eating UDP and a camera that has stopped producing frames all present as no picture, and only one of them is worth walking outside for.</p>
+</div>
+
+<div class="option" data-choice="ask-first" onclick="toggleSelect(this)">
+  <div class="y-head"><h3>Show the failure and let you choose</h3></div>
+  <div class="y-wrap" style="max-width:480px"><div class="y-panel">
+    <i class="y-fastener tl"></i><i class="y-fastener tr"></i><i class="y-fastener bl"></i><i class="y-fastener br"></i>
+    <div class="y-placard"><span><b>Nose</b></span><span>—</span></div>
+    <div class="y-display">
+      <div class="y-vid" style="height:172px; background:#04060a">
+        <div class="y-stampc"><div class="big">Live video failed</div>
+          <div class="sub">no media path after 12 s</div></div>
+      </div>
+      <div class="y-keys">
+        <b class="live">Retry</b><b class="live">Use stills</b><b>Off</b><span class="sp"></span><b>Snapshot</b>
+      </div>
+    </div>
+  </div></div>
+  <p class="y-note">Explicit, and it leaves you looking at a black rectangle while you decide something the console could have decided correctly. Falling back to a cheaper picture is not a decision about the aircraft — nothing is commanded, nothing changes on the board — so rule&nbsp;4 has no opinion here and the default should just be the useful one.</p>
+</div>
+</div>
+
+<hr class="y-rule">
+
+<h3 style="font-size:16px; margin-bottom:4px">Snapshot</h3>
+<p class="subtitle" style="max-width:1000px">Same rule as recording: it happens wherever this camera can do it, and the page says where. What differs is that a board&#8209;side snapshot is a file Yonder holds, so it can be looked at and taken away.</p>
+
+<div class="y-wrap y-duo">
+  <div><div class="y-cap2">Camera takes the photo</div>
+  <div class="y-panel">
+    <i class="y-fastener tl"></i><i class="y-fastener tr"></i><i class="y-fastener bl"></i><i class="y-fastener br"></i>
+    <div class="y-placard"><span><b>Gimbal</b></span><span>USB accessory</span></div>
+    <div class="y-display">
+      <div class="y-vid" style="height:168px">
+        <div class="y-pic"><div class="y-sky"></div><div class="y-gnd"></div></div>
+        <div class="y-flash"></div>
+        <div class="y-badge"><i></i>Photo taken</div>
+      </div>
+      <div class="y-bar2">
+        <span class="y-fact">Where<b>camera card</b></span>
+        <span class="y-fact">Size<b>4000 × 3000</b></span>
+        <span class="y-fact" style="color:#5f6a74">Yonder<b style="color:#6b7580">never sees the file</b></span>
+      </div>
+    </div>
+  </div></div>
+
+  <div><div class="y-cap2">Board grabs a frame</div>
+  <div class="y-panel">
+    <i class="y-fastener tl"></i><i class="y-fastener tr"></i><i class="y-fastener bl"></i><i class="y-fastener br"></i>
+    <div class="y-placard"><span><b>Nose</b></span><span>USB · UVC</span></div>
+    <div class="y-display">
+      <div class="y-vid" style="height:168px">
+        <div class="y-pic"><div class="y-sky"></div><div class="y-gnd"></div></div>
+        <div class="y-flash" style="opacity:.35"></div>
+        <div class="y-badge"><i></i>Frame grabbed</div>
+      </div>
+      <div class="y-bar2">
+        <span class="y-fact">Where<b>board card</b></span>
+        <span class="y-fact">Size<b>1920 × 1080</b></span>
+        <span class="y-fact">Card left<b>2 h 10 m</b></span>
+      </div>
+      <div class="y-keys">
+        <b class="live">View</b><b class="live">Download</b><b>Delete</b><span class="sp"></span><b>Snapshot</b>
+      </div>
+    </div>
+  </div></div>
+</div>
+
+<p class="y-note"><b>Two honest differences, both visible on the page.</b> The camera's own photo is at full sensor resolution and Yonder never touches it — so there is no View, no Download and no Delete, and saying that plainly beats letting someone look for a gallery that cannot exist. The board's frame grab is whatever the pipeline is producing, which is lower, but it is a file on a card Yonder owns, so those three keys are real. The white flash is a deliberate confirmation that something happened at the moment you pressed — R&#8209;UI&#8209;05 wants proof of effect, and on a link with a third of a second of lag a button that dims for 300&#8239;ms is not proof of anything.</p>

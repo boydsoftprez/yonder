@@ -87,7 +87,7 @@ export function metricFor(
  * named, because a modem that dials for itself is a network adapter as far as
  * this board is concerned (R-CEL-11).
  *
- * `connection.autoconnect yes` is what satisfies R-CEL-06: a modem that drops
+ * `connection.autoconnect yes` with unlimited retries satisfies R-CEL-06: a modem that drops
  * and returns is NetworkManager's business to reconnect, not a loop of
  * Yonder's. Rule 4's spirit as much as its letter — Yonder does not build
  * control loops it can delegate.
@@ -113,6 +113,7 @@ export function modemProfile(
         ["ipv4.route-metric", metric],
         ["ipv6.route-metric", metric],
         ["connection.autoconnect", "yes"],
+        ["connection.autoconnect-retries", "0"],
       ],
     };
   }
@@ -122,6 +123,7 @@ export function modemProfile(
     ["ipv4.route-metric", metric],
     ["ipv6.route-metric", metric],
     ["connection.autoconnect", "yes"],
+    ["connection.autoconnect-retries", "0"],
   ];
   /**
    * The bearer settings the configuration does not hold, named so they are
@@ -229,7 +231,7 @@ function reported(stdout: string): Map<string, string> {
  * wanted — the difference that has to be dialled to take effect.
  *
  * **Silence is never a difference.** A property that is absent from the
- * output, empty, or `--` is one this nmcli would not tell us about, and the
+ * output, empty, `--`, or a password masked as `<hidden>` is one this nmcli would not tell us about, and the
  * commonest reason is that it is a secret: `gsm.password` is not printed
  * without `--show-secrets`, and reading a credential back out of
  * NetworkManager to compare it puts it one accident away from a log line.
@@ -252,6 +254,7 @@ export function bearerChanges(wanted: string[][], stdout: string): string[] {
     if (name === undefined) continue;
     const now = values.get(name);
     if (now === undefined || now === "" || now === "--") continue;
+    if (name === "gsm.password" && now === "<hidden>") continue;
     if (now !== value) changed.push(name);
   }
   return changed;

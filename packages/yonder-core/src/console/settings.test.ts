@@ -45,6 +45,7 @@ function evaluate(text: string): { exports: Record<string, unknown>; required: s
       return {
         consoleGate: (opts: unknown) => ({ __gate: opts }),
         editorAuth: (opts: unknown) => ({ __editorAuth: opts }),
+        headInjection: (markup: unknown) => ({ __headInjection: markup }),
       };
     },
   };
@@ -172,6 +173,29 @@ describe("renderSettings", () => {
     it("comes from the installed package, by absolute path", () => {
       const { required } = evaluate(renderSettings(config(), { provisioned: true, paths: PATHS }));
       expect(required).toEqual(["/opt/yonder/packages/yonder-core/dist/console/wiring.js"]);
+    });
+  });
+
+  describe("the theme in the head", () => {
+    /**
+     * R-UI-22. A `ui-template`'s `@import` used to carry this, delivered to
+     * the client over Dashboard's own socket connection — which does not
+     * exist until the SPA has already booted, so the browser always painted
+     * an unstyled page first and the console flashed white on every load.
+     * `dashboard.middleware` is the hook `@flowfuse/node-red-dashboard` reads
+     * out of this file and runs in front of the document it serves;
+     * `wiring.ts`'s `headInjection` is what it does with it.
+     */
+    it("links the generated stylesheet through the dashboard's own hook", () => {
+      const { exports } = evaluate(renderSettings(config(), { provisioned: true, paths: PATHS }));
+      expect(exports.dashboard).toEqual({
+        middleware: { __headInjection: '<link rel="stylesheet" href="/yonder/theme.css">' },
+      });
+    });
+
+    it("is absent while unprovisioned, with no dashboard to style", () => {
+      const { exports } = evaluate(renderSettings(config(), { provisioned: false, paths: PATHS }));
+      expect(exports.dashboard).toBeUndefined();
     });
   });
 

@@ -1,5 +1,5 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
-import type { Config } from "../schema/config.js";
+import { CameraShape, type Config } from "../schema/config.js";
 
 /**
  * Whether an apply could cost the operator their way back to the device.
@@ -26,11 +26,57 @@ export function affectsReachability(previous: Config, next: Config): boolean {
   return JSON.stringify(withoutCosmetics(previous)) !== JSON.stringify(withoutCosmetics(next));
 }
 
+/**
+ * Every key on a camera, asked of the schema itself rather than typed out a
+ * second time: a hand-written copy is exactly the kind of thing that can
+ * fall out of sync with an addition to `Camera` — silently, with nothing
+ * here to notice. `reachability.test.ts`'s leaf-enumeration test is the
+ * guard that actually matters; this export exists for the same reason it
+ * always has, so a consumer that needs to know what a camera is made of has
+ * one place to ask.
+ */
+export const CAMERA_LEAVES = Object.keys(CameraShape.shape) as readonly (keyof Config["cameras"][number])[];
+
+/**
+ * The camera leaves that cannot cost the operator their way back to the
+ * device.
+ *
+ * The test for membership is not "is this cosmetic" but **"does changing this
+ * alter what leaves the aircraft on the path the console is standing on"**.
+ * The console reaches a flying aircraft over the same cellular uplink the
+ * video leaves by, so an added output or a raised ceiling is spend on that
+ * path — and nobody has yet measured what a saturated uplink does to a console
+ * session on a board. R-VPN-07 requires an exemption to be earned by
+ * measurement rather than by argument, so `bitrate_kbps`, `outputs` and the
+ * new `stream` stay load-bearing until somebody measures: an adaptive
+ * envelope is still a bitrate policy for the path the console shares.
+ *
+ * **`preview` is no longer here (R-NET-07, R-CFG-03).** It used to be exempt
+ * on the strength of a bound tight enough that no reachable setting of it
+ * could saturate a link — `max(2000)` kb/s, `max(1280)` px. That bound is now
+ * `max(4000)` kb/s, enough on a thin cellular link to take the console's own
+ * uplink with it, so the exemption is withdrawn in the same change that
+ * raised it: every field under `preview` — mode, size, the ladder, floor,
+ * ceiling, the fixed target, rate — is load-bearing from here on, because the
+ * object as a whole is no longer deleted before the comparison runs.
+ * `config.test.ts` asserts the new bound so nobody can raise it again without
+ * this file being where they have to look.
+ *
+ * Everything absent falls through to load-bearing, which is this file's whole
+ * design: `id`, `name`, `device`, `enabled` and `autostart` all change what
+ * the aircraft is doing or which hardware it is doing it with.
+ */
+export const CAMERA_EXEMPT_LEAVES = [
+  "width", "height", "framerate", "codec", "controls", "image", "gimbal_presets",
+] as const;
+
 /** The document with the fields that cannot affect reachability removed. */
 function withoutCosmetics(config: Config): unknown {
   const copy = structuredClone(config) as {
     ui: Record<string, unknown>;
     remote?: { zerotier?: Record<string, unknown> };
+    cameras?: Record<string, unknown>[];
+    mavlink?: Record<string, unknown>;
   };
   delete copy.ui.theme;
   // Joining a mesh only ever *adds* a path to this device; it cannot take away
@@ -62,6 +108,48 @@ function withoutCosmetics(config: Config): unknown {
   if (zerotier !== undefined) {
     delete zerotier.enabled;
     delete zerotier.network_id;
+  }
+  // Named leaf by leaf, on each element, for the reason the ZeroTier note
+  // above gives: `delete copy.cameras` would hand the exemption to every
+  // field added under a camera later, with nobody deciding it should have
+  // one and nothing in this file changing for a reviewer to look at.
+  //
+  // The array itself stays. Adding a camera, removing one, or reordering the
+  // list is load-bearing: each is a different set of pipelines running on the
+  // aircraft, and the count is what the uplink is shared between.
+  for (const camera of copy.cameras ?? []) {
+    for (const leaf of CAMERA_EXEMPT_LEAVES) delete camera[leaf];
+  }
+
+  // A ground-station endpoint touches no interface, no route and no radio, so
+  // it cannot take away the path the operator is reaching the device on —
+  // which is the only thing the confirmation window exists to protect.
+  //
+  // The failure this prevents is specific and bad: the window reverts *and
+  // reboots*, so an operator adjusting a port mid-flight over a marginal link
+  // loses the video, the telemetry and the mesh a minute after touching
+  // something that could not have cost them any of it (R-CFG-12, §5).
+  //
+  // Leaf by leaf, exactly as `remote.zerotier` above and for the same reason.
+  // `mavlink.serial`, `mavlink.ingest` and `mavlink.tcp_server.port` are
+  // deliberately absent, and each earns its absence on its own. The first
+  // moves which wire the router opens, and the second opens an
+  // unauthenticated command path to the vehicle (R-MAV-07); neither has been
+  // shown to be safe to keep. The port is not like those two, and not like its
+  // own sibling `tcp_server.enabled` either: it is a number the schema would
+  // otherwise accept in full, and a value the schema accepts can still be a
+  // port some other service on the device already holds. R-MAV-14 refuses
+  // exactly one such collision — with `ui.port`, the console's own — which
+  // leaves every other one for the window to catch, not the schema. A
+  // validator is a narrower promise than a rollback.
+  const mavlink = copy.mavlink;
+  if (mavlink !== undefined) {
+    delete mavlink.endpoints;
+    delete mavlink.autocast;
+    const tcp = mavlink.tcp_server as Record<string, unknown> | undefined;
+    if (tcp !== undefined) {
+      delete tcp.enabled;
+    }
   }
   return copy;
 }

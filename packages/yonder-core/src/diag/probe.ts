@@ -2,6 +2,7 @@
 import { systemClock, type Clock } from "../apply/types.js";
 import { systemRunner, type CommandRunner } from "../net/runner.js";
 import { IPV4_PATTERN } from "../schema/config.js";
+import { isIP } from "node:net";
 
 /**
  * Reachability probes (R-DIA-01, R-DIA-02).
@@ -50,11 +51,8 @@ const HOSTNAME_LABEL = /^[a-z0-9]([a-z0-9-]{0,61}[a-z0-9])?$/i;
  * hyphen, 253 characters in total. A trailing root dot is allowed because it
  * is legal and an operator may paste one.
  *
- * **This refuses IPv6 addresses**, because they contain colons and no rule
- * here admits one. That is a real limitation on an IPv6-only cellular network
- * and it is recorded as K-22 rather than papered over with a loose pattern: a
- * validator that accepts an address shape it has not thought about is how the
- * thing it was written to stop gets through.
+ * IPv6 literals are validated by Node's address parser; scoped addresses
+ * must use the separate interface selector in Diagnostics.
  *
  * A hostname cannot begin with a hyphen, which is also what stops a value
  * being read by `ping` as a flag.
@@ -67,6 +65,7 @@ const HOSTNAME_LABEL = /^[a-z0-9]([a-z0-9-]{0,61}[a-z0-9])?$/i;
  */
 export function isProbeHost(host: string): boolean {
   if (host === "" || host.length > MAX_HOSTNAME_LENGTH) return false;
+  if (isIP(host) === 6) return true;
   if (IPV4_PATTERN.test(host)) return true;
   const name = host.endsWith(".") ? host.slice(0, -1) : host;
   if (name === "") return false;
@@ -199,7 +198,7 @@ export async function ping(
       received: null,
       rttMs: null,
       reason: "invalid-host",
-      detail: "that is not a host name or an IPv4 address",
+      detail: "that is not a host name, IPv4 address, or IPv6 address",
     };
   }
 

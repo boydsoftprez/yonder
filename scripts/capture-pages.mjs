@@ -26,17 +26,46 @@
 //      Geometry rather than pixels, because "shape" is what the requirement
 //      says and because a pixel diff across macOS and CI is a coin toss about
 //      font rasterisation, not a check.
-//   3. **A picture.** Written on every run so somebody can look. The committed
-//      copy masks live readings — a load average changes between two runs and
-//      would make the file dirty forever — so what it records is the layout.
-//      The unmasked copy goes to an artifact directory for the full view.
+//   3. **A picture.** Written on every run so somebody can look. Every reading
+//      on it is its **widest honest specimen** (R-UI-23) rather than the value
+//      that happened to be there, so the file is the same on two runs of the
+//      same console *and* shows what the page does with the longest value the
+//      field can actually carry. A reading with no specimen is masked and
+//      named, because a load average changes between two runs and would make
+//      the file dirty for ever. The unmasked copy goes to an artifact
+//      directory for the full view.
+//
+//   4. **A camera.** R-UI-03 builds navigation from detected hardware, so with
+//      none attached there is no camera page — and this gate then covers none
+//      of the camera work and does not complain, because from its point of
+//      view there is nothing there. `--synthetic-cameras` names the fixture the
+//      harness seeded the daemon from, and this checks that those pages really
+//      were photographed rather than quietly skipped.
+//   5. **The viewport contract** (`--fold`, spec §5). A tall full-page PNG is
+//      not evidence that anything fits above the fold, so `--fold` also
+//      photographs the viewport alone, asserts the picture, the Aim panel and
+//      the shutter key are inside it, asserts nothing inside a deck has a
+//      scrollbar of its own, and asserts the rail is still in the viewport at
+//      the bottom of the page.
+//   6. **A credential check**, which is the one thing here that is not a mask.
+//      The stream-address surface shows a *resolved* RTSP password (R-VID-15) and
+//      these images are committed, so a capture taken against a real device
+//      would put a real secret in the repository for ever. R-SEC-10 says never
+//      in a log, an error, or a support bundle; a committed page is all three.
+//      Same shape as K-32: a rule nobody notices is broken until it already is.
 //
 // Usage:
 //   node scripts/capture-pages.mjs --base-url URL --password PW --palette day
 //   node scripts/capture-pages.mjs ... --accept     # adopt the new shape
+//   node scripts/capture-pages.mjs ... --synthetic-cameras scripts/fixtures/camera-globalshutter.json
+//   node scripts/capture-pages.mjs ... --secrets /etc/yonder/secrets.yaml
+//   node scripts/capture-pages.mjs ... --viewport 1440x900 --fold
 import { mkdirSync, readFileSync, writeFileSync, existsSync } from "node:fs";
 import { join, dirname, isAbsolute } from "node:path";
 import { fileURLToPath } from "node:url";
+// The rules that run inside the page. Their own module so they can be
+// tested against a synthetic DOM without a console — see measure-page.mjs.
+import { measure, railAtBottom, railAtTop } from "./measure-page.mjs";
 
 const REPO = join(dirname(fileURLToPath(import.meta.url)), "..");
 
@@ -64,25 +93,90 @@ function pagesFromFlows() {
         });
       }
     } else {
-      out.push({ name: slug, title: p.name, url });
+      // A page whose deck is exchanged shows one deck at a time, so capturing
+      // it once would quietly narrow "every page" to whichever deck the page
+      // comes up on — the same hole a tabbed page has, reached a different
+      // way. A deck is a `yonder-deck-<name>` in a group's className, and the
+      // key that reveals it is the soft key whose action is that name.
+      const decks = [];
+      for (const g of flows.filter((n) => n.type === "ui-group" && n.page === p.id)
+        .sort((a, b) => (a.order ?? 0) - (b.order ?? 0))) {
+        const named = /yonder-deck-([a-z0-9-]+)/.exec(String(g.className ?? ""));
+        if (named && !decks.includes(named[1])) decks.push(named[1]);
+      }
+      if (decks.length < 2) {
+        out.push({ name: slug, title: p.name, url });
+        continue;
+      }
+      const label = (action) => {
+        for (const rail of flows.filter((n) => n.type === "ui-yonder-softkeys")) {
+          for (const key of JSON.parse(String(rail.keys ?? "[]"))) {
+            if (key.action === action) return key.label;
+          }
+        }
+        return null;
+      };
+      for (const [i, deck] of decks.entries()) {
+        out.push({
+          name: `${slug}-${deck}`,
+          title: `${p.name} · ${deck}`,
+          url,
+          // The first deck is the one the page comes up on, so it is captured
+          // as found; every other one is reached by pressing its key.
+          ...(i === 0 ? {} : { press: label(deck) }),
+          // Group visibility lives in the daemon's state store, so it is
+          // shared and it persists: a run that left the console on Setup would
+          // photograph the next page's Live deck as Setup. The last deck puts
+          // it back.
+          ...(i === decks.length - 1 ? { restore: label(decks[0]) } : {}),
+        });
+      }
     }
   }
   return out;
 }
 
 /**
- * What carries a live reading.
+ * What carries a reading.
  *
- * These are masked in the committed picture and excluded from the shape
- * manifest's text, because their content changes between two runs of the same
- * console and neither the picture nor the manifest is about their values.
+ * Each of these is photographed at the widest honest value its field can show
+ * (R-UI-23) — see `scripts/fixtures/specimens.json`. A field with no specimen
+ * there is masked instead, and named on every run, because its content changes
+ * between two runs of the same console and neither the picture nor the shape
+ * manifest is about its value.
+ *
+ * The two are the same list on purpose. A reading that is worth freezing is a
+ * reading that is worth photographing, and a second list of "things that carry
+ * a value" is a second list to forget to add to.
  */
 const LIVE = [
   ".nrdb-ui-text-value",
   ".v-data-table td",
   ".y-gauge__value",
   ".y-bar__v",
-  ".tape__box",
+  // The four instruments this list did not name, found by asking what is on a
+  // page rather than what used to need painting over. `ui-yonder-facts` is
+  // the one that matters: it draws a sentence per capability composed by the
+  // probe, it is one of the two largest overflow findings in the run, and
+  // until now its widest value was the only thing on the page nothing had
+  // measured. This is `.tape__box` one level up — a reading the list does not
+  // name is a reading nothing complains about.
+  ".y-facts__state",
+  ".y-facts__reason",
+  ".y-budget__total",
+  // The sparkline's scale is inside a `v-if="known"`, so on a harness with no
+  // mesh traffic it is never drawn and has no specimen here — the first run
+  // on a board that has some will say so, by name, which is the whole point
+  // of naming it in this list before anything renders it.
+  ".y-spark__ceiling",
+  ".y-spark__span",
+  // `.y-tape__box`, with the prefix every other class in this file has.
+  // It was `.tape__box` here, which is a class no component in this
+  // repository has ever had, so it matched nothing — and matched nothing
+  // silently, because there is no tape on a page yet either. A selector that
+  // is wrong and a selector that has nothing to find look identical until
+  // the day they stop being the same thing.
+  ".y-tape__box",
   // An annunciator caption is normally a state word — NOTHING, CONNECTED —
   // and those are exactly what somebody looking at these pictures needs to
   // read, so the widget is not masked as a kind. `CHANGE PENDING`'s is the
@@ -95,7 +189,30 @@ const LIVE = [
   // under it wear `yonder-fixed`, so what the banner is about is still
   // readable in the picture.
   ".yonder-live .y-ann__text",
+  // The telemetry instruments' own readings. A leg's rate and a sparkline's
+  // series are measurements that differ between two runs of this gate by
+  // construction — a heartbeat interval and a router's kB counter — so
+  // leaving them unmasked would leave both committed pictures dirty after
+  // every run, which is the failure this list exists to prevent. The places
+  // either side of a leg, its caption and the span under the chart are
+  // words rather than readings, and stay readable in the picture.
+  ".y-flow__rate",
+  ".y-spark__chart",
+  ".y-spark__ceiling",
 ];
+
+/**
+ * **`.y-id__v` is deliberately not on that list**, and this is where that is
+ * written down rather than left as an omission.
+ *
+ * `YonderIdentity` draws the resolved RTSP stream address, and R-SEC-10's whole
+ * evidence in this repository is that the committed `camera-setup` capture
+ * shows the fixture's `FIXTURE-NOT-A-REAL-PASSWORD` and not a device's real
+ * one. A specimen written over that field would erase the only picture that
+ * proves the rule holds. It is exempt from the sideways rule for a separate
+ * and unrelated reason — a value to copy rather than to read — and neither
+ * exemption implies the other.
+ */
 
 /**
  * The exception to the list above: a widget that has said its values are the
@@ -120,6 +237,37 @@ const FIXED = ".yonder-fixed";
 
 /** Fixed, so geometry means the same thing on a laptop and on a CI runner. */
 const VIEWPORT = { width: 1280, height: 900 };
+
+/**
+ * The three things spec §5 says fit above the fold on a notebook, by the
+ * class each component's own root carries rather than by the Node-RED node
+ * that happens to hold it today.
+ *
+ * `ui-yonder-aim` is a node and the shutter key is a part inside the deck, so
+ * a check written against node types would go blind the moment one of them
+ * moved. A component's root class is the one thing that is true wherever it
+ * is mounted.
+ *
+ * A part that is not on the page at all is a finding, not a pass. A check that
+ * cannot tell "there was nothing to find" from "I did not look" is not a
+ * check — and the camera pages do not carry the Aim panel or the shutter key
+ * yet, so this reports them missing on every run until they arrive. It goes
+ * through `report()` like every other rule, so the debt list *could* hold one
+ * with a reason and a way out; nothing is on it, deliberately. These are the
+ * pages being rebuilt, and a finding accepted the week before it is fixed is
+ * a line somebody has to remember to delete.
+ */
+const ABOVE_THE_FOLD = [
+  ["the picture", ".y-pic"],
+  ["the Aim panel", ".y-aimpanel"],
+  ["the shutter key", ".y-shutter"],
+];
+
+/** A deck, however it is drawn: groups wearing the class today, one node later. */
+const DECK = '[class*="yonder-deck"], .nrdb-ui-yonder-deck';
+
+/** The soft-key rail, which must be reachable at the bottom of the page. */
+const RAIL = ".yonder-rail";
 
 /**
  * The debt list.
@@ -208,10 +356,120 @@ const press = arg("press");
  */
 const only = arg("only");
 const as = arg("as");
+/**
+ * The fixture the harness seeded the daemon's camera layer from.
+ *
+ * Given here as well as to the daemon so that this can check the camera pages
+ * were actually photographed. A page that renders nothing still produces a
+ * picture, and "the camera pages are captured" is the whole claim this flag
+ * exists to make true.
+ */
+const syntheticCameras = arg("synthetic-cameras");
+/**
+ * The device's own secret store, for the check below.
+ *
+ * Not a mask. A mask would paint over a leak and commit the picture anyway;
+ * this fails the build.
+ */
+const secretsPath = arg("secrets");
+
+/**
+ * The widest honest value every reading is photographed at (R-UI-23).
+ *
+ * **This is the difference between a picture of a layout and a picture of a
+ * page.** The committed captures used to paint a grey box over every reading,
+ * because a load average is different on two runs and would leave the file
+ * permanently dirty. That kept the file clean and it hid the defect the
+ * pictures existed to catch: a readout row is only ever as wrong as its
+ * *longest* value, and the value that happened to be on the page during a
+ * capture is never the longest one. `2000 kb/s` fits; `20000 kb/s`, which the
+ * schema allows, is what an operator's page actually has to hold.
+ *
+ * So each field is given one value here — the widest the code that composes
+ * it can produce — and the gate renders that instead. The picture is still
+ * identical on two runs, which is what the masking was for, and it is now a
+ * picture of the hardest case rather than of the easiest.
+ *
+ * A field with no entry is masked exactly as before and **named on every
+ * run**, so the list of things still hidden is visible rather than implied,
+ * and can only shrink. An entry that matches no field on any page fails, the
+ * way a stale accepted violation does: a specimen for a reading that no longer
+ * exists is a value nobody is checking.
+ */
+const specimensPath = under(arg("specimens"), "scripts/fixtures/specimens.json");
+const specimens = (() => {
+  const parsed = JSON.parse(readFileSync(specimensPath, "utf8"));
+  const fields = {};
+  for (const [key, entry] of Object.entries(parsed.fields ?? {})) fields[key] = entry.value;
+  return { fields, masked: Object.keys(parsed.masked ?? {}) };
+})();
+
+/**
+ * The viewport this run measures in.
+ *
+ * Fixed at 1280x900 for the shape references, which is what makes geometry
+ * mean the same thing twice. `--viewport` is for the surfaces spec §5 names
+ * separately — a notebook at 1440x900 and a landscape tablet below the 1100 px
+ * breakpoint — and each of those records a shape reference of its own under
+ * its own `--as` name, so a width is never compared against a different width.
+ */
+const viewport = (() => {
+  const given = arg("viewport");
+  if (given === undefined) return VIEWPORT;
+  const parsed = /^(\d+)x(\d+)$/.exec(given);
+  if (parsed === null) {
+    process.stderr.write(`capture-pages: --viewport wants WIDTHxHEIGHT, not "${given}"\n`);
+    process.exit(2);
+  }
+  return { width: Number(parsed[1]), height: Number(parsed[2]) };
+})();
+
+/**
+ * Hold the page to the viewport contract in spec §5, and photograph the
+ * viewport on its own.
+ *
+ * Separate from the full-page capture rather than replacing it, because the
+ * two answer different questions and the spec asks both: the full page proves
+ * every control is reachable, and only the viewport proves what an operator
+ * sees before scrolling. A tall PNG is not evidence that anything fits above
+ * the fold.
+ */
+const fold = has("fold");
 
 if (!password) {
   process.stderr.write("capture-pages: --password is required\n");
   process.exit(2);
+}
+
+/**
+ * The value that must never appear in a captured page.
+ *
+ * R-VID-15 puts a *resolved* RTSP URL on the stream-address surface, R-UI-12
+ * commits these images, and R-SEC-10 says a credential belongs in none of a
+ * log, an error or a support bundle — a committed page image is all three at
+ * once. So the fixture the harness seeds carries a visibly fake password and
+ * this reads the device's real one and asserts it is nowhere.
+ *
+ * Absent when no `--secrets` was given, and then the check says so rather than
+ * passing silently: a guard that cannot tell "nothing to find" from "did not
+ * look" is not a guard.
+ */
+function deviceSecret(name) {
+  if (secretsPath === undefined) return null;
+  try {
+    const bag = parseYaml(readFileSync(secretsPath, "utf8")) ?? {};
+    const value = bag[name];
+    return typeof value === "string" && value !== "" ? value : null;
+  } catch {
+    return null;
+  }
+}
+
+let parseYaml;
+try {
+  ({ parse: parseYaml } = await import("yaml"));
+} catch {
+  parseYaml = () => ({});
 }
 
 let chromium;
@@ -225,245 +483,6 @@ try {
   process.exit(2);
 }
 
-/**
- * Everything measured inside the page.
- *
- * Runs in the browser, so it can only use what is on the page. Returns plain
- * data; every judgement about it is made out here where it can be read.
- */
-function measure([liveSelectors, fixedSelector]) {
-  const round = (n) => Math.round(n);
-  const boxOf = (el) => {
-    const r = el.getBoundingClientRect();
-    return { x: round(r.x), y: round(r.y), w: round(r.width), h: round(r.height) };
-  };
-
-  /**
-   * A key that survives a reorder of unrelated widgets. The element's own
-   * classes plus its position among its siblings — not an index into a flat
-   * list, which would renumber everything below an insertion and report five
-   * changes where there was one.
-   */
-  const keyOf = (el) => {
-    const cls = [...el.classList]
-      .filter((c) => !/^(v-|mdi-)/.test(c) && !c.includes("theme--"))
-      .sort()
-      .join(".");
-    const siblings = [...(el.parentElement?.children ?? [])].filter(
-      (s) => s.className === el.className,
-    );
-    const nth = siblings.indexOf(el);
-    return cls + (siblings.length > 1 ? `#${nth}` : "");
-  };
-
-  const widgets = [...document.querySelectorAll('[class*="nrdb-ui-widget"], [class*="nrdb-ui-group"]')];
-
-  /**
-   * Content that does not fit its box, either way it fails.
-   *
-   * A scrollable box hides the excess — that is K-13, 39% of a safety warning
-   * behind an inner scrollbar nothing indicated was there. A box that does
-   * *not* scroll lets the excess escape instead, and the next widget is
-   * painted over the top of it. Same cause, opposite symptom, and this check
-   * only looked for the first one until an operator spotted the second: a
-   * dropdown 48px tall with 70px of content, its message under the password
-   * field that follows it.
-   */
-  const clipped = [];
-  for (const el of document.querySelectorAll("*")) {
-    const style = getComputedStyle(el);
-    const scrolls = /auto|scroll|hidden/.test(style.overflowY);
-    const isWidget = /nrdb-ui-widget/.test(el.className || "");
-    // A scroller hides its overflow; a widget that does not scroll spills it
-    // onto whatever is drawn next. Both are content that does not fit.
-    if (!scrolls && !isWidget) continue;
-    if (el.scrollHeight <= el.clientHeight + 2) continue;
-    if (el.clientHeight === 0) continue;
-    // The page's own scroller. A console taller than the window is a page you
-    // scroll, not content that is hidden — the defect is a box *inside* the
-    // page clipping what it holds.
-    if (el === document.documentElement || el === document.body) continue;
-    if (el.clientHeight >= window.innerHeight - 4) continue;
-    // A table body scrolling is a table doing its job. Prose is not.
-    if (el.closest(".v-data-table__wrapper, .v-table__wrapper")) continue;
-    clipped.push({
-      key: keyOf(el),
-      how: scrolls ? "hides" : "spills over what follows it",
-      visible: el.clientHeight,
-      content: el.scrollHeight,
-      hidden: Math.round((1 - el.clientHeight / el.scrollHeight) * 100),
-      text: (el.textContent ?? "").trim().slice(0, 80),
-    });
-  }
-
-  /**
-   * An action spanning the surface it sits on. R-UI-10, checked in the DOM
-   * rather than over the flows, because a widget width of "auto" that CSS
-   * then stretches is exactly the case a JSON check cannot see.
-   */
-  const spanning = [];
-  for (const el of document.querySelectorAll("button, .nrdb-ui-button .v-btn")) {
-    const parent = el.parentElement;
-    if (!parent) continue;
-    const own = el.getBoundingClientRect().width;
-    const around = parent.getBoundingClientRect().width;
-    if (around < 8 || own / around < 0.9) continue;
-    if (own < 240) continue; // a narrow column is allowed to be filled
-    spanning.push({
-      key: keyOf(el),
-      label: (el.textContent ?? "").trim().slice(0, 40),
-      width: Math.round(own),
-      of: Math.round(around),
-    });
-  }
-
-  /**
-   * Text on a control that cannot be read against what is behind it (R-UI-16).
-   *
-   * This is the check the picture could not make. An operator reported that
-   * in the night palette the text in the entry fields was "not able to be
-   * read by human eyes"; every unit test passed, the shape reference was
-   * unchanged, and the committed capture showed the words — at 1.05:1 against
-   * their own recess, which is a picture of the defect that looks like a
-   * picture of an empty field.
-   *
-   * **Computed colours, not pixels.** Each control's own colour is composited
-   * over everything painted behind it, with the alpha and the accumulated
-   * `opacity` of its ancestors folded in — because what made those labels
-   * unreadable was Vuetify drawing black at 60% opacity, and a rule that read
-   * `color` alone would have called that black and passed it in the day
-   * palette for the same reason it failed in night.
-   *
-   * **Controls only.** The threshold is WCAG AA for body text, and the
-   * console's own controls clear it in both palettes with room: the tightest
-   * measured is 4.63:1 (a day label on a day recess) and most are 5.5–12.8:1.
-   * Instrument faces, annunciator lamps and gauge bands are deliberately
-   * coloured against their own backgrounds and are a different question; this
-   * one is about the text that says what to type and the text that was typed.
-   */
-  const rgba = (s) => {
-    const n = (s.match(/-?[\d.]+/g) ?? []).map(Number);
-    return n.length >= 3 ? { r: n[0], g: n[1], b: n[2], a: n.length > 3 ? n[3] : 1 } : null;
-  };
-  const over = (fg, bg) => ({
-    r: fg.r * fg.a + bg.r * (1 - fg.a),
-    g: fg.g * fg.a + bg.g * (1 - fg.a),
-    b: fg.b * fg.a + bg.b * (1 - fg.a),
-    a: 1,
-  });
-  const luminance = (c) => {
-    const f = (v) => { const u = v / 255; return u <= 0.03928 ? u / 12.92 : ((u + 0.055) / 1.055) ** 2.4; };
-    return 0.2126 * f(c.r) + 0.7152 * f(c.g) + 0.0722 * f(c.b);
-  };
-  const contrast = (a, b) => {
-    const [x, y] = [luminance(a), luminance(b)];
-    return (Math.max(x, y) + 0.05) / (Math.min(x, y) + 0.05);
-  };
-  // Everything painted behind this element, composited bottom-up. The page
-  // itself is the floor: a transparent stack over a transparent body is still
-  // read against something, and white is the browser's own answer.
-  const behind = (el) => {
-    const stack = [];
-    for (let a = el; a !== null; a = a.parentElement) {
-      const c = rgba(getComputedStyle(a).backgroundColor);
-      if (c !== null && c.a > 0) stack.push(c);
-    }
-    let ground = { r: 255, g: 255, b: 255, a: 1 };
-    for (let i = stack.length - 1; i >= 0; i--) ground = over(stack[i], ground);
-    return ground;
-  };
-  const opacityOf = (el) => {
-    let o = 1;
-    for (let a = el; a !== null; a = a.parentElement) o *= Number(getComputedStyle(a).opacity || 1);
-    return o;
-  };
-
-  const unreadable = [];
-  const CONTROL_TEXT = [
-    ".nrdb-ui-widget input", ".nrdb-ui-widget textarea", ".nrdb-ui-widget .v-label",
-    ".nrdb-ui-widget label", ".nrdb-ui-widget .v-field__input",
-    ".nrdb-ui-widget .v-select__selection-text", ".nrdb-ui-widget .v-messages__message",
-    // The table's own search box is not inside a widget wrapper of its own,
-    // and it is a field an operator types into. It measured 1.03:1.
-    ".nrdb-ui-table-wrapper input", ".nrdb-ui-table-wrapper .v-label",
-  ].join(",");
-  for (const el of document.querySelectorAll(CONTROL_TEXT)) {
-    const r = el.getBoundingClientRect();
-    if (r.width === 0 || r.height === 0) continue;
-    const style = getComputedStyle(el);
-    const fill = style.webkitTextFillColor;
-    const own = rgba(fill && fill !== "currentcolor" ? fill : style.color);
-    if (own === null) continue;
-    const ground = behind(el);
-    const shown = over({ ...own, a: own.a * opacityOf(el) }, ground);
-    const ratio = contrast(shown, ground);
-    if (ratio >= 4.5) continue;
-    unreadable.push({
-      // `keyOf` drops framework classes, which is right for a widget and
-      // leaves nothing at all for a Vuetify label — every class it has is a
-      // `v-` one. So the framework's own two are kept here, because a finding
-      // with an empty key cannot be told from another finding with an empty
-      // key, either by a reader or by the debt list.
-      key: keyOf(el) || `${el.tagName.toLowerCase()}.${[...el.classList].filter((c) => /^v-/.test(c)).slice(0, 2).join(".")}`,
-      text: (el.tagName === "INPUT" ? (el.value || el.placeholder || "") : (el.textContent ?? "")).trim().slice(0, 40),
-      color: style.color,
-      opacity: Number(opacityOf(el).toFixed(2)),
-      on: `rgb(${Math.round(ground.r)},${Math.round(ground.g)},${Math.round(ground.b)})`,
-      ratio: Number(ratio.toFixed(2)),
-    });
-  }
-
-  /**
-   * What the committed picture masks, decided here and marked on the page.
-   *
-   * Marked rather than returned, because the caller needs Playwright locators
-   * and this needs an ancestor test — "not inside a widget that declared
-   * itself fixed" — which CSS has no combinator for and `element.closest`
-   * does in one call. One attribute, set once, and the screenshot masks
-   * exactly the elements this decided on.
-   */
-  const live = new Set();
-  for (const sel of liveSelectors) {
-    for (const el of document.querySelectorAll(sel)) {
-      if (el.closest(fixedSelector)) continue;
-      live.add(el);
-      el.setAttribute("data-yonder-mask", "");
-    }
-  }
-
-  /**
-   * The words on anything that has declared itself fixed.
-   *
-   * Geometry alone could not tell four of these states apart. The `Way out`
-   * rows differ by a sentence and a lamp caption; an annunciator is
-   * `inline-flex` inside a grid-fixed wrapper and the qualifier wraps to one
-   * line in every state, so *no box moves* — and the four state references
-   * came out byte-identical to their bases, asserting nothing the base did
-   * not already assert. Same for `status-psk-changed`, whose whole subject is
-   * one cell's text.
-   *
-   * `yonder-fixed` is the one declaration on this console that a value is the
-   * same on every run, which is exactly the licence needed to freeze its
-   * text. Nothing else's text is recorded: a load average in a reference
-   * would leave it dirty for ever, which is what the masking exists to
-   * prevent.
-   */
-  const fixed = [...document.querySelectorAll(fixedSelector)].map((el) => ({
-    key: keyOf(el),
-    text: (el.textContent ?? "").replace(/\s+/g, " ").trim(),
-  })).filter((f) => f.text !== "");
-
-  return {
-    viewport: { w: window.innerWidth, h: window.innerHeight },
-    scrollWidth: document.documentElement.scrollWidth,
-    widgets: widgets.map((el) => ({ key: keyOf(el), box: boxOf(el) })),
-    liveBoxes: [...live].map(boxOf).filter((b) => b.w > 0 && b.h > 0),
-    fixed,
-    clipped,
-    spanning,
-    unreadable,
-  };
-}
 
 // ---------------------------------------------------------------------------
 
@@ -485,7 +504,7 @@ const seen = new Set();
 
 const browser = await chromium.launch();
 const context = await browser.newContext({
-  viewport: VIEWPORT,
+  viewport,
   deviceScaleFactor: 1,
   reducedMotion: "reduce",
   colorScheme: "light",
@@ -502,6 +521,10 @@ if (!login.ok()) {
 
 let failures = 0;
 let changed = 0;
+/** What every captured page rendered, for the whole-run checks at the end. */
+const seenText = [];
+/** Every field name a reading was found under, for the stale-specimen check. */
+const fieldsSeen = new Set();
 const note = (s) => process.stdout.write(s + "\n");
 
 for (const page of pages) {
@@ -513,16 +536,38 @@ for (const page of pages) {
   // blank. Console errors and failed requests are collected so the gate can
   // say what happened instead of leaving a picture of nothing.
   const noise = [];
+  // A stream negotiation for a camera that is not running is not a page
+  // defect — it is the case R-VID-14 exists for, and the component says so in
+  // words on the frame. The browser logs it as a console error anyway, so the
+  // filter is on the resource it names rather than on the words, which are the
+  // browser's and not ours. A 404 on a widget bundle still fails, which is
+  // what this check was written for.
+  const aboutTheStream = (url) => /\/whep(\?|$)/.test(String(url ?? ""));
   tab.on("console", (m) => {
-    if (m.type() === "error") noise.push(`console: ${m.text().slice(0, 200)}`);
+    if (m.type() !== "error") return;
+    if (aboutTheStream(m.location()?.url)) return;
+    noise.push(`console: ${m.text().slice(0, 200)}`);
   });
   tab.on("pageerror", (e) => noise.push(`uncaught: ${String(e.message).slice(0, 200)}`));
-  tab.on("requestfailed", (r) => noise.push(`request failed: ${r.url().slice(-90)}`));
+  tab.on("requestfailed", (r) => {
+    if (aboutTheStream(r.url())) return;
+    noise.push(`request failed: ${r.url().slice(-90)}`);
+  });
   tab.on("response", (r) => {
+    // The picture negotiating a stream for a camera that is not running is not
+    // a page defect — it is the case R-VID-14 exists for, and the component
+    // says so in words on the frame ("this camera is not streaming; start it
+    // on the rail"). A 404 on a widget bundle still fails, which is what this
+    // check was written for.
+    if (aboutTheStream(r.url())) return;
     if (r.status() >= 400) noise.push(`HTTP ${r.status()}: ${r.url().slice(-90)}`);
   });
 
-  await tab.goto(baseUrl + page.url, { waitUntil: "networkidle" });
+  // `load`, not `networkidle`. A page carrying a live picture never goes idle:
+  // the WHEP session reconnects with backoff for as long as it is open, so
+  // waiting for silence on a camera page is waiting for something that will
+  // not happen. The widget wait below is what actually says the page is drawn.
+  await tab.goto(baseUrl + page.url, { waitUntil: "load" });
   // The dashboard renders its widgets after the socket connects, so waiting on
   // the network alone captures an empty page.
   await tab.waitForSelector('[class*="nrdb-ui-widget"], [class*="nrdb-ui-group"]', { timeout: 15000 })
@@ -546,15 +591,63 @@ for (const page of pages) {
     }
   }
 
-  const shape = await tab.evaluate(measure, [LIVE, FIXED]);
+  // The deck this entry is for, reached by pressing its key. Unlike a tab,
+  // which the browser owns, a deck is exchanged by the *device*: the press
+  // goes to Node-RED, the flow answers with a ui-control message, and the
+  // groups appear. So this is also the only proof that path works at all.
+  if (page.press) {
+    const key = tab.locator("button", { hasText: page.press }).first();
+    if (await key.count()) {
+      await key.click();
+      await tab.waitForTimeout(900);
+    } else {
+      note(`  FAIL  ${page.title} (${palette}) has no key labelled "${page.press}" to reach it`);
+      failures += 1;
+    }
+  }
+
+  // **Read before anything is rewritten.** The specimens below replace the
+  // text of every reading on the page, and the R-SEC-10 check further down
+  // asks whether the device's real RTSP password is in the page's HTML — so
+  // taking the HTML after the substitution would ask that question of a page
+  // the gate had already overwritten, and it would always answer no. The
+  // guard would still be there, still green, and checking nothing.
+  const html = await tab.content();
+
+  // **From the top of the page, always.** Every box in the shape manifest is a
+  // `getBoundingClientRect`, which is measured from the viewport and not from
+  // the document — so a page that happens to be scrolled records a different
+  // geometry for the same layout. Reaching a deck presses a soft key on the
+  // rail, and the browser scrolls that key into view to click it: `Camera ·
+  // Setup` was measured 327 px down its own page — every widget in both of
+  // its references moved by exactly that — and the viewport contract
+  // below duly reported the picture as outside the viewport when it was in it.
+  await tab.evaluate(() => { window.scrollTo(0, 0); });
+  await tab.waitForTimeout(150);
+
   const stem = `${page.name}.${palette}`;
 
-  // The picture. Masked for the committed copy — a load average changes
-  // between two runs and would leave the file permanently dirty — and whole
-  // for the artifact a person actually looks at.
+  // **The page as it really was**, before a specimen is written into it and
+  // before anything is masked. The committed copy below is the layout under
+  // the hardest value each field can hold, which is a different and equally
+  // honest picture — and it is not a portrait of one board in one state, so
+  // this is the copy to look at when the question is what the device was
+  // actually doing.
+  await tab.screenshot({ path: join(artifacts, `${stem}.png`), fullPage: true });
+
+  // R-UI-29 supersedes the Live/Setup split: picture and Aim remain bounded;
+  // capture and transaction controls stay on the single scrolling workspace.
+  const workspace = await tab.locator('.y-deck--workspace').count() > 0;
+  const foldParts = workspace ? ABOVE_THE_FOLD.filter(([name]) => name !== 'the shutter key') : ABOVE_THE_FOLD;
+  const shape = await tab.evaluate(measure, [LIVE, FIXED, specimens.fields, specimens.masked, foldParts, DECK]);
+  for (const reading of shape.readings) fieldsSeen.add(reading.key);
+
+  // The committed picture: every reading at its widest honest specimen, and a
+  // mask over the few that have none — a load average changes between two runs
+  // and would leave the file permanently dirty.
   //
   // The elements were marked by `measure()` a moment ago rather than selected
-  // again here, so there is one decision about what is live rather than the
+  // again here, so there is one decision about what is hidden rather than the
   // same list applied twice by two mechanisms that can drift.
   const masks = [tab.locator("[data-yonder-mask]")];
   await tab.screenshot({
@@ -568,7 +661,50 @@ for (const page of pages) {
     // through is not a mask, it is a tint.
     maskColor: "#8b8f94",
   });
-  await tab.screenshot({ path: join(artifacts, `${stem}.png`), fullPage: true });
+
+  // ---- the viewport contract, spec §5 ----
+  //
+  // The viewport on its own, and then the page scrolled to the bottom. The
+  // full-page picture above proves every control is *reachable*; neither of
+  // these two is evidence for the other, and the requirement asks for both.
+  let rail = null;
+  let railTop = null;
+  if (fold) {
+    await tab.screenshot({
+      path: join(refs, "capture", `${stem}.fold.png`),
+      fullPage: false,
+      mask: masks,
+      maskColor: "#8b8f94",
+    });
+    await tab.screenshot({ path: join(artifacts, `${stem}.fold.png`), fullPage: false });
+    await tab.evaluate(() => { window.scrollTo(0, document.documentElement.scrollHeight); });
+    // A sticky rail is placed by the browser after the scroll settles, so a
+    // measurement taken in the same tick is of where it used to be.
+    await tab.waitForTimeout(300);
+    rail = await tab.evaluate(railAtBottom, [RAIL]);
+    // And once the page is back at the top: on a page taller than the window
+    // this is the only measurement that tells a sticky rail from one that
+    // sits at the end of the page (spec §5, blueprint L-97).
+    railTop = await tab.evaluate(railAtTop, [RAIL]);
+    await tab.evaluate(() => { window.scrollTo(0, 0); });
+  }
+
+  // ---- R-SEC-10, and this one is a check rather than a mask ----
+  //
+  // The stream-address surface shows a resolved credential. R-UI-12 commits
+  // these images, so a captured page carrying the real one would put a secret
+  // in the repository for ever — and R-SEC-10 says never in a log, an error,
+  // or a support bundle. The fixture carries a visibly fake value; this is
+  // what proves the real one never got in.
+  //
+  // Same shape as K-32: a rule nobody notices is broken until it already is.
+  seenText.push(html);
+  const secret = deviceSecret("rtsp_password");
+  if (secret !== null && html.includes(secret)) {
+    note(`  FAIL  ${page.title} (${palette}) contains the resolved RTSP credential`);
+    note("          capture with --synthetic-cameras so the pages render the fixture value");
+    failures += 1;
+  }
 
   // ---- rules ----
   // A finding on the debt list is reported and not counted; anything else
@@ -603,6 +739,116 @@ for (const page of pages) {
       `${page.title} (${palette}) ${c.how}: ${c.content}px of content in ${c.visible}px (${c.hidden}%)`,
       `${c.key}  "${c.text}"`,
     );
+  }
+  for (const t of shape.truncated) {
+    report(
+      { rule: "truncated", page: page.name, palette, key: t.key },
+      `${page.title} (${palette}) ${t.how}: ${t.content}px of text in ${t.visible}px (${t.hidden}%)`,
+      `${t.key}  "${t.text}"`,
+    );
+  }
+  // A reading nobody has chosen a widest value for. Not an error in the page —
+  // an error in `scripts/fixtures/specimens.json`, which is why it names the
+  // key to add rather than the widget to fix.
+  for (const r of shape.readings.filter((x) => x.state === "unspecified")) {
+    report(
+      { rule: "unspecified", page: page.name, palette, key: r.key },
+      `${page.title} (${palette}) photographs a masked reading with no specimen`,
+      `add "${r.key}" to ${join("scripts/fixtures", "specimens.json")}, or list it under "masked" with a reason  (it reads "${r.was}")`,
+    );
+  }
+  // **The above-the-fold contract is the notebook's, and only the notebook's.**
+  // Spec §5 names one surface for it: "At 1440x900 with the sidebar open, the
+  // picture, Aim and Capture fit above the fold." The tablet row beside it asks
+  // for something different — "everything still reachable with a finger" — and
+  // §13 says the same, "no hidden controls ... at tablet widths". Reachable is
+  // what the rail check below and the clipping rules already measure.
+  //
+  // Applying the fold list at 1024x768 as well was stricter than anything
+  // asked for, and it was not free: it is what pushed the readout strip out
+  // from under the picture, where fold.1440.png draws it, down below the deck
+  // — because three lines of prose between the picture and the deck put the
+  // shutter key nine pixels past a 768px viewport. A gate rule nobody asked
+  // for moved the page away from the blueprint. The parts are checked where
+  // the contract is; the viewport is still photographed at both widths.
+  const foldContract = fold && shape.viewport.h >= 900;
+  if (fold) {
+    // Only the parts list is the notebook's; the nested-scroller and rail
+    // checks below are asked for at tablet widths too (spec §13), so they stay
+    // outside this condition.
+    for (const part of foldContract ? shape.fold.parts : []) {
+      if (!part.present) {
+        report(
+          { rule: "fold", page: page.name, palette, key: part.name },
+          `${page.title} (${palette}) has no ${part.name} on it at ${shape.viewport.w}x${shape.viewport.h}`,
+          `spec §5 puts it above the fold; nothing matched ${part.sel}`,
+        );
+        continue;
+      }
+      if (part.inside) continue;
+      report(
+        { rule: "fold", page: page.name, palette, key: part.name },
+        `${page.title} (${palette}) draws ${part.name} outside the ${shape.viewport.w}x${shape.viewport.h} viewport`,
+        `${part.box.w}x${part.box.h} at ${part.box.x},${part.box.y}`,
+      );
+    }
+    // A deck that is not there is a check that did not run, and this file
+    // already argues that for the parts above. `nested` was empty on every
+    // run because `querySelectorAll` matched nothing, and an empty list reads
+    // exactly like a page with no scroller in it.
+    if (shape.fold.decks === 0) {
+      report(
+        { rule: "nested", page: page.name, palette, key: "the deck" },
+        `${page.title} (${palette}) has no deck on it, so nothing was checked for a scroller of its own`,
+        `spec §5 gives this page one; nothing matched ${DECK}`,
+      );
+    }
+    for (const n of shape.fold.nested) {
+      report(
+        { rule: "nested", page: page.name, palette, key: n.key },
+        `${page.title} (${palette}) scrolls ${n.across ? "sideways" : "inside"} the deck: ${n.key}`,
+        "one vertical page scroll, and no scroller of its own inside it (spec §5)",
+      );
+    }
+    if (workspace) {
+      for (const [name, selector] of [['transaction area', '.y-deck__transaction'], ['capture control', '.y-shutter']]) {
+        const control = tab.locator(selector);
+        if (await control.count() !== 1) {
+          note(`  FAIL  ${page.title} (${palette}) must have one ${name}`);
+          failures += 1;
+          continue;
+        }
+        await control.scrollIntoViewIfNeeded();
+        const box = await control.boundingBox();
+        if (!box || box.x < 0 || box.y < 0 || box.x + box.width > shape.viewport.w + 1 || box.y + box.height > shape.viewport.h + 1) {
+          note(`  FAIL  ${page.title} (${palette}) cannot reach the complete ${name} by scrolling`);
+          failures += 1;
+        } else note(`  ok    ${page.title} (${palette}) keeps the ${name} reachable on its single workspace`);
+      }
+      await tab.evaluate(() => { window.scrollTo(0, 0); });
+    } else if (rail === null || !rail.present) {
+      note(`  FAIL  ${page.title} (${palette}) has no rail to keep reachable`);
+      failures += 1;
+    } else if (!rail.inside) {
+      note(`  FAIL  ${page.title} (${palette}) puts the rail outside the viewport at the bottom of the page`);
+      note(`          ${rail.box.w}x${rail.box.h} at ${rail.box.x},${rail.box.y} in ${rail.viewport.w}x${rail.viewport.h}`);
+      failures += 1;
+    } else {
+      note(`  ok    ${page.title} (${palette}) keeps the rail in the viewport at the bottom of the page`);
+    }
+    if (railTop !== null && railTop.present && railTop.tall && !railTop.inside) {
+      report(
+        { rule: "rail", page: page.name, palette, key: "top" },
+        `${page.title} (${palette}) loses the rail when the page is scrolled to the top`,
+        `${railTop.box.w}x${railTop.box.h} at ${railTop.box.x},${railTop.box.y} in ${railTop.viewport.w}x${railTop.viewport.h} — the rail is not sticky (spec §5, L-97)`,
+      );
+    } else if (railTop !== null && railTop.present && railTop.tall) {
+      note(`  ok    ${page.title} (${palette}) keeps the rail in the viewport at the top of a page that scrolls`);
+    }
+    const held = shape.fold.parts.filter((x) => x.present && x.inside);
+    if (held.length === shape.fold.parts.length && foldContract) {
+      note(`  ok    ${page.title} (${palette}) fits ${held.map((x) => x.name).join(", ")} above the fold`);
+    }
   }
   for (const a of shape.spanning) {
     report(
@@ -671,8 +917,22 @@ for (const page of pages) {
       note(`  FAIL  ${page.title} (${palette}) changed shape: ${was.widgets.length} widgets -> ${recorded.widgets.length}, ${moved.length} moved, ${reworded.length} reworded`);
       for (const w of moved.slice(0, 4)) note(`          ${w.key} now ${w.box.w}x${w.box.h} at ${w.box.x},${w.box.y}`);
       for (const f of reworded.slice(0, 4)) note(`          ${f.key} now says "${f.text.slice(0, 70)}"`);
-      note(`          look at ${join("docs/console/capture", stem + ".png")}, then re-run with ACCEPT_SHAPE=1`);
+      note(`          look at ${join(artifacts, stem + ".png")}, then re-run with ACCEPT_SHAPE=1`);
       changed += 1;
+    }
+  }
+
+  // Group visibility is the daemon's, so it is shared and it persists. A run
+  // that walked off leaving the console on Setup would photograph the next
+  // run's Live deck as Setup, and the shape reference would drift with it.
+  if (page.restore) {
+    const key = tab.locator("button", { hasText: page.restore }).first();
+    if (await key.count()) {
+      await key.click();
+      await tab.waitForTimeout(700);
+    } else {
+      note(`  FAIL  ${page.title} (${palette}) has no "${page.restore}" key to put the deck back`);
+      failures += 1;
     }
   }
 
@@ -684,9 +944,10 @@ if (press) {
   let pressed = false;
   for (const page of pages) {
     const tab = await context.newPage();
-    await tab.goto(baseUrl + page.url, { waitUntil: "networkidle" });
+    await tab.goto(baseUrl + page.url, { waitUntil: "load" });
     await tab.waitForTimeout(500);
-    const key = tab.locator("button", { hasText: press }).first();
+    const key = tab.getByRole("button", { name: press, exact: true }).first();
+    await key.waitFor({ state: "visible", timeout: 5000 }).catch(() => {});
     if (await key.count()) {
       await key.click();
       note(`  ok    pressed "${press}" on ${page.title}`);
@@ -719,8 +980,85 @@ for (const e of stale) {
   failures += 1;
 }
 
+/**
+ * R-SEC-10, asked of the specimen file itself.
+ *
+ * These values are written into pages that are screenshotted and committed, so
+ * a specimen carrying a credential is the same leak the page check further up
+ * exists to prevent, arriving by the one route that check cannot see: it reads
+ * the page *before* the substitution, precisely so the substitution cannot
+ * hide a real value, which means it is also reading it before a specimen could
+ * introduce one.
+ */
+{
+  const secret = deviceSecret("rtsp_password");
+  const carrying = secret === null
+    ? []
+    : Object.entries(specimens.fields).filter(([, value]) => String(value).includes(secret));
+  for (const [key] of carrying) {
+    note(`  FAIL  the specimen for "${key}" carries this device's RTSP credential`);
+    note(`          it would be rendered into a committed page image (R-SEC-10)`);
+    failures += 1;
+  }
+}
+
+/**
+ * A specimen for a field that no page has.
+ *
+ * The same rule the accepted-violations list is held to, for the same reason:
+ * a value nobody is checking looks exactly like a value that is being checked,
+ * and the file stops being a description of the console. Only on a full pass —
+ * a run of one page has not been near the other ten, and calling their
+ * specimens dead would delete a real one.
+ */
+if (only === undefined) {
+  const declared = [...Object.keys(specimens.fields), ...specimens.masked];
+  for (const key of declared.filter((k) => !fieldsSeen.has(k))) {
+    note(`  FAIL  no reading on any page is called "${key}"`);
+    note(`          nothing is photographed by it — delete that entry from ${join("scripts/fixtures", "specimens.json")}`);
+    failures += 1;
+  }
+}
+
+/**
+ * The claim `--synthetic-cameras` exists to make true.
+ *
+ * The fixture is only worth having if the camera pages were actually
+ * photographed. Without this, a fixture that stopped being read — a renamed
+ * key, a daemon started without it — would leave the camera pages rendering
+ * nothing and every check above would still pass, because a page with no
+ * camera on it is a page, and this gate would say so cheerfully.
+ */
+if (syntheticCameras !== undefined) {
+  const fixture = JSON.parse(readFileSync(syntheticCameras, "utf8"));
+  const wanted = String(fixture.camera?.name ?? "");
+  const captured = pages.filter((p) => p.name.startsWith("camera"));
+  if (captured.length === 0) {
+    note("  FAIL  --synthetic-cameras was given and no camera page was captured");
+    failures += 1;
+  }
+  if (secretsPath === undefined) {
+    note("  FAIL  --synthetic-cameras without --secrets: nothing checked the real credential");
+    note("          the stream address resolves one, and these images are committed (R-SEC-10)");
+    failures += 1;
+  }
+  // Only on a full pass, and for the reason the stale-debt check gives one
+  // paragraph up: a run of one page has not been anywhere near the other ten,
+  // and "no captured page names the fixture's camera" is a claim about the
+  // set. The other two assertions above hold on every run, which is what
+  // keeps `--secrets` from being optional on the single-page fold captures.
+  if (only === undefined && !seenText.some((t) => t.includes(wanted))) {
+    note(`  FAIL  no captured page names "${wanted}", so the fixture reached no page`);
+    failures += 1;
+  }
+}
+
 note("");
-note(`  captured ${pages.length} pages in the ${palette} palette`);
+note(`  captured ${pages.length} pages in the ${palette} palette at ${viewport.width}x${viewport.height}`);
+{
+  const rendered = [...fieldsSeen].filter((k) => Object.prototype.hasOwnProperty.call(specimens.fields, k));
+  note(`  ${rendered.length} of ${fieldsSeen.size} field(s) photographed at their widest honest value`);
+}
 if (failures) note(`  ${failures} rule failure(s)`);
 if (changed) note(`  ${changed} page(s) changed shape without being accepted`);
 process.exit(failures + changed === 0 ? 0 : 1);

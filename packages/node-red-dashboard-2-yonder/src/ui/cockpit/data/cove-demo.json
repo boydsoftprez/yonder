@@ -1,0 +1,238 @@
+{
+  "name": "Take off around the cove then land",
+  "source": "Mission Planner QGC WPL 110",
+  "home": {
+    "lat": 35.9607874,
+    "lon": -83.3668696,
+    "alt": 315.641734
+  },
+  "items": [
+    {
+      "seq": 1,
+      "command": 22,
+      "frame": 3,
+      "params": [
+        0,
+        0,
+        0,
+        0
+      ],
+      "lat": 0,
+      "lon": 0,
+      "alt": 91.439999,
+      "current": false,
+      "autocontinue": true
+    },
+    {
+      "seq": 2,
+      "command": 16,
+      "frame": 3,
+      "params": [
+        0,
+        0,
+        0,
+        0
+      ],
+      "lat": 35.9604227,
+      "lon": -83.3647192,
+      "alt": 91.439999,
+      "current": false,
+      "autocontinue": true
+    },
+    {
+      "seq": 3,
+      "command": 16,
+      "frame": 3,
+      "params": [
+        0,
+        0,
+        0,
+        0
+      ],
+      "lat": 35.9635837,
+      "lon": -83.3646119,
+      "alt": 91.439999,
+      "current": false,
+      "autocontinue": true
+    },
+    {
+      "seq": 4,
+      "command": 16,
+      "frame": 3,
+      "params": [
+        0,
+        0,
+        0,
+        0
+      ],
+      "lat": 35.965772,
+      "lon": -83.3624768,
+      "alt": 91.439999,
+      "current": false,
+      "autocontinue": true
+    },
+    {
+      "seq": 5,
+      "command": 16,
+      "frame": 3,
+      "params": [
+        0,
+        0,
+        0,
+        0
+      ],
+      "lat": 35.9642176,
+      "lon": -83.3589256,
+      "alt": 91.439999,
+      "current": false,
+      "autocontinue": true
+    },
+    {
+      "seq": 6,
+      "command": 16,
+      "frame": 3,
+      "params": [
+        0,
+        0,
+        0,
+        0
+      ],
+      "lat": 35.9618035,
+      "lon": -83.3610284,
+      "alt": 91.439999,
+      "current": false,
+      "autocontinue": true
+    },
+    {
+      "seq": 7,
+      "command": 16,
+      "frame": 3,
+      "params": [
+        0,
+        0,
+        0,
+        0
+      ],
+      "lat": 35.9596238,
+      "lon": -83.3619726,
+      "alt": 91.439999,
+      "current": false,
+      "autocontinue": true
+    },
+    {
+      "seq": 8,
+      "command": 16,
+      "frame": 3,
+      "params": [
+        0,
+        0,
+        0,
+        0
+      ],
+      "lat": 35.9564453,
+      "lon": -83.3624876,
+      "alt": 91.439999,
+      "current": false,
+      "autocontinue": true
+    },
+    {
+      "seq": 9,
+      "command": 16,
+      "frame": 3,
+      "params": [
+        0,
+        0,
+        0,
+        0
+      ],
+      "lat": 35.9554726,
+      "lon": -83.3646011,
+      "alt": 91.439999,
+      "current": false,
+      "autocontinue": true
+    },
+    {
+      "seq": 10,
+      "command": 16,
+      "frame": 3,
+      "params": [
+        0,
+        0,
+        0,
+        0
+      ],
+      "lat": 35.9540135,
+      "lon": -83.365674,
+      "alt": 91.439999,
+      "current": false,
+      "autocontinue": true
+    },
+    {
+      "seq": 11,
+      "command": 16,
+      "frame": 3,
+      "params": [
+        0,
+        0,
+        0,
+        0
+      ],
+      "lat": 35.9552468,
+      "lon": -83.3677125,
+      "alt": 91.439999,
+      "current": false,
+      "autocontinue": true
+    },
+    {
+      "seq": 12,
+      "command": 16,
+      "frame": 3,
+      "params": [
+        0,
+        0,
+        0,
+        0
+      ],
+      "lat": 35.957305,
+      "lon": -83.3669937,
+      "alt": 91.439999,
+      "current": false,
+      "autocontinue": true
+    },
+    {
+      "seq": 13,
+      "command": 16,
+      "frame": 3,
+      "params": [
+        0,
+        0,
+        0,
+        0
+      ],
+      "lat": 35.9591201,
+      "lon": -83.3663177,
+      "alt": 91.439999,
+      "current": false,
+      "autocontinue": true
+    },
+    {
+      "seq": 14,
+      "command": 16,
+      "frame": 3,
+      "params": [
+        0,
+        0,
+        0,
+        0
+      ],
+      "lat": 35.9603532,
+      "lon": -83.3644724,
+      "alt": 91.439999,
+      "current": false,
+      "autocontinue": true
+    }
+  ],
+  "warnings": [
+    "WPL sequence 0 was recognized as the Mission Planner home record and excluded from mission items."
+  ]
+}

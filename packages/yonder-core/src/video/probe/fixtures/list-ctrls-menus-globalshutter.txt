@@ -1,0 +1,29 @@
+
+User Controls
+
+                     brightness 0x00980900 (int)    : min=-64 max=64 step=1 default=0 value=0 flags=has-min-max
+                       contrast 0x00980901 (int)    : min=0 max=95 step=1 default=0 value=0 flags=has-min-max
+                     saturation 0x00980902 (int)    : min=0 max=255 step=1 default=56 value=56 flags=has-min-max
+                            hue 0x00980903 (int)    : min=-2000 max=2000 step=1 default=0 value=0 flags=has-min-max
+        white_balance_automatic 0x0098090c (bool)   : default=1 value=1
+                          gamma 0x00980910 (int)    : min=64 max=300 step=1 default=110 value=110 flags=has-min-max
+                           gain 0x00980913 (int)    : min=0 max=1023 step=1 default=0 value=0 flags=has-min-max
+           power_line_frequency 0x00980918 (menu)   : min=0 max=2 default=1 value=1 (50 Hz)
+				0: Disabled
+				1: 50 Hz
+				2: 60 Hz
+      white_balance_temperature 0x0098091a (int)    : min=2800 max=6500 step=1 default=4600 value=4600 flags=inactive, has-min-max
+                      sharpness 0x0098091b (int)    : min=0 max=7 step=1 default=0 value=0 flags=has-min-max
+         backlight_compensation 0x0098091c (int)    : min=36 max=160 step=1 default=54 value=54 flags=has-min-max
+
+Camera Controls
+
+                  auto_exposure 0x009a0901 (menu)   : min=0 max=3 default=3 value=3 (Aperture Priority Mode)
+				1: Manual Mode
+				3: Aperture Priority Mode
+         exposure_time_absolute 0x009a0902 (int)    : min=1 max=10000 step=1 default=156 value=156 flags=inactive, has-min-max
+                   pan_absolute 0x009a0908 (int)    : min=-648000 max=648000 step=3600 default=0 value=0 flags=has-min-max
+                  tilt_absolute 0x009a0909 (int)    : min=-648000 max=648000 step=3600 default=0 value=0 flags=has-min-max
+                 focus_absolute 0x009a090a (int)    : min=0 max=1023 step=1 default=0 value=348 flags=inactive, has-min-max
+     focus_automatic_continuous 0x009a090c (bool)   : default=1 value=1
+                  zoom_absolute 0x009a090d (int)    : min=0 max=60 step=1 default=0 value=0 flags=has-min-max

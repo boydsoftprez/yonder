@@ -1,0 +1,23 @@
+--- a/rkaiq/xcore/xcam_thread.cpp
++++ b/rkaiq/xcore/xcam_thread.cpp
+@@ -154,7 +154,19 @@
+         }
+     }
+ 
+-    if (pthread_create(&_thread_id, &attr, (void* (*)(void*))thread_func, this) != 0) {
++    int create_error = pthread_create(&_thread_id, &attr, (void* (*)(void*))thread_func, this);
++    if (create_error == EPERM && _policy != -1 && _policy != SCHED_OTHER) {
++        // Armbian's RT cgroup policy can reject SCHED_RR even for root.
++        // A normal-priority stats thread is essential; silently losing it
++        // leaves exposure and white balance frozen at their initial values.
++        struct sched_param normal = {};
++        pthread_attr_setschedpolicy(&attr, SCHED_OTHER);
++        pthread_attr_setschedparam(&attr, &normal);
++        create_error = pthread_create(&_thread_id, &attr, (void* (*)(void*))thread_func, this);
++        fprintf(stderr, "rkaiq thread %s: realtime scheduling denied, normal-priority fallback %s\n",
++                XCAM_STR(_name), create_error ? "failed" : "started");
++    }
++    if (create_error != 0) {
+         pthread_attr_destroy(&attr);
+         return false;
+     }

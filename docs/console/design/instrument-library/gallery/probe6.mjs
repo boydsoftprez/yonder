@@ -1,0 +1,11 @@
+import { chromium } from "playwright";
+const b = await chromium.launch(); const p = await b.newPage({ viewport: { width: 1512, height: 900 }, deviceScaleFactor: 2 });
+await p.goto("http://127.0.0.1:18930/index.html", { waitUntil: "networkidle" });
+await p.locator(".d-nav__i", { hasText: "Cam 2" }).click(); await p.waitForTimeout(300);
+const up = async () => (await p.locator(".d-strip").innerText()).split("UPLINK")[1].replace(/\n/g, " ").trim();
+console.log("good:", await up());
+await p.locator(".d-shell").screenshot({ path: ".superpowers/gallery/live.pocket2.night.png" });
+await p.getByRole("button", { name: /link poor/i }).click(); await p.waitForTimeout(200); console.log("poor:", await up());
+await p.locator(".d-shell").screenshot({ path: ".superpowers/gallery/live.pocket2.poor.png" });
+await p.getByRole("button", { name: /link lost/i }).click(); await p.waitForTimeout(200); console.log("lost:", await up());
+await b.close();

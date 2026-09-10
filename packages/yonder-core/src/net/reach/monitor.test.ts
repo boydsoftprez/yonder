@@ -11,6 +11,24 @@ import {
 import { DEFAULT_CONFIG, type Config } from "../../schema/config.js";
 import type { DeviceInfo } from "../nmcli/client.js";
 
+it("uses the kernel route when a higher-priority addressed Ethernet is only a LAN, and follows route changes", async () => {
+  const { clock } = fixedClock();
+  let route: string | null = "wwan0";
+  const monitor = new ReachMonitor({
+    standing: new Standing({ clock }), probe: async () => true, counters: () => null,
+    devices: async () => ({ ethernet: "eth0", modem: "wwan0" }), down: async () => [],
+    order: () => ["ethernet", "modem"], holding: async () => ["ethernet", "modem"],
+    routeDevice: async () => route,
+  });
+  expect((await monitor.state()).inUse).toBe("modem");
+  expect(await monitor.inUseNow()).toEqual({ path: "modem", device: "wwan0" });
+  route = "eth0";
+  expect((await monitor.state()).inUse).toBe("ethernet");
+  route = null;
+  expect((await monitor.state()).inUse).toBeNull();
+  expect(await monitor.inUseNow()).toBeNull();
+});
+
 function fixedClock(start = 1_000) {
   let now = start;
   return {
@@ -201,6 +219,29 @@ describe("ReachMonitor.state", () => {
     });
     for (let i = 0; i < FAILURES_TO_STAND_DOWN; i++) await monitor.test("ethernet");
     expect(await monitor.inUseNow()).toEqual({ path: "modem", device: "wwan0" });
+  });
+
+  it("starts the independent holding and device observations together", async () => {
+    const { clock } = fixedClock();
+    const standing = new Standing({ clock });
+    let devicesStarted = false;
+    let release: (() => void) | undefined;
+    const holding = new Promise<PathName[]>((resolve) => {
+      release = () => { resolve(["modem"]); };
+    });
+    const monitor = new ReachMonitor({
+      standing,
+      probe: async () => true,
+      devices: async () => { devicesStarted = true; return { modem: "wwan0" }; },
+      down: async () => [],
+      order: () => ["modem"],
+      holding: () => holding,
+    });
+
+    const answer = monitor.inUseNow();
+    expect(devicesStarted).toBe(true);
+    release?.();
+    await expect(answer).resolves.toEqual({ path: "modem", device: "wwan0" });
   });
 
   /**
@@ -430,6 +471,12 @@ describe("ReachMonitor.carrying", () => {
   it("is true while the path in use has not been stood down", async () => {
     const { monitor } = build({ inUse: "modem" });
     expect(await monitor.carrying()).toBe(true);
+  });
+
+  it("can take the watchdog's direct fresh holding read instead of the shared observation", async () => {
+    const { monitor } = build({ inUseThrows: true, reaches: () => false });
+    for (let i = 0; i < FAILURES_TO_STAND_DOWN; i++) await monitor.test("modem");
+    await expect(monitor.carrying(async () => ["modem"])).resolves.toBe(false);
   });
 
   it("is false once the path in use has been stood down", async () => {

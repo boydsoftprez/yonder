@@ -85,20 +85,32 @@ export default {
 <style scoped>
 .y-keys {
     display: flex;
+    /* R-UI-25: a key is `flex: 0 0 auto` below and never shrinks, so a rail
+       narrower than its keys' combined width used to run on past its own
+       edge — visible only for however far whatever clipped it (an
+       ancestor's `overflow: hidden`, the viewport) let it get, with nothing
+       to say a key past that point still existed. Wrapping onto a second
+       row is what a rail this narrow does instead — never a scrollbar,
+       which would trade a hidden key for one behind a gesture nobody knows
+       to make. */
+    flex-wrap: wrap;
     border-top: 1px solid var(--yonder-divider, #2b333c);
     background: var(--yonder-pane, #090d12);
 }
 
 .y-keys__key {
-    /* Sized to its words, with a floor for a gloved finger — never `flex: 1`.
-       Two keys stretched across a 1256px rail are the slab this whole design
-       language replaced, wearing a rail for a hat. */
+    /* Sized to its words, never `flex: 1`. Two keys stretched across a 1256px
+       rail are the slab this whole design language replaced, wearing a rail
+       for a hat. */
     flex: 0 0 auto;
     min-width: 8rem;
     padding-inline: 1.25rem;
-    /* Deep enough for a gloved finger (R-UI-04) without becoming a slab: the
-       rail is the full width, a key within it never is. */
-    min-height: 34px;
+    /* A key is a control, so it takes the same floor every other control
+       takes. This was 34px, under a comment that justified it the same way
+       `--yonder-touch: 44px` was justified — so the two numbers disagreed
+       while their reasons matched, and the shared fiction is what kept that
+       invisible. The rail is the full width; a key within it never is. */
+    min-height: var(--yonder-touch, 44px);
     padding: 7px 6px;
     border: 0;
     border-right: 1px solid var(--yonder-divider, #2b333c);
@@ -109,8 +121,12 @@ export default {
     letter-spacing: 0.13em;
     text-transform: uppercase;
     white-space: nowrap;
-    overflow: hidden;
-    text-overflow: ellipsis;
+    /* No `overflow:hidden; text-overflow:ellipsis` here. A key is
+       `flex: 0 0 auto` with a `min-width`, so it never shrinks and can never
+       ellipsize — the rule was inert, and an inert truncation rule is an
+       invitation to fix a future regression by widening it back into a live
+       one. A key an operator cannot read in full is a key that does not
+       exist, which is the whole reason this rail wraps (R-UI-25). */
     color: var(--yonder-label, #7f8a95);
     cursor: pointer;
 }
@@ -126,6 +142,19 @@ export default {
 
 .tone-act { color: var(--yonder-select, #2ad4f0); }
 .tone-warn { color: var(--yonder-irreversible, #f03fce); }
+/*
+ * `caution` is for a key that is deliberately on and hazardous — opening the
+ * MAVLink command path to the network is the case it was added for (R-MAV-07).
+ *
+ * Neither existing tone says that. `warn` is the irreversible mark, reserved
+ * for the one control that takes the page away from the operator, and spending
+ * it twice makes it mean less. `bad` on the annunciator means *failed*, and
+ * this has not failed — it is doing exactly what it was told. Amber already
+ * carries "the boundary you have to understand before you cross it" in the
+ * generated stylesheet, which is what this is.
+ */
+.tone-caution { color: var(--yonder-waiting, #ffcf28); }
+.tone-caution.on { box-shadow: inset 0 2px 0 var(--yonder-waiting, #ffcf28); }
 
 .y-keys__key:hover { background: var(--yonder-raised, rgba(255, 255, 255, 0.04)); }
 .y-keys__key:focus-visible {

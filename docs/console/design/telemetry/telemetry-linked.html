@@ -1,0 +1,1131 @@
+<!DOCTYPE html>
+<html lang="en"><head>
+<meta charset="utf-8">
+<title>Yonder, as designed — Telemetry (M5a mockup)</title>
+<style>
+/* SPDX-License-Identifier: GPL-3.0-or-later
+ *
+ * GENERATED FILE. Do not edit it.
+ *
+ * Written by yonder-core's ConsoleRenderer from ui.theme in
+ * /etc/yonder/config.yaml, and rewritten from scratch on every apply — so an
+ * edit here survives until the next one and then disappears. Change the
+ * configuration instead.
+ *
+ * The generator is packages/yonder-core/src/console/theme.ts.
+ *
+ * Nothing in this file is fetched from anywhere: every colour is a literal,
+ * there is no web font and no rule that pulls in another stylesheet
+ * (R-UI-01). A theme that fetches a font works in a lab and fails in a field,
+ * which is why a test asserts it about this text rather than a reviewer
+ * asserting it about this comment.
+ */
+
+:root {
+  --yonder-theme: "day";
+
+  /* ---- palette ---------------------------------------------------- */
+  --yonder-background: #e6dfcc;
+  --yonder-surface: #f6f1e3;
+  --yonder-border: #c3b99e;
+  --yonder-text: #1b1811;
+  --yonder-muted: #6d6555;
+  --yonder-accent: #2c5f8f;
+  --yonder-neutral: #7a7263;
+  --yonder-waiting: #9a6a1c;
+  --yonder-good: #2f6b4f;
+  --yonder-bad: #a8322c;
+  --yonder-on-tone: #ffffff;
+
+  /* ---- the instrument roles (ADR-0009) ------------------------------
+     Read by the components in node-red-dashboard-2-yonder. They carry
+     fallbacks, so a widget still draws if this sheet has not arrived - but
+     the fallbacks are night values, and on a day board that would be the
+     one thing you must not put in front of an eye. These are what make
+     day and night one design in two materials rather than two designs. */
+  --yonder-display: #f6f1e3;
+  --yonder-pane: #ede6d3;
+  --yonder-divider: #c3b99e;
+  --yonder-label: #6d6555;
+  --yonder-value: #1b1811;
+  --yonder-track: #e0d8c2;
+  --yonder-select: #2c5f8f;
+  --yonder-irreversible: #b23a7a;
+
+  /* ---- machined chrome, per material -------------------------------- */
+  --yonder-bezel: #8b9199;
+  --yonder-lip: rgba(255, 255, 255, 0.85);
+  --yonder-seat: rgba(0, 0, 0, 0.16);
+  --yonder-raised: rgba(0, 0, 0, 0.07);
+  --yonder-engraved: rgba(255, 255, 255, 0.9);
+
+  /* ---- type -------------------------------------------------------
+     A system stack, never a webfont: R-UI-01 forbids fetching one, and a
+     console that waits on a font it cannot reach shows an operator nothing
+     at all. The mono stack is for values that are identifiers rather than
+     quantities - an SSID, an address, a version - where a slashed zero and
+     fixed width are what make them checkable. */
+  --yonder-font: ui-sans-serif, system-ui, -apple-system, "Segoe UI", Roboto,
+    "Helvetica Neue", Arial, "Noto Sans", sans-serif;
+  --yonder-font-mono: ui-monospace, SFMono-Regular, "SF Mono", Menlo, Consolas,
+    "Liberation Mono", monospace;
+
+  --yonder-size-label: 0.875rem;
+  --yonder-size-body: 1rem;
+  --yonder-size-value: 1.25rem;
+  --yonder-size-title: 0.9375rem;
+  --yonder-size-page: 1.125rem;
+
+  /* ---- space ------------------------------------------------------- */
+  --yonder-space-1: 0.25rem;
+  --yonder-space-2: 0.5rem;
+  --yonder-space-3: 0.75rem;
+  --yonder-space-4: 1rem;
+  --yonder-space-5: 1.5rem;
+  --yonder-radius: 4px;
+
+  /* Anything an operator has to hit.
+
+     44px is WCAG 2.5.5's enhanced target size: a floor that holds for a mouse,
+     a trackpad and a finger alike, which is why it can be stated without
+     knowing who is pointing. An earlier version of this comment justified the
+     number with a user nobody had — a gloved finger on a tablet strapped to a
+     leg — and cited R-UI-04 for it. R-UI-04 says "remain usable on a tablet in
+     the field" and nothing else. Recorded here because a fiction with a
+     requirement id beside it is the kind that gets rebuilt. */
+  --yonder-touch: 44px;
+
+  /* ---- the dashboard's own variables, pointed at ours ---------------- */
+  --v-theme-background: var(--yonder-background);
+  --v-theme-surface: var(--yonder-display);
+  --v-theme-on-background: var(--yonder-value);
+  --v-theme-on-surface: var(--yonder-value);
+  --v-theme-primary: var(--yonder-select);
+  --nrdb-page-background: transparent;
+  --nrdb-group-background: var(--yonder-display);
+  --nrdb-group-border: var(--yonder-divider);
+  --nrdb-group-text: var(--yonder-value);
+  --nrdb-page-text: var(--yonder-value);
+  --nrdb-page-sidebar-background: transparent;
+}
+
+html, body {
+  background: var(--yonder-background);
+  color: var(--yonder-text);
+  font-family: var(--yonder-font);
+  font-size: var(--yonder-size-body);
+  -webkit-text-size-adjust: 100%;
+}
+
+.nrdb-app,
+.v-application,
+.v-application__wrap {
+  background-color: #e6dfcc;
+  background-image:
+    repeating-linear-gradient(0deg, rgba(90,72,40,0.05) 0 1px, transparent 1px 48px),
+    repeating-linear-gradient(90deg, rgba(90,72,40,0.05) 0 1px, transparent 1px 48px),
+    repeating-radial-gradient(ellipse 52% 40% at 24% 30%, transparent 0 15px, rgba(122,98,58,0.075) 15px 16px),
+    repeating-radial-gradient(ellipse 46% 38% at 74% 66%, transparent 0 17px, rgba(122,98,58,0.065) 17px 18px),
+    radial-gradient(60% 45% at 18% 22%, rgba(150,168,120,0.30), transparent 70%),
+    radial-gradient(52% 40% at 72% 30%, rgba(198,176,124,0.34), transparent 72%),
+    radial-gradient(46% 38% at 46% 78%, rgba(176,142,92,0.26), transparent 70%);
+  background-repeat: repeat;
+  background-attachment: fixed;
+}
+
+/* ---- the bar across the top -----------------------------------------
+   Machined chrome, not a white slab. It carries the wordmark as a placard:
+   letterspaced caps with a dark shadow, the way a legend is engraved into a
+   panel rather than printed on a card. */
+.v-app-bar,
+.v-app-bar.v-toolbar {
+  background: transparent !important;
+  color: var(--yonder-value) !important;
+  border-bottom: 1px solid var(--yonder-bezel);
+  box-shadow: 0 1px 0 var(--yonder-lip) !important;
+}
+
+.v-app-bar-title,
+.v-app-bar-title .v-toolbar-title__placeholder {
+  font-size: 0.9375rem;
+  font-weight: 700;
+  letter-spacing: 0.06em;
+  color: var(--yonder-value);
+  text-shadow: 0 1px 1px var(--yonder-engraved);
+}
+
+.v-app-bar-title::before {
+  content: "YONDER";
+  display: inline-block;
+  margin-right: var(--yonder-space-3);
+  padding-right: var(--yonder-space-3);
+  border-right: 1px solid var(--yonder-bezel);
+  box-shadow: 1px 0 0 var(--yonder-lip);
+  font-size: 0.75rem;
+  font-weight: 800;
+  letter-spacing: 0.22em;
+  color: var(--yonder-select);
+  vertical-align: baseline;
+}
+
+/* The navigation drawer is panel, not page. */
+.v-navigation-drawer {
+  background: color-mix(in srgb, var(--yonder-display) 78%, transparent) !important;
+  color: var(--yonder-label) !important;
+  border-right: 1px solid var(--yonder-bezel) !important;
+  box-shadow: 1px 0 0 var(--yonder-lip);
+}
+
+.v-navigation-drawer .v-list-item-title {
+  font-family: var(--yonder-font-mono);
+  font-size: 0.75rem;
+  font-weight: 700;
+  letter-spacing: 0.14em;
+  text-transform: uppercase;
+}
+
+.v-navigation-drawer .v-list-item--active .v-list-item-title {
+  color: var(--yonder-value);
+}
+
+.v-navigation-drawer .v-list-item--active {
+  background: var(--yonder-raised);
+  box-shadow: inset 2px 0 0 var(--yonder-select);
+}
+
+/* ---- the tab strip: a tab is a surface, not a word on the panel -------
+   A page whose groups are tabs draws its strip straight onto the carbon, and
+   Vuetify's own colours survive there because nothing had ever overridden
+   them: the label sat on bare weave with the texture running through the
+   letters, the selected tab's tint was a light-palette value that vanished on
+   a dark panel, and the slider marking the selection was a dark rule on a dark
+   ground. Three failures, and recolouring the text fixes none of them — a
+   lighter label on bare weave is still a label with no ground.
+
+   So a tab gets what a navigation item already has, twenty lines up: a seat in
+   the panel, a raised face when it is the one selected, and a lit edge. The
+   two controls do the same job — choose which surface you are looking at — and
+   they are read the same way. */
+.v-tabs {
+  background: color-mix(in srgb, var(--yonder-display) 78%, transparent) !important;
+  border-bottom: 1px solid var(--yonder-bezel);
+  box-shadow: inset 0 -1px 0 var(--yonder-lip);
+}
+
+.v-tab.v-tab {
+  font-family: var(--yonder-font-mono);
+  font-size: 0.75rem;
+  font-weight: 700;
+  letter-spacing: 0.14em;
+  text-transform: uppercase;
+  color: var(--yonder-label);
+  opacity: 1;
+}
+
+.v-tab.v-tab--selected {
+  background: var(--yonder-raised);
+  color: var(--yonder-value);
+  box-shadow: inset 0 -2px 0 var(--yonder-select);
+}
+
+/* Vuetify's own slider is a bar in the theme's primary colour, which is the
+   one thing on the strip we have not defined. The lit edge above says the
+   same thing, so this says it twice and in a colour nobody chose. */
+.v-tab .v-tab__slider {
+  display: none;
+}
+
+/* ---- groups: a display seated in the panel ----------------------------
+   Not a white card. A dark display face inside a machined bezel: a hard dark
+   outer edge, a lit inner lip, and a drop shadow so it reads as mounted
+   rather than drawn. */
+.nrdb-ui-group > .v-card {
+  background: var(--yonder-display) !important;
+  border: 1px solid var(--yonder-bezel) !important;
+  border-radius: 3px;
+  box-shadow:
+    0 0 0 1px var(--yonder-lip),
+    inset 0 1px 0 var(--yonder-lip),
+    0 6px 18px var(--yonder-seat) !important;
+  color: var(--yonder-value);
+}
+
+/* The group's name as a placard: letterspaced caps on the bezel, engraved. */
+.nrdb-ui-group .v-card-title {
+  font-family: var(--yonder-font-mono);
+  font-size: 0.6875rem;
+  font-weight: 700;
+  letter-spacing: 0.22em;
+  text-transform: uppercase;
+  color: var(--yonder-label);
+  text-shadow: 0 1px 1px var(--yonder-engraved);
+  padding: var(--yonder-space-3) var(--yonder-space-4);
+  border-bottom: 1px solid var(--yonder-divider);
+  margin-bottom: var(--yonder-space-2);
+}
+
+/* ---- a readout row ---------------------------------------------------
+   Label left, value right. The value is the thing being read, so it is the
+   larger of the two and the label is the quieter - the opposite of the stock
+   widget, where both are the same weight and the eye has to hunt. */
+.nrdb-ui-text.nrdb-ui-text--row-spread {
+  align-items: baseline;
+  gap: var(--yonder-space-4);
+  min-height: var(--yonder-touch);
+  padding: var(--yonder-space-2) var(--yonder-space-1);
+}
+
+.nrdb-ui-text-label {
+  font-size: var(--yonder-size-label);
+  font-weight: 500;
+  color: var(--yonder-muted);
+  line-height: 1.4;
+}
+
+/* Tabular figures, so a value that changes does not change width. A load
+   average that reflows the row every two seconds is unreadable in motion,
+   which is the condition this instrument is read in. */
+.nrdb-ui-text-value {
+  font-size: var(--yonder-size-value);
+  font-weight: 600;
+  color: var(--yonder-text);
+  font-variant-numeric: tabular-nums;
+  font-feature-settings: "tnum" 1;
+  text-align: right;
+}
+
+/* ---- buttons ---------------------------------------------------------
+   Sized to their words, not stretched across the group. Vuetify ships block
+   buttons and uppercase labels; a 700px solid slab reading SCAN FOR NETWORKS
+   reads as a warning rather than an action. */
+.nrdb-ui-button .v-btn,
+.nrdb-ui-form-actions .v-btn {
+  text-transform: none !important;
+  letter-spacing: 0 !important;
+  font-weight: 600;
+  font-size: var(--yonder-size-body);
+  min-height: var(--yonder-touch);
+  border-radius: var(--yonder-radius);
+  box-shadow: none !important;
+  padding-inline: var(--yonder-space-5);
+}
+
+/* Vuetify's block button is min-width:100% and flex:1 0 auto, not width, so
+   overriding width alone does nothing - which is how the first attempt at
+   this left every action still 704px wide.
+
+   And the second attempt left it 288px of 288px, because it answered with
+   flex properties and **the widget's own container is a grid**. flex and
+   align-self: flex-start are inert on the inline axis there; a grid item
+   stretches unless something says otherwise, and justify-self is what says
+   it. Both are set, because the parent is a grid here and could be a flex
+   row somewhere else, and neither costs anything in the other model.
+
+   The soft-key rail is where actions belong (R-UI-10), but a stock button
+   still appears where the task panel is the right home for it, and it must
+   not be a slab there either. */
+.nrdb-ui-button .v-btn.v-btn--block {
+  width: auto;
+  min-width: 12rem !important;
+  flex: 0 0 auto;
+  align-self: flex-start;
+  justify-self: start;
+}
+
+/* Below this the column is too narrow for a button to sit beside anything,
+   so it may as well take the width and be easy to hit. */
+@media (max-width: 599px) {
+  .nrdb-ui-button .v-btn.v-btn--block {
+    min-width: 100% !important;
+    width: 100%;
+  }
+}
+
+/* A stock action, in the same idiom as a soft key.
+   
+   Main's pages keep their controls inside the task panel, in the order the
+   operator does them, and that is the right home for them - but a filled
+   Vuetify button on a chart page reads as a web form, not as a control on an
+   instrument. So a stock button gets the key treatment: a machined face, a
+   hard edge, an engraved label in letterspaced caps. It is the same object
+   the rail is made of, wearing a different container. */
+.nrdb-ui-button .v-btn,
+.nrdb-ui-form-actions .v-btn,
+.v-btn--variant-flat,
+.v-btn--variant-elevated {
+  background: var(--yonder-raised) !important;
+  color: var(--yonder-value) !important;
+  border: 1px solid var(--yonder-divider) !important;
+  border-radius: 2px !important;
+  box-shadow: inset 0 1px 0 var(--yonder-lip) !important;
+  font-family: var(--yonder-font-mono) !important;
+  font-size: 0.75rem !important;
+  font-weight: 700 !important;
+  letter-spacing: 0.13em !important;
+  text-transform: uppercase !important;
+  text-shadow: 0 1px 1px var(--yonder-engraved);
+}
+
+/* The one control on a page that takes the page away from the operator. On
+   this console that is Join: it retunes the radio and the access point goes
+   with it. Nothing else on any page carries this tone (R-UI-10). */
+.nrdb-ui-button .v-btn.yonder-irreversible,
+#nrdb-ui-widget-join-go .v-btn {
+  border-color: var(--yonder-irreversible) !important;
+  color: var(--yonder-irreversible) !important;
+}
+
+.v-btn--variant-outlined {
+  border: 1px solid var(--yonder-divider) !important;
+  color: var(--yonder-value) !important;
+  background: var(--yonder-raised) !important;
+}
+
+/* ---- inputs ---------------------------------------------------------- */
+.nrdb-ui-text-field input,
+.nrdb-ui-form input {
+  font-family: var(--yonder-font);
+  font-size: var(--yonder-size-body);
+  color: var(--yonder-value);
+}
+
+/* A field is a recess in the panel, not a white box laid on it. */
+.nrdb-ui-form .v-field,
+.nrdb-ui-text-field .v-field {
+  background: var(--yonder-pane) !important;
+  border-radius: 2px;
+  box-shadow: inset 0 1px 3px var(--yonder-seat);
+}
+
+.nrdb-ui-form .v-field__outline,
+.nrdb-ui-text-field .v-field__outline {
+  --v-field-border-opacity: 1;
+  color: var(--yonder-divider);
+}
+
+.nrdb-ui-form label,
+.nrdb-ui-form .v-label {
+  color: var(--yonder-label) !important;
+  opacity: 1 !important;
+}
+
+/* Visible, and visible in both palettes. A field device gets driven by
+   keyboard more often than a desktop one, because a tablet keyboard is what
+   is to hand. */
+:focus-visible {
+  outline: 2px solid var(--yonder-accent);
+  outline-offset: 2px;
+}
+
+/* Nothing has been scanned yet, which is a state and not a fault.
+   
+   Dashboard hardcodes an error message of "No options available" on a
+   dropdown whenever its options list is empty - so a page an operator has
+   only just opened puts a red label and a red rule around a list nobody has
+   asked for. There is no "required" flag to turn off; the widget is simply in
+   Vuetify's error state whenever there is nothing to choose from.
+
+   And the label cannot be recoloured, because Vuetify paints it with
+   rgb(var(--v-theme-error)) - a triplet, not a colour, so no rule about the
+   color property reaches it. The way in is to hand that widget a different
+   triplet. The message stays, which is right: "No options available" is the
+   true and useful thing to say before a scan. It just stops being an alarm.
+
+   Setting it on the widget alone is not enough. Vuetify stamps its theme
+   class on elements inside the field as well, and each of those redeclares
+   every --v-theme-* for its own subtree - so the widget-level value was
+   overridden two elements before it reached the label. The second selector
+   catches those, and outranks them. */
+.nrdb-ui-dropdown,
+.nrdb-ui-dropdown [class*="v-theme--"] {
+  --v-theme-error: 109 101 85;
+}
+
+.nrdb-ui-dropdown .v-field__outline {
+  color: var(--yonder-divider) !important;
+}
+
+/* ---- tables ---------------------------------------------------------- */
+.nrdb-ui-table table,
+.v-data-table {
+  background: transparent !important;
+  color: var(--yonder-text) !important;
+}
+
+.v-data-table th,
+.v-data-table-header__content {
+  font-size: var(--yonder-size-label) !important;
+  font-weight: 600 !important;
+  color: var(--yonder-muted) !important;
+  letter-spacing: 0.02em;
+}
+
+.v-data-table td {
+  font-size: var(--yonder-size-body) !important;
+  color: var(--yonder-value) !important;
+  min-height: var(--yonder-touch);
+  border-bottom: 1px solid var(--yonder-border) !important;
+}
+
+/* ---- a live log is not a paged report ---------------------------------
+   The activity pane is something you glance at while a command runs. Its
+   footer offers "Items per page" and first/previous/next/last over a list
+   that is already only the last few dozen lines, which is furniture for a
+   report rather than a readout - and it takes the vertical space the log
+   itself should have. Kept from main. */
+.nrdb-ui-table .v-data-table-footer {
+  display: none !important;
+}
+
+/* Signal strengths and channel numbers are quantities; an SSID is a name you
+   compare character by character. */
+.v-data-table td:not(:first-child) {
+  font-variant-numeric: tabular-nums;
+}
+
+.v-data-table-rows-no-data {
+  color: var(--yonder-muted) !important;
+  font-size: var(--yonder-size-body);
+  padding: var(--yonder-space-5) var(--yonder-space-4) !important;
+}
+
+/* ---- prose ------------------------------------------------------------
+   The notes on these pages carry the parts an operator has to understand
+   before pressing something - what happens to the access point, how long
+   they have to confirm. They are content, not chrome, so they get a reading
+   measure and a reading line-height. */
+.nrdb-ui-markdown,
+.nrdb-ui-markdown-content {
+  font-size: var(--yonder-size-body);
+  line-height: 1.55;
+  color: var(--yonder-value);
+  max-width: 68ch;
+}
+
+.nrdb-ui-markdown-content strong { font-weight: 600; }
+
+.nrdb-ui-markdown-content code {
+  font-family: var(--yonder-font-mono);
+  font-size: 0.9375em;
+  color: var(--yonder-select);
+  background: var(--yonder-pane);
+  border: 1px solid var(--yonder-divider);
+  border-radius: 3px;
+  padding: 0.05em 0.35em;
+}
+
+.nrdb-ui-markdown-content h3 {
+  font-size: var(--yonder-size-page);
+  font-weight: 600;
+  margin: var(--yonder-space-2) 0 var(--yonder-space-3);
+}
+
+.nrdb-ui-markdown-content hr {
+  border: 0;
+  border-top: 1px solid var(--yonder-border);
+  margin: var(--yonder-space-4) 0;
+}
+
+/* ---- content is never clipped ----------------------------------------
+   A Dashboard widget takes its height from a configured row span, and some
+   content has no row count that is right at every width: the same words are
+   taller on a narrower screen, in a larger system font, in another language,
+   and a form is as tall as the fields it holds however many rows somebody
+   typed into the editor.
+
+   The default silently wins that argument with overflow: auto. On the first
+   board this ran on, the Network page's "Read this before you join a network"
+   was 706px of text in a 372px widget - 39% of it behind an inner scrollbar
+   that nothing indicated was there. That is the warning which tells an
+   operator the access point is about to disappear, where to find the device
+   afterwards, and that they have five minutes to confirm before it all rolls
+   back. It is the mitigation this project deliberately wrote for K-13, and
+   an operator would have read the first half, pressed Join, and lost the page
+   before reaching the part that says what to do next.
+
+   **That fix was scoped too narrowly, and the capture gate found the rest.**
+   It named the defect "prose", so it covered markdown and stopped. Forms have
+   the identical problem for the identical reason, and two of them shipped
+   clipped: the join form was 172px of content in 48px with 72% hidden, and
+   the ping form 112px in 48px with 57% hidden. The join form is the one an
+   operator fills in immediately *after* reading the warning above - so the
+   page explained carefully what pressing Join would cost, and then hid the
+   field they had to type into to do it (K-29).
+
+   The rule is not about prose. It is: **a widget whose height is a function
+   of its content, rather than of its shape, sizes to that content and the
+   grid takes the rows it needs.** A fixed height is legitimate for a chart or
+   a gauge, where the shape is the point. It is never legitimate for something
+   an operator has to read or fill in.
+
+   A dropdown belongs here too, and it took an operator's eye to notice. Its
+   box is 48px and its content 70 once Vuetify adds a message under the field,
+   and because the widget does not scroll, the extra 22px does not hide - it
+   escapes, and the next widget is painted over the top of it. Same cause as
+   the form, opposite symptom, and the gate was only looking for the first
+   one.
+
+   Anything added here needs the same test in theme.test.ts, because the cost
+   of getting it wrong is silent. */
+.nrdb-ui-widget.nrdb-ui-markdown,
+.nrdb-ui-widget.nrdb-ui-form,
+.nrdb-ui-widget.nrdb-ui-dropdown {
+  grid-row-end: auto !important;
+  grid-template-rows: none !important;
+  height: auto !important;
+  min-height: 0;
+  overflow: visible !important;
+}
+
+/* The form's own inner box, which is a second place the same clipping can
+   happen: the widget growing does nothing if what is inside it still scrolls.
+   Both are needed, and only one of them is visible in a stylesheet diff. */
+.nrdb-ui-form .nrdb-ui-form-content,
+.nrdb-ui-form form {
+  height: auto !important;
+  min-height: 0;
+  overflow: visible !important;
+}
+
+/* ---- the command-state language, in CSS ------------------------------
+   The tone names come from console/command.ts, so a control cannot mean one
+   thing on one page and something else on another (ADR-0005, R-UI-05). */
+.yonder-tone-neutral { color: var(--yonder-neutral); }
+.yonder-tone-waiting { color: var(--yonder-waiting); font-weight: 600; }
+.yonder-tone-good    { color: var(--yonder-good); font-weight: 600; }
+.yonder-tone-bad     { color: var(--yonder-bad); font-weight: 600; }
+
+/* The soft-key rail's group: part of the bezel, not another instrument. */
+.nrdb-ui-group.yonder-rail > .v-card,
+.yonder-rail > .v-card {
+  background: color-mix(in srgb, var(--yonder-pane) 82%, transparent) !important;
+  box-shadow:
+    inset 0 1px 0 var(--yonder-lip),
+    0 0 0 1px var(--yonder-bezel) !important;
+}
+
+.yonder-note {
+  color: var(--yonder-label);
+  line-height: 1.55;
+  max-width: 68ch;
+}
+
+/* The boundary you have to understand before you cross it. A hard rule and a
+   band fading inward, the way a chart marks one. */
+.yonder-warning {
+  border-left: 4px solid var(--yonder-waiting);
+  padding: var(--yonder-space-3) var(--yonder-space-4);
+  background:
+    linear-gradient(90deg, color-mix(in srgb, var(--yonder-waiting) 16%, transparent), transparent 90px),
+    var(--yonder-pane);
+  color: var(--yonder-value);
+  line-height: 1.55;
+  border-radius: 0 var(--yonder-radius) var(--yonder-radius) 0;
+}
+
+</style>
+<style>
+/* Layout + component styles lifted from the real Vue components.
+   Vuetify supplies layout on the console; the generated theme supplies material. */
+* { box-sizing: border-box; }
+body { margin: 0; }
+.v-application, .v-application__wrap { min-height: 100vh; display: flex; flex-direction: column; }
+.v-app-bar { height: 64px; display: flex; align-items: center; padding: 0 16px; flex: none; }
+.v-app-bar-title { width: 220px; line-height: 1.35; }
+.y-body { flex: 1; display: flex; min-height: 0; }
+.v-navigation-drawer { width: 256px; flex: none; padding-top: 8px; }
+.v-list-item { display: flex; align-items: center; gap: 14px; height: 52px; padding: 0 20px; color: var(--yonder-label); }
+.v-list-item svg { width: 20px; height: 20px; flex: none; stroke: currentColor; fill: none; stroke-width: 1.6; }
+.y-main { flex: 1; min-width: 0; padding: 10px 12px 16px; display: grid;
+          grid-template-columns: 1fr 336px; gap: 12px; align-content: start; }
+.y-col { display: flex; flex-direction: column; gap: 12px; min-width: 0; }
+.y-wide { grid-column: 1 / -1; }
+.nrdb-ui-group > .v-card { padding-bottom: 10px; }
+.v-card-body { padding: 0 16px; }
+.nrdb-ui-text--row-spread { display: flex; justify-content: space-between; }
+.nrdb-ui-text--row-spread + .nrdb-ui-text--row-spread { border-top: 1px solid color-mix(in srgb, var(--yonder-divider) 55%, transparent); }
+.y-mono { font-family: var(--yonder-font-mono); }
+.y-sub { font-size: .8125rem; color: var(--yonder-muted); font-weight: 500; }
+.nrdb-ui-button { padding: 8px 0 4px; display: flex; gap: 10px; }
+.v-btn { display: inline-flex; align-items: center; justify-content: center; border: 0; cursor: pointer;
+         min-height: var(--yonder-touch); padding-inline: var(--yonder-space-5); }
+.yonder-warning { margin: 8px 0 4px; font-size: .9375rem; }
+.yonder-warning p { margin: 0 0 8px; } .yonder-warning p:last-child { margin-bottom: 0; }
+.yonder-warning b { color: var(--yonder-value); font-weight: 650; }
+
+.y-ep { display: grid; grid-template-columns: 62px 1fr 92px; gap: 10px; align-items: center;
+        min-height: var(--yonder-touch); padding: 4px 0; }
+.y-ep + .y-ep { border-top: 1px solid color-mix(in srgb, var(--yonder-divider) 55%, transparent); }
+.y-ep__name { font-family: var(--yonder-font-mono); font-size: .6875rem; font-weight: 700;
+              letter-spacing: .14em; text-transform: uppercase; color: var(--yonder-label); }
+.y-field { font-family: var(--yonder-font-mono); font-size: .9375rem; color: var(--yonder-value);
+           background: var(--yonder-pane); border: 1px solid var(--yonder-divider);
+           border-radius: var(--yonder-radius); padding: 8px 10px; min-height: 38px; display: flex; align-items: center; }
+.y-field--empty { color: color-mix(in srgb, var(--yonder-label) 70%, transparent); }
+
+.y-ann { display: inline-flex; align-items: center; gap: 5px; padding: 3px 8px; border: 1px solid currentColor;
+         font-family: var(--yonder-font-mono); font-size: .5625rem; font-weight: 800; letter-spacing: .15em;
+         text-transform: uppercase; white-space: nowrap; }
+.y-ann__lamp { width: 5px; height: 5px; border-radius: 50%; background: currentColor; box-shadow: 0 0 6px currentColor; flex: none; }
+.tone-neutral { color: var(--yonder-neutral); }
+.tone-waiting { color: var(--yonder-waiting); }
+.tone-good    { color: var(--yonder-good); }
+.tone-bad     { color: var(--yonder-bad); }
+
+.y-spark { display: flex; align-items: center; gap: 10px; height: 56px; margin: 10px 0 4px; }
+.y-spark__label { flex: none; font-family: var(--yonder-font-mono); font-size: .5625rem; font-weight: 700;
+                  letter-spacing: .12em; text-transform: uppercase; color: var(--yonder-label); white-space: nowrap; }
+.y-spark__chart { position: relative; flex: 1; min-width: 0; height: 100%;
+                  background: var(--yonder-pane); border: 1px solid var(--yonder-divider); }
+.y-spark__chart svg { display: block; width: 100%; height: 100%; }
+.y-spark polyline { fill: none; stroke-width: 2; vector-effect: non-scaling-stroke; }
+.y-spark polyline.rx { stroke: var(--yonder-value); }
+.y-spark polyline.tx { stroke: var(--yonder-select); stroke-dasharray: 5 4; }
+.y-spark circle.rx { fill: var(--yonder-value); } .y-spark circle.tx { fill: var(--yonder-select); }
+.y-spark__key { display: flex; flex: none; align-items: center; gap: 10px; font-family: var(--yonder-font-mono);
+                font-size: .5625rem; line-height: 1; font-weight: 700; letter-spacing: .1em; color: var(--yonder-label); }
+.y-spark__key span { display: flex; align-items: center; gap: 5px; white-space: nowrap; }
+.y-spark__key i { display: inline-block; width: 12px; height: 0; border-top-width: 2px; border-top-style: solid; }
+.y-spark__key .rx i { border-top-color: var(--yonder-value); }
+.y-spark__key .tx i { border-top-color: var(--yonder-select); border-top-style: dashed; }
+.y-spark__scale { display: flex; flex-direction: column; gap: 2px; white-space: nowrap; }
+.y-spark__ceiling { font-family: var(--yonder-font-mono); font-size: .75rem; color: var(--yonder-value); }
+.y-spark__span { font-size: .6875rem; color: var(--yonder-label); }
+
+.y-chain__row { display: grid; grid-template-columns: 18px 1fr; gap: 10px; align-items: start;
+                padding: 9px 0; font-size: .875rem; line-height: 1.4; }
+.y-chain__row + .y-chain__row { border-top: 1px solid color-mix(in srgb, var(--yonder-divider) 55%, transparent); }
+.y-chain__mark { font-family: var(--yonder-font-mono); font-weight: 800; font-size: .875rem; line-height: 1.4; }
+.y-chain__what { color: var(--yonder-value); font-weight: 600; }
+.y-chain__why { color: var(--yonder-muted); }
+
+/* --- the four-cell strip, from YonderDataBar.vue --- */
+.y-bar { display: flex; align-items: stretch; border-top: 1px solid var(--yonder-divider); margin-top: 10px; }
+.y-bar__cell { flex: 1; min-width: 0; padding: 5px 10px; border-right: 1px solid var(--yonder-divider); }
+.y-bar__cell:last-child { border-right: 0; }
+.y-bar__k { display: block; font-family: var(--yonder-font-mono); font-size: .5rem; font-weight: 700;
+            letter-spacing: .16em; text-transform: uppercase; color: var(--yonder-label); }
+.y-bar__v { font-family: var(--yonder-font-mono); font-size: .75rem; font-weight: 700;
+            font-variant-numeric: tabular-nums; color: var(--yonder-value); display: block;
+            overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.y-bar__v.id { color: var(--yonder-select); }
+.y-bar__v.absent { color: var(--yonder-label); font-weight: 400; }
+
+/* --- the gauge, from YonderGauge.vue --- */
+.y-gauge { display: grid; grid-template-columns: 7.5rem auto auto; justify-content: start; align-items: center;
+           gap: 8px; min-height: 26px; margin: 12px 0; }
+.y-gauge__label { font-family: var(--yonder-font-mono); font-size: .5625rem; font-weight: 700; letter-spacing: .12em;
+                  text-transform: uppercase; color: var(--yonder-label); white-space: nowrap; }
+.y-gauge__track { position: relative; height: 10px; width: 120px; flex: none;
+                  background: var(--yonder-track); border: 1px solid var(--yonder-divider); }
+.y-gauge__fill { position: absolute; inset: 0 auto 0 0; display: block; }
+.tone-good .y-gauge__fill { background: var(--yonder-good); }
+.y-gauge__ptr { position: absolute; top: -3px; width: 0; height: 0; border-left: 4px solid transparent;
+                border-right: 4px solid transparent; border-top: 6px solid var(--yonder-value); transform: translateX(-4px); }
+.y-gauge__value { font-family: var(--yonder-font-mono); font-size: .8125rem; font-weight: 700;
+                  font-variant-numeric: tabular-nums; color: var(--yonder-value); white-space: nowrap; }
+
+/* --- NEW: the telemetry flow strip --- */
+.y-flow { display: grid; grid-template-columns: 1fr 112px 1fr 112px 1fr; align-items: stretch; gap: 0; margin: 6px 0 2px; }
+.y-flow__node { background: var(--yonder-pane); border: 1px solid var(--yonder-divider);
+                border-radius: var(--yonder-radius); padding: 10px 12px; min-height: 76px;
+                display: flex; flex-direction: column; justify-content: center; gap: 3px; min-width: 0; }
+.y-flow__k { font-family: var(--yonder-font-mono); font-size: .5rem; font-weight: 700; letter-spacing: .16em;
+             text-transform: uppercase; color: var(--yonder-label); }
+.y-flow__v { font-size: 1.0625rem; font-weight: 650; color: var(--yonder-value); line-height: 1.2;
+             overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.y-flow__d { font-family: var(--yonder-font-mono); font-size: .6875rem; color: var(--yonder-muted);
+             overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.y-flow__v.absent { color: var(--yonder-label); font-weight: 500; }
+.y-flow__leg { display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 4px; padding: 0 4px; }
+.y-flow__rate { font-family: var(--yonder-font-mono); font-size: .6875rem; font-weight: 700;
+                letter-spacing: .04em; color: var(--yonder-value); text-align: center;
+                max-width: 100%; line-height: 1.25; overflow-wrap: anywhere; }
+.y-flow__leg.absent .y-flow__rate { color: var(--yonder-label); font-weight: 400; }
+.y-flow__arrow { width: 100%; height: 12px; }
+.y-flow__arrow line { stroke: var(--yonder-select); stroke-width: 2; }
+.y-flow__arrow polygon { fill: var(--yonder-select); }
+.y-flow__leg.absent .y-flow__arrow line { stroke: var(--yonder-divider); stroke-dasharray: 4 4; }
+.y-flow__leg.absent .y-flow__arrow polygon { fill: var(--yonder-divider); }
+.y-hide { display: none !important; }
+
+/* ---- narrower than a laptop -----------------------------------------
+   Not a second design: one column, and nothing collides or gets cut.
+   R-UI-04 is "remain usable on a tablet in the field", P2 — met by
+   reflowing, not by inventing a device. */
+.y-burger { display: none; }
+.y-flow__arrow--v { display: none; }
+@media (max-width: 1023px) {
+  .v-navigation-drawer { display: none; }
+  .y-burger { display: flex; flex-direction: column; gap: 4px; margin-right: 14px; }
+  .y-burger i { display: block; width: 20px; height: 2px; background: var(--yonder-value); }
+  .y-main { grid-template-columns: 1fr; }
+  .y-flow { grid-template-columns: 1fr; }
+  .y-flow__node { min-height: 0; }
+  .y-flow__leg { flex-direction: row; justify-content: flex-start; gap: 12px; padding: 6px 0 6px 20px; }
+  .y-flow__rate { text-align: left; }
+  .y-flow__arrow { display: none; }
+  .y-flow__arrow--v { display: block; width: 12px; height: 26px; flex: none; }
+}
+.y-flow__arrow--v line { stroke: var(--yonder-select); stroke-width: 2; }
+.y-flow__arrow--v polygon { fill: var(--yonder-select); }
+.y-flow__leg.absent .y-flow__arrow--v line { stroke: var(--yonder-divider); stroke-dasharray: 4 4; }
+.y-flow__leg.absent .y-flow__arrow--v polygon { fill: var(--yonder-divider); }
+
+@media (max-width: 640px) {
+  .y-main { padding: 8px 8px 14px; }
+  .y-bar { flex-wrap: wrap; }
+  .y-bar__cell { flex: 1 0 45%; border-bottom: 1px solid var(--yonder-divider); }
+  .y-ep { grid-template-columns: 52px 1fr 74px; gap: 6px; }
+  .y-gauge { grid-template-columns: 6.5rem auto auto; }
+  .y-gauge__track { width: 84px; }
+  .nrdb-ui-button { flex-wrap: wrap; }
+  .y-spark__key { display: none; }
+}
+
+/* soft keys, from YonderSoftKeys.vue */
+.y-keys { display: flex; border-top: 1px solid var(--yonder-divider); background: var(--yonder-pane); margin: 8px 0 4px; }
+.y-keys__key { flex: 0 0 auto; min-width: 8rem; padding: 7px 6px; padding-inline: 1.25rem; min-height: var(--yonder-touch, 44px);
+               border: 0; border-right: 1px solid var(--yonder-divider); background: transparent;
+               font-family: var(--yonder-font-mono); font-size: .625rem; font-weight: 700; letter-spacing: .13em;
+               text-transform: uppercase; white-space: nowrap; color: var(--yonder-label); cursor: pointer; }
+.y-keys__key:last-child { border-right: 0; }
+.y-keys__key.on { color: var(--yonder-value); background: var(--yonder-raised); box-shadow: inset 0 2px 0 var(--yonder-select); }
+.y-keys__key.tone-warn { color: var(--yonder-irreversible); }
+.y-keys__key.tone-warn.on { box-shadow: inset 0 2px 0 var(--yonder-irreversible); }
+
+/* the same band, at the weight a security boundary earns */
+.yonder-warning--bad { border-left-color: var(--yonder-bad);
+  background: linear-gradient(90deg, color-mix(in srgb, var(--yonder-bad) 16%, transparent), transparent 90px), var(--yonder-pane); }
+.yonder-warning--bad i { font-style: italic; }
+
+.y-col:last-child .y-keys__key { min-width: 0; flex: 1 1 0; padding-inline: .5rem; }
+.y-keys__key.tone-caution { color: var(--yonder-waiting); }
+.y-keys__key.tone-caution.on { box-shadow: inset 0 2px 0 var(--yonder-waiting); }
+.tone-irrev { color: var(--yonder-irreversible); }
+.yonder-warning--irrev { border-left-color: var(--yonder-irreversible);
+  background: linear-gradient(90deg, color-mix(in srgb, var(--yonder-irreversible) 16%, transparent), transparent 90px), var(--yonder-pane); }
+.y-sent { align-self: center; font-size: .8125rem; color: var(--yonder-good); font-weight: 600; }
+
+</style>
+<style>
+  .y-field--dirty { border-color: var(--yonder-select); box-shadow: inset 0 0 0 1px var(--yonder-select); }
+  .y-unsaved { align-self: center; font-size: .8125rem; color: var(--yonder-select); font-weight: 600; }
+</style>
+</head>
+<body>
+<div class="v-application"><div class="v-application__wrap">
+
+  <header class="v-app-bar v-toolbar">
+    <span class="y-burger"><i></i><i></i><i></i></span><div class="v-app-bar-title">Telemetry</div>
+  </header>
+
+  <div class="y-body">
+    <nav class="v-navigation-drawer">
+      <div class="v-list-item">
+        <svg viewBox="0 0 24 24"><rect x="3" y="4" width="18" height="12" rx="2"></rect><path d="M8 20h8M12 16v4"></path></svg>
+        <div class="v-list-item-title">Status</div>
+      </div>
+      <div class="v-list-item">
+        <svg viewBox="0 0 24 24"><path d="M2 8.5a15 15 0 0 1 20 0M5 12a10 10 0 0 1 14 0M8.5 15.5a5 5 0 0 1 7 0"></path><circle cx="12" cy="19" r="1"></circle></svg>
+        <div class="v-list-item-title">Network</div>
+      </div>
+      <div class="v-list-item v-list-item--active">
+        <svg viewBox="0 0 24 24"><path d="M3 12h3l2.5-7 4 14 3-9 2 2h3.5"></path></svg>
+        <div class="v-list-item-title">Telemetry</div>
+      </div>
+      <div class="v-list-item">
+        <svg viewBox="0 0 24 24"><path d="M4 6h2M4 12h2M4 18h2M9 6h11M9 12h11M9 18h11"></path></svg>
+        <div class="v-list-item-title">Log</div>
+      </div>
+      <div class="v-list-item">
+        <svg viewBox="0 0 24 24"><path d="M6 3v6a6 6 0 0 0 12 0V3"></path><path d="M12 15v3a3 3 0 0 0 6 0v-1"></path><circle cx="19" cy="16" r="2"></circle></svg>
+        <div class="v-list-item-title">Diagnostics</div>
+      </div>
+    </nav>
+
+    <main class="y-main">
+      <div class="y-col">
+
+        <!-- ============ AUTOPILOT ============ -->
+        <div class="nrdb-ui-group"><div class="v-card">
+          <div class="v-card-title">Autopilot</div>
+          <div class="v-card-body">
+
+            <div class="nrdb-ui-text nrdb-ui-text--row-spread">
+              <span class="nrdb-ui-text-label">Link</span>
+              <span class="nrdb-ui-text-value">
+                <span class="y-ann tone-good" data-state="found stopped"><i class="y-ann__lamp"></i>Connected</span>
+                <span class="y-ann tone-waiting y-hide" data-state="searching"><i class="y-ann__lamp"></i>Searching</span>
+                <span class="y-ann tone-bad y-hide" data-state="noise"><i class="y-ann__lamp"></i>Not MAVLink</span>
+              </span>
+            </div>
+
+            <div class="yonder-warning y-hide" data-state="searching">
+              <p><b>Nothing is transmitting on that wire.</b></p>
+              <p>Tried 57 600, 115 200, 230 400 and 921 600. No bytes arrived at
+                 any of them — not even malformed ones, which is what a wrong speed looks like.</p>
+              <p>Check <b>pin 8</b> to the autopilot's <b>RX</b>, <b>pin 10</b> to its <b>TX</b>,
+                 and a shared ground on <b>pin 6</b>. A swapped pair looks exactly like this.</p>
+            </div>
+
+
+            <div class="yonder-warning y-hide" data-state="noise">
+              <p><b>Something is transmitting, but it isn't MAVLink.</b></p>
+              <p>Bytes arrived at all four speeds and not one of them formed a valid frame.
+                 So something is reaching the receive pin. Its port may be set to another protocol, or to a rate outside the four. A wiring fault that corrupts rather than silences — a poor ground, an intermittent joint — looks like this too, and nothing here has exercised the transmit wire.</p>
+              <p>The autopilot's port is most likely set to a protocol other than MAVLink, or to a
+                 speed outside the four. Check its <b>SERIAL<i>n</i>_PROTOCOL</b> and
+                 <b>SERIAL<i>n</i>_BAUD</b> for whichever port you wired.</p>
+            </div>
+
+            <div class="nrdb-ui-text nrdb-ui-text--row-spread">
+              <span class="nrdb-ui-text-label">Port</span>
+              <span class="nrdb-ui-text-value y-mono">/dev/ttyAMA0</span>
+            </div>
+
+            <div class="nrdb-ui-text nrdb-ui-text--row-spread" data-state="found stopped">
+              <span class="nrdb-ui-text-label">Speed</span>
+              <span class="nrdb-ui-text-value y-mono">57 600 <span class="y-sub">baud</span></span>
+            </div>
+            <div class="nrdb-ui-text nrdb-ui-text--row-spread y-hide" data-state="searching">
+              <span class="nrdb-ui-text-label">Speeds tried</span>
+              <span class="nrdb-ui-text-value y-mono y-sub">57.6k · 115.2k · 230.4k · 921.6k</span>
+            </div>
+            <div class="nrdb-ui-text nrdb-ui-text--row-spread y-hide" data-state="noise">
+              <span class="nrdb-ui-text-label">Speeds tried</span>
+              <span class="nrdb-ui-text-value y-mono y-sub">all four · bytes at each</span>
+            </div>
+            <div class="nrdb-ui-text nrdb-ui-text--row-spread y-hide" data-state="noise">
+              <span class="nrdb-ui-text-label">Bytes received</span>
+              <span class="nrdb-ui-text-value">18 402</span>
+            </div>
+            <div class="nrdb-ui-text nrdb-ui-text--row-spread y-hide" data-state="noise">
+              <span class="nrdb-ui-text-label">Valid frames</span>
+              <span class="nrdb-ui-text-value yonder-tone-bad">0</span>
+            </div>
+
+            <div class="nrdb-ui-text nrdb-ui-text--row-spread" data-state="found stopped">
+              <span class="nrdb-ui-text-label">Vehicle</span>
+              <span class="nrdb-ui-text-value">ArduPlane <span class="y-sub y-mono">· system 1</span></span>
+            </div>
+            <div class="nrdb-ui-text nrdb-ui-text--row-spread y-hide" data-state="searching noise">
+              <span class="nrdb-ui-text-label">Looking for</span>
+              <span class="nrdb-ui-text-value">1 min 12 s</span>
+            </div>
+
+            <div class="nrdb-ui-text nrdb-ui-text--row-spread" data-state="found stopped">
+              <span class="nrdb-ui-text-label">Heartbeat</span>
+              <span class="nrdb-ui-text-value">1.0 <span class="y-sub">Hz</span></span>
+            </div>
+            <div class="nrdb-ui-text nrdb-ui-text--row-spread y-hide" data-state="searching noise">
+              <span class="nrdb-ui-text-label">Next sweep</span>
+              <span class="nrdb-ui-text-value">in 24 <span class="y-sub">s</span></span>
+            </div>
+
+            <div class="nrdb-ui-text nrdb-ui-text--row-spread" data-state="found stopped">
+              <span class="nrdb-ui-text-label">Last heard</span>
+              <span class="nrdb-ui-text-value">0.4 <span class="y-sub">s ago</span></span>
+            </div>
+
+          </div>
+        </div></div>
+
+        <!-- ============ GROUND STATIONS ============ -->
+        <div class="nrdb-ui-group"><div class="v-card">
+          <div class="v-card-title">Ground stations</div>
+          <div class="v-card-body">
+
+            <div class="nrdb-ui-text nrdb-ui-text--row-spread">
+              <span class="nrdb-ui-text-label">Receiving</span>
+              <span class="nrdb-ui-text-value">
+                <span class="y-ann tone-good" data-state="found"><i class="y-ann__lamp"></i>Answering</span>
+                <span class="y-ann tone-neutral y-hide" data-state="stopped"><i class="y-ann__lamp"></i>Not sending</span>
+                <span class="y-ann tone-neutral y-hide" data-state="searching noise"><i class="y-ann__lamp"></i>Nothing to send</span>
+              </span>
+            </div>
+            <div class="nrdb-ui-text nrdb-ui-text--row-spread" data-state="found">
+              <span class="nrdb-ui-text-label">Last answered</span>
+              <span class="nrdb-ui-text-value">0.3 <span class="y-sub">s ago</span></span>
+            </div>
+            <div class="nrdb-ui-text nrdb-ui-text--row-spread y-hide" data-state="stopped">
+              <span class="nrdb-ui-text-label">Last answered</span>
+              <span class="nrdb-ui-text-value">4 min 12 <span class="y-sub">s ago</span></span>
+            </div>
+
+            <div class="y-ep">
+              <span class="y-ep__name">gcs 0</span>
+              <span class="y-field">192.168.191.40</span>
+              <span class="y-field">14550</span>
+            </div>
+            <div class="y-ep">
+              <span class="y-ep__name">gcs 1</span>
+              <span class="y-field y-field--dirty" data-sent="no">10.147.20.8</span><span class="y-field y-hide" data-sent="yes">10.147.20.8</span>
+              <span class="y-field y-field--dirty" data-sent="no">14551</span><span class="y-field y-hide" data-sent="yes">14551</span>
+            </div>
+            <div class="y-ep">
+              <span class="y-ep__name">gcs 2</span>
+              <span class="y-field y-field--empty">not set</span>
+              <span class="y-field">14552</span>
+            </div>
+
+            <div class="nrdb-ui-button">
+              <button class="v-btn v-btn--variant-flat">Send telemetry here</button>
+              <span class="y-unsaved" data-sent="no">One change not sent yet</span>
+              <span class="y-sent y-hide" data-sent="yes">Sent · telemetry now goes to two ground stations</span>
+            </div>
+
+            <div class="nrdb-ui-text nrdb-ui-text--row-spread">
+              <span class="nrdb-ui-text-label">TCP server</span>
+              <span class="nrdb-ui-text-value y-mono">:5760 <span class="y-sub" data-state="found stopped">· 1 client</span><span class="y-sub y-hide" data-state="searching noise">· no clients</span></span>
+            </div>
+
+
+            <div class="y-spark y-hide" data-state="stopped">
+              <span class="y-spark__label">Telemetry</span>
+              <span class="y-spark__chart">
+                <svg viewBox="0 0 300 100" preserveAspectRatio="none">
+                  <polyline class="rx" points="0,74 30,73 60,70 90,69 120,67 150,66 180,64 210,63 240,62 255,58 262,96 297,96"></polyline>
+                  <polyline class="tx" points="0,44 30,46 60,42 90,40 120,37 150,35 180,33 210,32 240,30 255,22 262,96 297,96"></polyline>
+                  <circle class="rx" cx="297" cy="96" r="2.6"></circle><circle class="tx" cx="297" cy="96" r="2.6"></circle>
+                </svg>
+              </span>
+              <span class="y-spark__key"><span class="rx"><i></i>RX</span><span class="tx"><i></i>TX</span></span>
+              <span class="y-spark__scale"><span class="y-spark__ceiling">4.1 kB/s</span><span class="y-spark__span">2 min</span></span>
+            </div>
+            <div class="y-spark" data-state="found">
+              <span class="y-spark__label">Telemetry</span>
+              <span class="y-spark__chart">
+                <svg viewBox="0 0 300 100" preserveAspectRatio="none">
+                  <polyline class="rx" points="0,74 15,71 30,73 45,68 60,70 75,66 90,69 105,64 120,67 135,63 150,66 165,61 180,64 195,60 210,63 225,59 240,62 255,58 270,61 285,57 297,59"></polyline>
+                  <polyline class="tx" points="0,44 15,39 30,46 45,36 60,42 75,33 90,40 105,30 120,37 135,28 150,35 165,26 180,33 195,25 210,32 225,23 240,30 255,22 270,29 285,21 297,27"></polyline>
+                  <circle class="rx" cx="297" cy="59" r="2.6"></circle>
+                  <circle class="tx" cx="297" cy="27" r="2.6"></circle>
+                </svg>
+              </span>
+              <span class="y-spark__key">
+                <span class="rx"><i></i>RX</span>
+                <span class="tx"><i></i>TX</span>
+              </span>
+              <span class="y-spark__scale">
+                <span class="y-spark__ceiling">4.1 kB/s</span>
+                <span class="y-spark__span">2 min</span>
+              </span>
+            </div>
+
+          </div>
+        </div></div>
+
+      </div>
+
+      <!-- ============ RAIL ============ -->
+      <div class="y-col">
+
+        <div class="nrdb-ui-group"><div class="v-card">
+          <div class="v-card-title">Telemetry</div>
+          <div class="v-card-body">
+            <div class="nrdb-ui-text nrdb-ui-text--row-spread">
+              <span class="nrdb-ui-text-label">State</span>
+              <span class="nrdb-ui-text-value">
+                <span class="y-ann tone-good" data-state="found"><i class="y-ann__lamp"></i>Running</span>
+                <span class="y-ann tone-neutral y-hide" data-state="stopped"><i class="y-ann__lamp"></i>Stopped by you</span>
+                <span class="y-ann tone-waiting y-hide" data-state="searching noise"><i class="y-ann__lamp"></i>Waiting</span>
+              </span>
+            </div>
+            <div class="nrdb-ui-text nrdb-ui-text--row-spread">
+              <span class="nrdb-ui-text-label">At boot</span>
+              <span class="nrdb-ui-text-value">Automatic</span>
+            </div>
+            <div class="nrdb-ui-text nrdb-ui-text--row-spread">
+              <span class="nrdb-ui-text-label">Accepting from</span>
+              <span class="nrdb-ui-text-value">
+                <span class="y-ann tone-neutral" data-ingest="closed"><i class="y-ann__lamp"></i>This device only</span>
+                <span class="y-ann tone-waiting y-hide" data-ingest="open"><i class="y-ann__lamp"></i>Any network</span>
+              </span>
+            </div>
+            <div class="y-keys">
+              <button class="y-keys__key on" data-ingest="closed">This device</button>
+              <button class="y-keys__key" data-ingest="closed">Any network</button>
+              <button class="y-keys__key y-hide" data-ingest="open">This device</button>
+              <button class="y-keys__key tone-caution on y-hide" data-ingest="open">Any network</button>
+            </div>
+            <div class="yonder-warning yonder-warning y-hide" data-ingest="open">
+              <p><b>Anyone who can reach this board could command the aircraft.</b></p>
+              <p>MAVLink carries no password. Opened to the network, every device on every
+                 network Yonder is joined to — the mobile network and the mesh included — can arm it,
+                 change its flight mode and write its parameters, with no credential at all.</p>
+              <p>The autopilot still checks every command, and Yonder still logs each one.
+                 Neither of those is authentication.</p>
+            </div>
+            <div class="nrdb-ui-button">
+              <button class="v-btn v-btn--variant-outlined" data-state="found">Stop telemetry</button>
+              <button class="v-btn v-btn--variant-outlined y-hide" data-state="stopped">Start telemetry</button>
+              <button class="v-btn v-btn--variant-outlined y-hide" data-state="searching noise">Look again now</button>
+            </div>
+          </div>
+        </div></div>
+
+        <div class="nrdb-ui-group"><div class="v-card">
+          <div class="v-card-title">Path check</div>
+          <div class="v-card-body">
+            <div class="y-chain" data-state="found">
+              <div class="y-chain__row">
+                <span class="y-chain__mark yonder-tone-good">OK</span>
+                <span><span class="y-chain__what">Autopilot to Yonder</span><br>
+                      <span class="y-chain__why">Heartbeat every second, 57 600 baud</span></span>
+              </div>
+              <div class="y-chain__row">
+                <span class="y-chain__mark yonder-tone-good">OK</span>
+                <span><span class="y-chain__what">Yonder to ground stations</span><br>
+                      <span class="y-chain__why">3.1 kB/s leaving, one endpoint configured</span></span>
+              </div>
+              <div class="y-chain__row">
+                <span class="y-chain__mark yonder-tone-good">OK</span>
+                <span><span class="y-chain__what">Ground station to Yonder</span><br>
+                      <span class="y-chain__why">Answering, last heard 0.3 s ago</span></span>
+              </div>
+            </div>
+            <div class="y-chain y-hide" data-state="stopped">
+              <div class="y-chain__row"><span class="y-chain__mark yonder-tone-good">OK</span>
+                <span><span class="y-chain__what">Autopilot to Yonder</span><br>
+                <span class="y-chain__why">Heartbeat every second, 57 600 baud</span></span></div>
+              <div class="y-chain__row"><span class="y-chain__mark yonder-tone-neutral">—</span>
+                <span><span class="y-chain__what">Yonder to ground stations</span><br>
+                <span class="y-chain__why">Stopped by you, 4 min ago</span></span></div>
+              <div class="y-chain__row"><span class="y-chain__mark yonder-tone-neutral">—</span>
+                <span><span class="y-chain__what">Ground station to Yonder</span><br>
+                <span class="y-chain__why">Not checked</span></span></div>
+            </div>
+            <div class="y-chain y-hide" data-state="searching noise">
+              <div class="y-chain__row">
+                <span class="y-chain__mark yonder-tone-bad">✕</span>
+                <span><span class="y-chain__what">Autopilot to Yonder</span><br>
+                      <span class="y-chain__why">No data on the wire, at any speed</span></span>
+              </div>
+              <div class="y-chain__row">
+                <span class="y-chain__mark yonder-tone-neutral">—</span>
+                <span><span class="y-chain__what">Yonder to ground stations</span><br>
+                      <span class="y-chain__why">Nothing to send</span></span>
+              </div>
+              <div class="y-chain__row">
+                <span class="y-chain__mark yonder-tone-neutral">—</span>
+                <span><span class="y-chain__what">Ground station to Yonder</span><br>
+                      <span class="y-chain__why">Not checked</span></span>
+              </div>
+            </div>
+            <div class="nrdb-ui-button">
+              <button class="v-btn v-btn--variant-outlined">Check the path</button>
+            </div>
+          </div>
+        </div></div>
+
+      </div>
+    </main>
+  </div>
+
+</div></div>
+
+
+
+
+</body></html>

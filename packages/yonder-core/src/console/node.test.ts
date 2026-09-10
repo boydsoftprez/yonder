@@ -270,7 +270,7 @@ describe("pendingChange", () => {
     // not leave a control removed behind it — and the pair is the safe answer
     // in any case.
     expect(shaped.payload).toEqual({
-      pending: false, id: "", what: "", why: "", keys: PENDING_KEYS,
+      pending: false, id: "", what: "", why: "", keys: PENDING_KEYS, engineState: "idle", observedAt: 1000,
     });
     expect(shaped.yonder.state).toBe("idle");
   });
@@ -296,8 +296,8 @@ describe("pendingChange", () => {
     expect(shaped.payload.what).toBe(PENDING_WHAT);
     expect(shaped.payload.why).toBe(PENDING_WHY);
     expect(shaped.payload.keys).toEqual([
-      { label: "CONFIRM", action: "confirm", tone: "warn" },
-      { label: "REVERT NOW", action: "revert", tone: "act" },
+      { label: "KEEP", action: "confirm", tone: "warn" },
+      { label: "REVERT", action: "revert", tone: "act" },
     ]);
     // The lamp's caption, already words and in the waiting tone.
     expect(shaped.yonder.state).toBe("pending");
@@ -312,7 +312,7 @@ describe("pendingChange", () => {
    * a wrong change into a device nobody can reach.
    */
   it("states the revert as the thing that recovers them", () => {
-    expect(PENDING_WHY).toMatch(/gets you back in/);
+    expect(PENDING_WHY).toMatch(/Revert/);
     expect(PENDING_WHY).not.toMatch(/lose|warning|danger|will be lost/i);
   });
 
@@ -360,7 +360,7 @@ describe("pendingChange", () => {
       120_000,
     );
     expect(shaped.payload.pending).toBe(true);
-    expect(shaped.payload.keys).toEqual([{ label: "REVERT NOW", action: "revert", tone: "act" }]);
+    expect(shaped.payload.keys).toEqual([{ label: "REVERT", action: "revert", tone: "act" }]);
     expect(shaped.payload.keys.map((k) => k.action)).not.toContain("confirm");
     // The countdown is unchanged: the change still reverts if it does not
     // take, and the operator still has to be able to see how long is left.

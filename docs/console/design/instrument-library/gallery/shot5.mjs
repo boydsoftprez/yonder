@@ -1,0 +1,11 @@
+import { chromium } from "playwright";
+const b = await chromium.launch(); const p = await b.newPage({ viewport: { width: 1512, height: 900 }, deviceScaleFactor: 2 });
+const errs = []; p.on("pageerror", e => errs.push(e.message));
+await p.goto("http://127.0.0.1:18930/index.html", { waitUntil: "networkidle" });
+await p.locator(".d-nav__i", { hasText: "Cam 2" }).click(); await p.waitForTimeout(300);
+await p.locator(".d-aimpanel").screenshot({ path: ".superpowers/gallery/aim.pocket2.png" });
+console.log("aim:", (await p.locator(".d-aimpanel").innerText()).replace(/\n+/g, " | ").slice(0, 300));
+await p.locator(".d-nav__i", { hasText: "Cam 1" }).click(); await p.waitForTimeout(300);
+await p.locator(".d-aimpanel").screenshot({ path: ".superpowers/gallery/aim.elp.png" });
+console.log(errs.length ? "ERRORS: " + errs.join(" | ") : "no errors");
+await b.close();

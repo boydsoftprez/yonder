@@ -4,7 +4,7 @@ import { JOIN_TOPIC } from "./net/join.js";
 import { readFileSync } from "node:fs";
 import { fileURLToPath } from "node:url";
 import { dirname, join } from "node:path";
-import { CONSOLE_HOME, EXCLUDED_NODES, THEME_HREF } from "./console/settings.js";
+import { CONSOLE_HOME, EXCLUDED_NODES } from "./console/settings.js";
 import { MIN_POLL_MS, PENDING_KEYS } from "./console/node.js";
 
 /**
@@ -32,6 +32,7 @@ interface FlowNode {
   ui?: string;
   theme?: string;
   interval?: number;
+  repeat?: string;
   [key: string]: unknown;
 }
 
@@ -105,6 +106,50 @@ describe("flows/flows.json", () => {
    * test: it is to move whatever was written into a package under
    * `packages/`, where it has a source file and tests of its own.
    */
+  /**
+   * **A control that leads nowhere.**
+   *
+   * Three controls shipped on the Telemetry page fully built — implemented in
+   * a node, routed in the daemon, given their own error type and their own
+   * status code, tested at both ends — and joined to nothing. Pressing them
+   * did exactly as much as pressing the desk. Two were found by a person
+   * pressing them; the third by a reviewer reading the wiring.
+   *
+   * Nothing here could have caught them. The suite proves that logic is not
+   * smuggled into this file, that every page carries its pending banner, that
+   * payload shapes match what the page was drawn against — all of which were
+   * true of a button wired to nothing. The checks were good at proving things
+   * *work* and had no way to notice one was never *joined up*.
+   *
+   * So: a widget an operator can act on must lead somewhere. This says
+   * nothing about where, or whether the far end is right — only that a press
+   * reaches something. That is the cheap half of the question, and it is the
+   * half that was missing.
+   */
+  it("has no control an operator can press that reaches nothing", () => {
+    const CONTROLS = [
+      "ui-button",
+      "ui-text-input",
+      "ui-dropdown",
+      "ui-switch",
+      "ui-slider",
+      "ui-radio-group",
+      "ui-form",
+      "ui-file-input",
+      "ui-yonder-softkeys",
+    ];
+    const deadEnds = flows
+      .filter((n) => CONTROLS.includes(n.type))
+      .filter((n) => (n.wires ?? []).every((group) => group.length === 0))
+      .map((n) => `${n.type} ${n.id}`);
+    expect(
+      deadEnds,
+      "a control on the console goes nowhere: an operator can press it and nothing "
+      + "happens, with no error and no sign anything is wrong. Wire it to the node "
+      + "that acts on it, or delete it.",
+    ).toEqual([]);
+  });
+
   it("contains no function node", () => {
     const offenders = flows.filter((n) => n.type === "function").map((n) => n.id);
     expect(
@@ -112,6 +157,29 @@ describe("flows/flows.json", () => {
       "the shipped flows contain a function node. Logic lives in packages/, never in "
       + "flows.json (CLAUDE.md rule 2): a diff against serialised JavaScript cannot be "
       + "reviewed. Move it into node-red-contrib-yonder-* or yonder-core.",
+    ).toEqual([]);
+  });
+
+  /**
+   * **Every value on the Telemetry page came from the device.**
+   *
+   * The page was built against thirty-two `change` nodes carrying static
+   * payloads and one `inject` to set them off, because the arrangement had to
+   * be settled by looking at it before there was anything to read. Those
+   * payloads were the specification the nodes in
+   * `node-red-contrib-yonder-mavlink` were then written against — and a
+   * mockup left in place beside the real source is a page that goes on
+   * looking right on a device that is telling it nothing at all.
+   *
+   * Asserted by prefix rather than by a list, so a mock added later to settle
+   * some other arrangement is caught by the same line.
+   */
+  it("carries no mockup scaffolding", () => {
+    const mocks = flows.filter((n) => String(n.id).startsWith("mock-"));
+    expect(
+      mocks.map((n) => n.id),
+      "flows/flows.json still has mockup scaffolding in it. A static payload beside a real "
+      + "source is a page that reads correctly on a device that has told it nothing.",
     ).toEqual([]);
   });
 
@@ -148,14 +216,16 @@ describe("flows/flows.json", () => {
     expect(text).not.toMatch(/@import\s+url\(\s*["']?(?:https?:)?\/\//i);
   });
 
-  it("imports exactly one stylesheet, and it is the one generated on the device", () => {
-    const imports = [...text.matchAll(/@import\s+url\(([^)]*)\)/g)].map((m) => m[1]);
-    expect(imports).toHaveLength(1);
-    expect(imports[0]).toContain(THEME_HREF);
-    expect(THEME_HREF.startsWith("/")).toBe(true);
-    // Root-relative, so it is same-origin whatever address the operator
-    // reached the console on - the access point, the LAN, or a mesh address.
-    expect(imports[0]).not.toMatch(/https?:|\/\//);
+  /**
+   * The theme used to reach the page through exactly this: a `ui-template`'s
+   * `@import`, injected over Dashboard's own socket connection after the SPA
+   * had already booted — which is what made the console flash white on every
+   * load (R-UI-22). It is linked from the served document's head now
+   * (`ConsoleRenderer`, `wiring.ts`'s `headInjection`), so the flows do not
+   * need to import it at all any more.
+   */
+  it("loads the theme from the served document's head, not by importing it here", () => {
+    expect(text).not.toMatch(/@import/);
   });
 
   /**
@@ -183,6 +253,38 @@ describe("flows/flows.json", () => {
     for (const node of pollers) {
       expect((node.interval ?? 0) * 1000, `${node.id} polls every ${String(node.interval)} s`)
         .toBeGreaterThanOrEqual(MIN_POLL_MS);
+    }
+  });
+
+  /**
+   * Every Yonder reader costs the daemon a request, and the daemon answers
+   * most of them by shelling out. So a second timer aimed at a second copy of
+   * the same reader is that whole cost paid twice, forever, for one answer -
+   * and it is invisible on the page, because both copies show the same thing.
+   *
+   * That is exactly what happened: the Status page's one-line mesh summary and
+   * the Network page's mesh panel each had their own `yonder-remote-state` on
+   * its own timer, at 2 s and 5 s, both reading `GET /remote/state`. One
+   * reader feeds both pages; nothing about a second copy was load-bearing.
+   *
+   * Only Yonder types are checked. A `change` or a `switch` on two timers is
+   * plumbing and costs nothing off-board.
+   */
+  it("reads each thing once, however many pages show it", () => {
+    const byId = new Map(flows.map((n) => [n.id, n]));
+    const polled = new Map<string, string[]>();
+    for (const node of flows) {
+      if (node.type !== "inject" || !node.repeat) continue;
+      for (const target of node.wires?.[0] ?? []) {
+        const type = byId.get(target)?.type ?? "";
+        if (!type.startsWith("yonder-")) continue;
+        polled.set(type, [...(polled.get(type) ?? []), `${node.id} every ${String(node.repeat)} s -> ${target}`]);
+      }
+    }
+    expect(polled.size).toBeGreaterThan(0);
+    for (const [type, pollers] of polled) {
+      expect(pollers, `${type} is polled ${String(pollers.length)} times: ${pollers.join(", ")}`)
+        .toHaveLength(1);
     }
   });
 
@@ -334,10 +436,16 @@ describe("flows/flows.json", () => {
     expect(base?.navigationStyle, "default collapses the pane at every width").toBe("fixed");
   });
 
-  it("serves the four pages this milestone is for", () => {
+  it("serves the pages these milestones are for", () => {
     const pages = flows.filter((n) => n.type === "ui-page");
+    // Cameras and the camera page came with M4; Telemetry joined them with
+    // M5a. They sit above Log and Diagnostics because the payload is what an
+    // operator came to the console for, and the log is what they reach for
+    // when it is not working. The list is exhaustive rather than a minimum on
+    // purpose: a page added without a line here is a page nobody decided to
+    // ship, and the capture gate would photograph it anyway.
     expect(pages.map((p) => p.name).sort())
-      .toEqual(["Diagnostics", "Log", "Network", "Status"]);
+      .toEqual(["Camera", "Cameras", "Cockpit", "Diagnostics", "Flight", "Log", "Network", "Settings", "Status", "Telemetry"]);
 
     const groups = flows.filter((n) => n.type === "ui-group");
     for (const page of pages) {
@@ -408,19 +516,11 @@ describe("flows/flows.json", () => {
    * and where it goes — which is what would still be true if the rail changed
    * shape again.
    */
-  it("lets the operator choose day or night, and says what that costs", () => {
-    const rail = flows.find((n) => n.id === "keys-status");
-    expect(rail?.type).toBe("ui-yonder-softkeys");
-
-    const actions = (JSON.parse(String(rail?.keys ?? "[]")) as { action: string }[])
-      .map((k) => k.action)
-      .sort();
-    expect(actions).toEqual(["day", "night"]);
-
-    // The choice goes to a node, which posts it to POST /ui/theme — which is
-    // what makes it persist and what puts it behind the confirmation timer.
-    expect(rail?.wires).toEqual([["theme-apply"]]);
-    expect(flows.find((n) => n.id === "theme-apply")?.type).toBe("yonder-theme");
+  it("moves appearance and password controls to Settings", () => {
+    expect(flows.find(n => n.id === "settings-workspace")?.type).toBe("ui-yonder-settings");
+    expect(flows.find(n => n.id === "group-settings")?.page).toBe("page-settings");
+    expect(flows.find(n => n.id === "keys-status")?.wires).toEqual([["open-settings"]]);
+    expect(flows.find(n => n.id === "theme-apply")).toBeUndefined();
   });
 
   /**
@@ -534,43 +634,59 @@ describe("flows/flows.json dashboard path", () => {
 });
 
 /**
- * The generated stylesheet has to actually reach the page.
+ * **No `ui-template` survives (R-UI-22, CLAUDE.md rule 2).**
  *
- * It did not. A `ui-template` node carried
- * `<link rel="stylesheet" href="/yonder/theme.css">` with
- * `templateScope: "site"` — and `"site"` is not one of the scopes Dashboard
- * 2.x accepts (`site:style`, `site:script`, `page:style`, `page:script`), so
- * the template was never injected at all. Every `--yonder-*` variable was
- * undefined in the document, the app bar stayed Vuetify white in both
- * palettes, and the `.yonder-tone-*` classes that ADR-0005 calls the shared
- * command-state language matched nothing.
+ * The generated stylesheet used to reach the page through one: a node
+ * carrying `<link rel="stylesheet" href="/yonder/theme.css">` inside an
+ * `@import`, with `templateScope: "site:style"`. That node was itself the
+ * fix for an earlier defect — an *older* `ui-template` had shipped with
+ * `templateScope: "site"`, which is not a scope Dashboard 2.x accepts at all,
+ * so it was never injected and every `--yonder-*` variable was undefined in
+ * the document. Both versions shared the one property that actually mattered:
+ * a `ui-template` is markup serialised into this file beside wire
+ * coordinates, so a pull request against either one was unreadable, and it
+ * cannot be reviewed if it cannot be read.
  *
- * It was invisible because the file *was* served, correctly, at its URL: a
- * check that fetched it got 200 and the right bytes. Only the page knew it
- * was never linked.
- *
- * `site:style` sets the `<style>` element's innerHTML, so the content has to
- * be CSS. A `<link>` tag inside a stylesheet is nothing.
+ * The theme is linked from the served document's head now — `ConsoleRenderer`
+ * writes it into `settings.js`, and `wiring.ts`'s `headInjection` is what
+ * actually splices it in — which is also the only way that link reaches the
+ * page *before* the browser paints it, rather than after Dashboard's own
+ * socket connects. Nothing a `ui-template` could do remains a reason to have
+ * one, so none may exist: this is the assertion that keeps the door CLAUDE.md
+ * rule 2 shut. If it fails, the fix is to find another way to reach Dashboard,
+ * not to add the node back.
  */
-describe("flows/flows.json stylesheet injection", () => {
-  const link = flows.find((n) => n.id === "style-link");
-
-  it("exists", () => {
-    expect(link, "the flows must carry the generated stylesheet").toBeDefined();
-    expect(link?.type).toBe("ui-template");
+describe("flows/flows.json ui-template", () => {
+  it("does not exist, so markup cannot be pasted into one", () => {
+    const offenders = flows.filter((n) => n.type === "ui-template").map((n) => n.id);
+    expect(
+      offenders,
+      "the shipped flows contain a ui-template. Markup lives in Vue components under "
+      + "node-red-dashboard-2-yonder, never pasted into flows.json (CLAUDE.md rule 2): a diff "
+      + "against serialised markup cannot be reviewed.",
+    ).toEqual([]);
   });
+});
 
-  it("uses a scope Dashboard actually honours", () => {
-    expect(["site:style", "page:style"]).toContain(link?.templateScope);
-  });
+/**
+ * `ui-markdown` is not banned the way `ui-template` is: it renders the
+ * content a node carries, nothing else, so there is no scope to get wrong and
+ * no way for it to hide behaviour. What it can still do is grow — the same
+ * shape of defect R-UI-16's word budget below is for — so this names *where*
+ * every surviving instance is rather than only counting them: a second one
+ * added anywhere but Diagnostics should fail here, specifically, and say so.
+ */
+describe("flows/flows.json ui-markdown", () => {
+  it("survives only on Diagnostics", () => {
+    const pageNameOf = (groupId: unknown): string | undefined => {
+      const group = flows.find((n) => n.type === "ui-group" && n.id === groupId);
+      const page = flows.find((n) => n.type === "ui-page" && n.id === group?.page);
+      return page?.name;
+    };
+    const notes = flows.filter((n) => n.type === "ui-markdown");
+    expect(notes.map((n) => `${String(n.id)} (${String(pageNameOf(n.group))})`)).toEqual([
 
-  it("imports the path the console serves it from", () => {
-    // THEME_HREF is what settings.js mounts. Two files that have to agree.
-    expect(String(link?.format)).toContain(`@import url("${THEME_HREF}")`);
-  });
-
-  it("carries CSS, not markup, because site:style is a style element", () => {
-    expect(String(link?.format)).not.toMatch(/<link|<style|rel=/i);
+    ]);
   });
 });
 
@@ -676,18 +792,25 @@ describe("flows/flows.json join controls", () => {
    */
   it("asks the operator to confirm nothing about the join", () => {
     expect(flows.find((n) => n.id === "group-net-confirm")).toBeUndefined();
-    // Narrowed, not weakened. R-UI-15 put a `yonder-confirm` back on Status,
-    // reached from a banner that any pending change raises — which closed
-    // K-30. What R-CFG-11 removed was a confirmation *of the join*, asked for
-    // from a page the join takes off the air. So the assertion is that the
-    // only confirm control in the flows is that one, and that nothing in the
-    // Wi-Fi panel reaches it.
-    expect(flows.filter((n) => n.type === "yonder-confirm").map((n) => n.id))
-      .toEqual(["confirm-pending"]);
+    // Narrowed, not weakened, and now on two counts. R-UI-15 put a
+    // `yonder-confirm` back on Status, reached from a banner that any pending
+    // change raises — which closed K-30 — and the camera page uses one for a
+    // bitrate apply: R-CFG-11 removed the confirmation for *joining a
+    // network*, not R-CFG-03's window in general, and a camera's bitrate is
+    // spend on the path the console is standing on. What must stay gone is a
+    // confirmation *of the join*, asked for from a page the join takes off
+    // the air. So the assertion is that the confirm controls in the flows are
+    // exactly the two allowed to be there, and that nothing in the Wi-Fi
+    // panel reaches either of them.
+    const confirms = flows
+      .filter((n) => n.type === "yonder-confirm")
+      .map((n) => String(n.id))
+      .sort();
+    expect(confirms).toEqual(["cam-transaction-confirm", "confirm-pending"]);
     const fromJoin = flows
       .filter((n) => n.group === "group-net-join" || n.type === "yonder-join")
       .flatMap((n) => (n.wires ?? []).flat());
-    expect(fromJoin).not.toContain("confirm-pending");
+    for (const id of confirms) expect(fromJoin).not.toContain(id);
     const words = flows
       .filter((n) => n.type === "ui-markdown" || n.type === "ui-button")
       .map((n) => `${String(n.content ?? "")} ${String(n.label ?? "")}`.toLowerCase())
@@ -1377,11 +1500,22 @@ describe("flows/flows.json status page remote line", () => {
     expect(line?.value).toBe("payload.summary");
   });
 
-  // The Status page reads independently of which Network tab is open, so it
-  // carries its own state node and its own inject rather than depending on
-  // the ZeroTier tab's.
-  it("has its own state node, fed by its own poll no tighter than the floor (R-UI-06)", () => {
-    expect(flows.filter((n) => n.type === "yonder-remote-state").length).toBeGreaterThanOrEqual(2);
+  /**
+   * Fed by the mesh reader, whichever page is in front.
+   *
+   * This line used to carry a second `yonder-remote-state` and a second timer,
+   * on the reasoning that the Status page must read "independently of which
+   * Network tab is open". That reasoning does not hold: an `inject` fires on
+   * the runtime's clock, and a Dashboard page that nobody is looking at does
+   * not stop it. Both copies therefore ran all the time, and the second one
+   * bought a duplicate `GET /remote/state` — 12 more a minute, each shelling
+   * out — for a value the first already had.
+   */
+  it("is fed by the mesh reader, on a poll no tighter than the floor (R-UI-06)", () => {
+    const readers = flows.filter((n) => n.type === "yonder-remote-state");
+    expect(readers).toHaveLength(1);
+    expect(readers[0]?.wires?.[0] ?? [], "the Remote line is wired to nothing that reads the mesh")
+      .toContain("text-status-remote");
 
     const periodic = flows.filter(
       (n) => n.type === "inject" && typeof n.repeat === "string" && n.repeat !== "",
@@ -1593,26 +1727,28 @@ describe("flows/flows.json Reachable by", () => {
 });
 
 /**
- * **`CHANGE PENDING` (R-UI-15).**
+ * The camera pages (M4).
  *
- * The confirmation timer is what makes this device unbrickable (R-CFG-03).
- * The apply engine has tracked the pending change and its deadline all along
- * and the console drew it **only on the page the change was made on** — make
- * a change on the Network page, walk to Status, and nothing said the
- * configuration reverts in ninety seconds unless somebody confirms it.
- *
- * This is also what closed K-30: `yonder-confirm` had been registered and used
- * by nothing since R-CFG-11 took away the wiring that called it.
- *
- * **On every surface, which is the whole of the requirement.** It shipped on
- * Status alone, and R-UI-15's own worked example was inverted by that: the
- * change is made on Network and only Status could see it. An operator who
- * fixed an APN on the Cellular tab, watched the modem redial and stayed there
- * lost the fix to a timer they could not see and had no key to stop.
+ * Asserted against the artefact rather than a rendering, for the reason every
+ * other block here is: the capture gate checks how these look in a browser,
+ * and this checks that they are wired to the things they claim to draw. A page
+ * bound to a property nothing sends renders an em dash for ever and no
+ * screenshot can tell you why.
  */
-describe("flows/flows.json Change pending", () => {
-  const byId = (id: string) => flows.find((n) => n.id === id);
-  const wiresOf = (id: string) => (byId(id)?.wires ?? []) as string[][];
+describe("flows/flows.json camera pages", () => {
+  const cameras = flows.find((n) => n.type === "ui-page" && n.name === "Cameras");
+  const camera = flows.find((n) => n.type === "ui-page" && n.name === "Camera");
+  const groupsOn = (page: FlowNode | undefined): FlowNode[] =>
+    flows.filter((n) => n.type === "ui-group" && n.page === page?.id);
+  const on = (page: FlowNode | undefined): FlowNode[] => {
+    const ids = new Set(groupsOn(page).map((g) => g.id));
+    return flows.filter((n) => ids.has(String(n.group)));
+  };
+
+  it("has both", () => {
+    expect(cameras, "there is no Cameras index").toBeDefined();
+    expect(camera, "there is no camera page").toBeDefined();
+  });
 
   /**
    * Every surface of this console, and the banner on each.
@@ -1623,10 +1759,33 @@ describe("flows/flows.json Change pending", () => {
    * appears, which an operator on another tab would never see. R-UI-12 counts
    * a tab as a surface for exactly this reason.
    */
+  // Local to this block: the merge landed the telemetry side's surface check
+  // in a describe that has no `byId` of its own.
+  const byId = (id: string) => flows.find((n) => n.id === id);
   const SURFACES = [
+    { group: "group-flight-pending", suffix: "-flight", hidden: "group" },
     { group: "group-status-pending", suffix: "", hidden: "group" },
     { group: "group-log-pending", suffix: "-log", hidden: "group" },
     { group: "group-diag-pending", suffix: "-diag", hidden: "group" },
+    { group: "group-settings-pending", suffix: "-settings", hidden: "group" },
+    { group: "group-tel-pending", suffix: "-tel", hidden: "group" },
+    // The two camera pages, reached by R-UI-15 on merge, in their own idiom.
+    // The Camera page states it on the single lamp it already has — one lamp
+    // for the page is this page-set's own rule, and a second annunciator is
+    // exactly what that rule forbids — while the Cameras page, which had no
+    // lamp, gains one above the list. Neither carries the `ui-text` pair:
+    // ADR-0009 keeps stock controls off both, and the lamp's text is the same
+    // message those lines are drawn from. CONFIRM and REVERT NOW are on the
+    // rail, because R-UI-10 puts every action there and only there.
+    { group: "group-cam-aim", suffix: "-cam", hidden: "widgets" },
+    { group: "group-cameras-pending", suffix: "-cameras", hidden: "group" },
+    { group: "group-cockpit-pending", suffix: "-cockpit", hidden: "group" },
+    // The camera pages, reached by R-UI-15 on merge. They carry the banner in
+    // their own idiom: the annunciator alone in the group (no `ui-text`, which
+    // ADR-0009 keeps off these two pages) and CONFIRM/REVERT as a softkey row
+    // on the rail, because R-UI-10 puts every action there and only there.
+    { group: "group-cameras-pending", suffix: "-cameras", hidden: "group" },
+    { group: "group-cam-pending", suffix: "-cam", hidden: "group" },
     { group: "group-net-now", suffix: "-interfaces", hidden: "widgets" },
     { group: "group-net-join", suffix: "-wifi", hidden: "widgets" },
     { group: "group-net-zerotier", suffix: "-zerotier", hidden: "widgets" },
@@ -1664,398 +1823,1351 @@ describe("flows/flows.json Change pending", () => {
     }
   });
 
-  /** And every one of them is the same four widgets, not a reduced copy. */
-  it.each(SURFACES)("draws the whole banner on $group", ({ group, suffix }) => {
-    const ids = banner(suffix);
-    expect(byId(ids.lamp)?.type).toBe("ui-yonder-annunciator");
-    expect(byId(ids.what)?.type).toBe("ui-text");
-    expect(byId(ids.why)?.type).toBe("ui-text");
-    expect(byId(ids.keys)?.type).toBe("ui-yonder-softkeys");
-    for (const id of Object.values(ids)) expect(byId(id)?.group).toBe(group);
-    // First on the surface. Dashboard packs by `order`, and reads `order ||
-    // MAX_SAFE_INTEGER` — so 0 would sort *last*, not first.
-    for (const id of Object.values(ids)) {
-      const order = Number(byId(id)?.order);
-      expect(order).toBeGreaterThan(0);
-      for (const other of flows.filter((n) => n.group === group && !Object.values(ids).includes(String(n.id)))) {
-        expect(order, `${id} is not above ${String(other.id)}`).toBeLessThan(Number(other.order));
+  /**
+   * **No stock control on either camera page** (ADR-0009, spec §1).
+   *
+   * Eleven of the twenty-three widgets on these two pages were stock
+   * Dashboard controls — two sliders, three number inputs, two tables, four
+   * text widgets — which is the measured defect the whole instrument library
+   * exists to fix. A slider carrying no value at all is not a control an
+   * operator can read (R-UI-09), and a `ui-number-input` that applies on
+   * blur is spec §10's defect 1. This is the assertion that stops one
+   * coming back: it names the five types by hand rather than testing "no
+   * type outside this package", because a stock `ui-button` on a rail is
+   * still allowed and a stock `ui-notification` is how a toast is drawn.
+   */
+  it("has no stock control on either camera page", () => {
+    const banned = ["ui-slider", "ui-number-input", "ui-table", "ui-text", "ui-dropdown"];
+    for (const page of [camera, cameras]) {
+      const types = on(page).map((n) => n.type);
+      for (const stock of banned) {
+        expect(types, `${String(page?.name)} still carries a ${stock}`).not.toContain(stock);
       }
     }
   });
 
   /**
-   * One read feeds them all, so no two surfaces can disagree about the time.
+   * **The Camera page is the instruments, and nothing else** (spec §6).
    *
-   * **The rails are fed too, and that is new.** They used to be a source and
-   * not a sink, because a rail's keys were static configuration — and static
-   * configuration is exactly why `CONFIRM` was offered for a change that
-   * moved the Wi-Fi radio, which R-CFG-11 says the device confirms and the
-   * operator does not. Which keys a state offers is decided in
-   * `pendingChange()` and travels on the same payload as the words beside
-   * them, so the two cannot drift apart.
+   * Two decks — Live and Setup, one component in two modes — the picture,
+   * the Aim panel as its own node (R-UI-28, so the Cockpit can carry it
+   * without a deck), one annunciator, the readout strip, and the rail's two
+   * keys.
    */
-  it("feeds every copy from the one poll, the rails included", () => {
-    const fed = wiresOf("poll-pending")[0];
-    for (const { suffix } of SURFACES) {
-      const ids = banner(suffix);
-      for (const id of Object.values(ids)) {
-        expect(fed, `${id} is drawn from nothing`).toContain(id);
-      }
-      expect(wiresOf(ids.keys)).toEqual([["tag-pending-key"]]);
-    }
-  });
-
-  it("is the first panel on Status, above the board it is about to change", () => {
-    const group = byId("group-status-pending");
-    expect(group?.type).toBe("ui-group");
-    expect(group?.page).toBe("page-status");
-    expect(group?.name).toBe("Change pending");
-    expect(group?.width).toBe(12);
-    for (const other of ["group-board", "group-status-reach", "group-status-remote"]) {
-      expect(Number(group?.order)).toBeLessThan(Number(byId(other)?.order));
-    }
-  });
+  it("draws one Camera workspace and one separate Aim without an idle annunciator", () => { const types=on(camera).map(n=>n.type); expect(types.filter(t=>t==='ui-yonder-deck')).toHaveLength(1); expect(types.filter(t=>t==='ui-yonder-aim')).toHaveLength(1); expect(types).toContain('ui-yonder-picture'); expect(types).toContain('ui-yonder-holdkey'); expect(types).not.toContain('ui-yonder-annunciator'); });
 
   /**
-   * **Hidden in the shipped file, not merely at the first poll.**
+   * **The Cameras page is the index, the budget and the rail** (spec §5).
    *
-   * Dashboard reads a group with no `visible` as visible, and group
-   * visibility is server-side state that starts unset — so a console that had
-   * just started would draw an empty CHANGE PENDING panel until the first
-   * read said otherwise. A panel that is always there saying nothing is
-   * pending is noise on a page an operator glances at, and noise on that page
-   * is what makes the one time it matters invisible.
+   * R-CAM-12 asks for what was found, what was rejected and why; both lists
+   * are `ui-yonder-index`'s, drawn from one payload, rather than two
+   * `ui-table`s whose columns are declared in this file.
    */
-  it("ships hidden, and is raised only while something is pending", () => {
-    for (const { group, hidden } of SURFACES) {
-      if (hidden === "group") expect(byId(group)?.visible, group).toBe(false);
-    }
-
-    // The decision is a boolean the package computed. The flow routes it; it
-    // does not work it out (CLAUDE.md rule 2).
-    const gate = byId("route-pending-banner");
-    expect(gate?.type).toBe("switch");
-    expect(gate?.property).toBe("payload.pending");
-    expect((gate?.rules as { t: string }[]).map((r) => r.t)).toEqual(["true", "false"]);
-    expect(wiresOf("route-pending-banner"))
-      .toEqual([["show-pending-banner"], ["hide-pending-banner"]]);
-
-    // Two constants either side of it, never one conditional.
-    //
-    // A grid page's whole group goes down together, which is one id and no
-    // flash while a browser waits for the first poll. A tab's group cannot:
-    // hiding it would take the *tab* away and showing it would make one
-    // appear, so on the Network page the four widgets are hidden by id
-    // inside the tab they sit in.
-    const expected = (key: string) => ({
-      groups: { [key]: SURFACES.filter((x) => x.hidden === "group").map((x) => x.group) },
-      widgets: {
-        [key]: SURFACES.filter((x) => x.hidden === "widgets")
-          .flatMap((x) => Object.values(banner(x.suffix))),
-      },
-    });
-    for (const [id, key] of [["show-pending-banner", "show"], ["hide-pending-banner", "hide"]]) {
-      const node = byId(id);
-      expect(node?.type).toBe("change");
-      const rules = node?.rules as { p: string; tot: string; to: string }[];
-      expect(rules).toHaveLength(1);
-      expect(rules[0].p).toBe("payload");
-      expect(rules[0].tot).toBe("json");
-      expect(JSON.parse(rules[0].to)).toEqual(expected(key));
-      expect(wiresOf(id)).toEqual([["control-pending"]]);
-    }
-    // Dashboard hides a group or a widget only through ui-control, which
-    // needs the base.
-    expect(byId("control-pending")?.type).toBe("ui-control");
-    expect(byId("control-pending")?.ui).toBe(flows.find((n) => n.type === "ui-base")?.id);
+  it("draws the Cameras page from index, budget, softkeys", () => {
+    const types = on(cameras).map((n) => n.type);
+    expect(types.slice().sort())
+      // The annunciator arrived with R-UI-15: this page had no lamp of its
+      // own, so a change pending confirmation had nowhere to show while an
+      // operator was looking at the camera list.
+      .toEqual([
+        "ui-yonder-annunciator", "ui-yonder-budget", "ui-yonder-index",
+        "ui-yonder-softkeys", "ui-yonder-softkeys",
+      ]);
   });
 
   /**
-   * Nothing is raised or lowered that is not part of the banner.
+   * **R-CAM-05 in words, and the thing nothing in this repository rendered.**
    *
-   * A ui-control list is a set of ids in a JSON string, which is the kind of
-   * thing that grows a typo. Every id in both lists has to be one of the
-   * banner's own widgets on a tab that cannot hide its group.
-   */
-  it("shows and hides the banner and nothing else", () => {
-    const own = new Set(SURFACES.flatMap((x) => Object.values(banner(x.suffix))));
-    const groups = new Set(SURFACES.map((x) => x.group));
-    for (const id of ["show-pending-banner", "hide-pending-banner"]) {
-      const payload = JSON.parse(String((byId(id)?.rules as { to: string }[])[0].to)) as
-        { groups: Record<string, string[]>; widgets: Record<string, string[]> };
-      for (const g of Object.values(payload.groups).flat()) expect(groups.has(g), g).toBe(true);
-      for (const w of Object.values(payload.widgets).flat()) expect(own.has(w), w).toBe(true);
-    }
-  });
-
-  /**
-   * The countdown is text when it reaches the page. A clock ticking inside
-   * `flows.json` would be arithmetic in wiring — on the one number that
-   * decides whether an operator still has a device.
-   */
-  it("draws the time left as a lit caption, computed in the package", () => {
-    const poller = byId("poll-pending");
-    expect(poller?.type).toBe("yonder-pending");
-    expect(Number(poller?.interval) * 1000).toBeGreaterThanOrEqual(MIN_POLL_MS);
-    expect(wiresOf("poll-pending")[0].slice(-2))
-      .toEqual(["route-pending-banner", "route-pending-key"]);
-
-    for (const { group, suffix } of SURFACES) {
-      const lamp = byId(banner(suffix).lamp);
-      expect(lamp?.type).toBe("ui-yonder-annunciator");
-      expect(lamp?.group).toBe(group);
-      // From the shared channel, with no label of its own, so the words are
-      // the ones `pendingChange()` wrote.
-      expect(lamp?.source).toBe("yonder");
-      expect(lamp?.label).toBe("");
-      expect(Number(lamp?.order)).toBe(1);
-      // The one annunciator on this console whose caption is a *reading*
-      // rather than a state word. Without saying so, the committed picture of
-      // this page would differ on every run by a second or two of countdown —
-      // which is the thing masking exists to stop.
-      expect(String(lamp?.className)).toContain("yonder-live");
-    }
-  });
-
-  /**
-   * Both lines are sentences, so both are qualifiers. `.nrdb-ui-text-value`
-   * is `text-align: right` — the defect Task 8's capture found, on prose the
-   * console had put in a readout's slot.
-   */
-  it("says what is in force and what the revert is for, as prose", () => {
-    for (const { group, suffix } of SURFACES) {
-      const ids = banner(suffix);
-      for (const [id, bound] of [[ids.what, "payload.what"], [ids.why, "payload.why"]]) {
-        const line = byId(id);
-        expect(line?.type).toBe("ui-text");
-        expect(line?.group).toBe(group);
-        expect(line?.value).toBe(bound);
-        expect(line?.valueType).toBe("msg");
-        expect(line?.wrapText).toBe(true);
-        expect(String(line?.className)).toContain("yonder-qualifier");
-        // **And unmasked in the committed picture.** Both are `ui-text`
-        // values, so both render `.nrdb-ui-text-value` — masked by *kind*,
-        // because most instances of it carry a reading. These carry none:
-        // `what` is one fixed sentence and `why` is `PENDING_WHY`. Without
-        // `yonder-fixed` the only picture of this banner is a grey box over
-        // the words, which is the third defect of exactly this shape on this
-        // branch. The countdown above them is the reading, and it says so
-        // with `yonder-live`.
-        expect(String(line?.className)).toContain("yonder-fixed");
-      }
-      expect(Number(byId(ids.what)?.order)).toBeLessThan(Number(byId(ids.why)?.order));
-    }
-  });
-
-  /**
-   * **`CONFIRM` is the irreversible one, and `REVERT NOW` is not.**
+   * `byPathStable` was resolved, typed and tested from Task 4 onwards and no
+   * surface showed it — so an operator never learned whether the camera they
+   * configured would still be the one that name means after a reboot. It was
+   * a table column and a `ui-text` line; both went with the stock widgets,
+   * and for one commit the sentence was composed on two payloads and drawn on
+   * neither. It is a cell on the readout strip and a line on every index row
+   * now, both from `identityWords()`, which is where the sentence lives.
    *
-   * This is the opposite of what most interfaces do and it is deliberate.
-   * Confirming keeps a change nobody can take back automatically; reverting
-   * is the safe direction, and it is the thing that gets an operator back in.
+   * A `note` cell, not a reading: the by-path name alone is 66 characters
+   * before the sentence starts (R-UI-25 — it wraps rather than being cut).
+   * The index's own half is a component fact and is held in
+   * `index.component.test.ts`; this holds the half that lives in the wiring.
    */
-  it("marks confirming as the irreversible act, and reverting as the safe one", () => {
-    for (const { suffix } of SURFACES) {
-      const keys = JSON.parse(String(byId(banner(suffix).keys)?.keys ?? "[]")) as
-        { label: string; action: string; tone: string }[];
-      // The rail's own configuration, which is what it draws when nothing has
-      // told it otherwise — and it offers both keys, because that is the
-      // direction to fail in (R-UI-15).
-      expect(keys).toEqual(PENDING_KEYS);
-    }
-    // R-UI-10: at most one control per page takes the irreversible tone, and
-    // Status's other rail is two palette keys.
-    const warnOnStatus = flows
-      .filter((n) => n.type === "ui-yonder-softkeys")
-      .filter((n) => String(n.group).includes("status") || n.group === "group-status-pending")
-      .flatMap((n) => JSON.parse(String(n.keys ?? "[]")) as { tone?: string }[])
-      .filter((k) => k.tone === "warn");
-    expect(warnOnStatus).toHaveLength(1);
+  it("shows each camera's identity, not only its /dev node", () => {
+    // Identity now travels with the unified deck; its rendering is component-tested.
+    expect(flows.find(n=>n.id==='pick-cam-deck')?.rules).toContainEqual({t:'set',p:'payload',pt:'msg',to:'payload.deck',tot:'msg'});
+    expect(flows.some(n=>n.id==='bar-camera'||n.id==='pick-cam-strip')).toBe(false);
   });
 
   /**
-   * **The rail decides nothing, and the flow decides nothing either.**
-   *
-   * R-CFG-11 takes the confirmation of a radio move away from the operator,
-   * so the banner over one must not offer a key to do it. That judgement is
-   * `pendingChange()`'s, in `yonder-core`, where it is tested — not a
-   * `switch` here choosing between two rails, and not a `function` node
-   * (CLAUDE.md rule 2). What the flows carry is a wire.
+   * R-CAM-05 and R-CAM-12, both now composed in `video/present.ts` rather
+   * than assembled out of table columns here: `cameraIndex()` puts
+   * `identity` on every row and carries every rejection with its reason, and
+   * `present.test.ts` is what holds it to that. What this file holds is the
+   * half it can see — that the page is fed the composed object and nothing
+   * re-derives it in a `change` node (CLAUDE.md rule 2).
    */
-  it("lets the package say which keys each state offers", () => {
-    for (const { suffix } of SURFACES) {
-      const rail = byId(banner(suffix).keys);
-      // Static configuration is the fallback, not the decision: the component
-      // draws the list on the message when it is given one.
-      expect(rail?.type).toBe("ui-yonder-softkeys");
-      expect(wiresOf("poll-pending")[0]).toContain(String(rail?.id));
-    }
-    // Nothing between the poll and the rail that could rewrite the list.
-    expect(byId("poll-pending")?.type).toBe("yonder-pending");
-    for (const node of flows.filter((n) => inPanel.includes(n))) {
-      expect(node.type, node.id).not.toBe("function");
-    }
-  });
-
-  /**
-   * A press is answered by a fresh read, so the id the two nodes act on is
-   * the one the device holds at that moment — never one a flow cached and may
-   * have watched expire. The key's own action rides on `msg.topic`, which the
-   * read does not overwrite.
-   */
-  it("reads the apply id at the moment the key is pressed, and caches none", () => {
-    // Whichever copy was pressed. Every rail on every surface goes to the one
-    // node that re-reads the id, so a key on the Cellular tab and a key on
-    // Status act on the same apply and cannot act on a stale one.
-    for (const { suffix } of SURFACES) {
-      expect(wiresOf(banner(suffix).keys)).toEqual([["tag-pending-key"]]);
-    }
-    const tag = byId("tag-pending-key");
-    expect(tag?.type).toBe("change");
-    expect(tag?.rules).toEqual([{ t: "set", p: "topic", pt: "msg", to: "payload", tot: "msg" }]);
-    expect(wiresOf("tag-pending-key")).toEqual([["poll-pending"]]);
-
-    const route = byId("route-pending-key");
-    expect(route?.type).toBe("switch");
-    expect(route?.property).toBe("topic");
-    expect((route?.rules as { v: string }[]).map((r) => r.v)).toEqual(["confirm", "revert"]);
-    expect(wiresOf("route-pending-key")).toEqual([["confirm-pending"], ["revert-pending"]]);
-
-    expect(byId("confirm-pending")?.type).toBe("yonder-confirm");
-    expect(byId("revert-pending")?.type).toBe("yonder-revert");
-    // Nothing here keeps state between one press and the next.
-    expect(JSON.stringify(inPanel)).not.toMatch(/"flow"|"global"/);
-  });
-
-  /**
-   * Whichever key was pressed, the operator is told what it did. Without
-   * this a confirm the daemon refused — "nothing is pending confirmation" —
-   * would be a key that did nothing and said nothing (R-UI-05).
-   */
-  it("says out loud what each key did", () => {
-    for (const id of ["confirm-pending", "revert-pending"]) {
-      expect(wiresOf(id)).toEqual([["say-pending"]]);
-    }
-    const say = byId("say-pending");
-    expect(say?.type).toBe("change");
-    expect((say?.rules as { to: string }[])[0].to).toBe("yonder.message");
-    expect(wiresOf("say-pending")[0]).toContain(flows.find((n) => n.type === "ui-notification")?.id);
-  });
-
-  // CLAUDE.md rule 2. The countdown is the thing most likely to be reached
-  // for with a function node, and it is in yonder-core.
-  it("ships no function node", () => {
-    const own = new Set([
-      "poll-pending", "tag-pending-key", "route-pending-key", "route-pending-banner",
-      "show-pending-banner", "hide-pending-banner", "control-pending",
-      "confirm-pending", "revert-pending", "say-pending",
+  it("feeds the index from the sweep, as one composed payload", () => {
+    const index = flows.find((n) => n.type === "ui-yonder-index");
+    expect(index, "there is no camera index").toBeDefined();
+    const pick = flows.find((n) => n.id === "pick-cameras-index");
+    // A move, not a composition: one property, read whole.
+    expect((pick?.rules as { p: string; to: string; tot: string }[])).toEqual([
+      { t: "set", p: "payload", pt: "msg", to: "payload.index", tot: "jsonata" },
     ]);
-    for (const node of flows.filter((n) => own.has(n.id) || inPanel.includes(n))) {
-      expect(node.type, node.id).not.toBe("function");
+    expect((pick?.wires as string[][])[0]).toEqual([index?.id]);
+    expect((flows.find((n) => n.id === "cameras-read")?.wires as string[][])[0])
+      .toContain("pick-cameras-index");
+  });
+
+  /**
+   * R-VID-11. Both totals are on the index and not on any one camera's page,
+   * because both are shared: *starting the second camera would need 2.1 Mb/s
+   * more* is a sentence no single camera's page can say.
+   */
+  it("puts the uplink budget on the index, where the total means something", () => {
+    const budget = flows.find((n) => n.type === "ui-yonder-budget");
+    expect(budget, "there is no uplink track").toBeDefined();
+    expect(groupsOn(cameras).map((g) => g.id)).toContain(String(budget?.group));
+    // Fed by the sweep, or it draws the fallback for ever.
+    const sweep = flows.find((n) => n.type === "yonder-cameras");
+    expect((sweep?.wires as string[][])[0]).toContain(budget?.id);
+  });
+
+  /**
+   * R-UI-03: navigation from detected hardware, so a camera that is not
+   * present has no section. The flows cannot create a page, so the page is
+   * hidden — and the decision is a switch on what the sweep found, never a
+   * guess made once when the file was written.
+   */
+  it("hides the camera page when there is no camera to show", () => {
+    // **On a *configured* camera, not on attached hardware.** `found` is the
+    // hardware sweep, so a freshly flashed device — which now ships
+    // `cameras: []` — put CAMERA in the nav the moment anything was plugged
+    // in, and every node on the page then asked for a camera that is not in
+    // the configuration: 404, "not answering" on every badge, and a page of
+    // empty widgets. `found[].id` is the configured id for the socket a
+    // camera was detected on, or null, which is exactly the question.
+    const decide = flows.find((n) => n.id === "cameras-present");
+    expect(decide?.type).toBe("switch");
+    expect(decide?.property).toBe("payload.found[id != null]");
+    expect(decide?.propertyType).toBe("jsonata");
+    const [present, absent] = decide?.wires as string[][];
+    expect(present).toEqual(["cameras-show-page"]);
+    expect(absent).toEqual(["cameras-hide-page"]);
+    for (const id of ["cameras-show-page", "cameras-hide-page"]) {
+      expect((flows.find((n) => n.id === id)?.wires as string[][])[0]).toEqual(["console-control"]);
     }
+  });
+
+  /**
+   * **Picture, strip, deck, rail — and the deck is the only part that moves.**
+   *
+   * Not a panel over the frame: on a camera you are aiming, a panel over the
+   * frame hides the part of the shot you are aiming at. Asserted by order: the
+   * picture and the strip come first, the decks are in the middle, and both
+   * rails sit at the foot.
+   */
+  /**
+   * **Picture, aim, strip, deck, rail — the blueprint's own order.**
+   *
+   * `docs/console/design/instrument-library/fold.1440.png` draws the readings
+   * directly under the picture and above the deck, and this asserts that.
+   *
+   * It briefly did not. The strip was moved below both decks because three
+   * lines of prose between the picture and the deck put the shutter key nine
+   * pixels past a 1024×768 viewport — measured, and true. But the measurement
+   * was against a rule nobody asked for: spec §5 gives the above-the-fold
+   * contract to one surface, "at 1440×900 with the sidebar open", and asks a
+   * tablet for something else entirely — "everything still reachable with a
+   * finger", which §13 repeats as "no hidden controls ... at tablet widths".
+   * The gate was applying the notebook's fold list at 1024×768 as well, and
+   * the page was rearranged to satisfy it.
+   *
+   * That is the whole shape of the mistake worth remembering: a gate rule
+   * stricter than the specification silently became the specification, and
+   * moved the console away from the blueprint it was built to match.
+   * `capture-pages.mjs` now checks the parts where the contract is, and the
+   * rail and nested-scroller checks still run at both widths, because those
+   * two are asked for at both.
+   *
+   * **The strip above the deck is one row, and that is what pays for the
+   * picture.** `fold.1440.png` draws five compact readings there and no prose.
+   * Ours carried the run state and the identity sentence as full-width `note`
+   * cells too, 160 px of them, and with that above the deck the picture could
+   * not grow by a single row before the shutter key left the 1440x900
+   * viewport — measured, at 74 px over. The sentences are their own group
+   * below the deck (`group-cam-facts`), where a line of prose costs the
+   * picture nothing and R-CAM-05's sentence is still on the page.
+   */
+  it("keeps preview/Aim first and camera controls on the same surface", () => { const ordered=groupsOn(camera).sort((a,b)=>Number(a.order)-Number(b.order)); expect(ordered.slice(0,2).map(g=>g.id)).toEqual(['group-cam-picture','group-cam-aim']); expect(ordered.map(g=>g.id)).toContain('group-cam-controls'); expect(flows.find(n=>n.id==='group-cam-controls')).toMatchObject({visible:true}); });
+
+  /**
+   * The deck is what Live and Setup exchange, and the page starts on Live.
+   *
+   * A page that came up with both decks drawn would be twice the height it
+   * should be, and one that came up on Setup would show an operator the
+   * settings when they asked for the picture.
+   */
+  it("starts with one unified controls group and no alternative layout", () => { expect(flows.find(n=>n.id==='group-cam-controls')?.visible).toBe(true); expect(flows.some(n=>n.id==='group-cam-setup'||n.id==='group-cam-live')).toBe(false); });
+
+  it("keeps connection details in the camera workspace", () => { expect(flows.some(n=>n.id==='cam-show-connection'||n.id==='deck-live'||n.id==='deck-setup')).toBe(false); });
+
+  /**
+   * **One widget per deck, and no group left for a stock widget to be
+   * dropped into** (spec §6, verbatim).
+   *
+   * The three legends this test used to check — *applies live*, *restarts
+   * the picture*, *stored in config.yaml* — were three Dashboard groups
+   * holding eleven stock controls between them, and the legend was the only
+   * thing telling an operator which kind of control they were touching.
+   * `YonderDeck` draws its own columns with their own legends and qualifiers
+   * from the report, so the distinction is now made per control rather than
+   * per group — and the groups themselves are gone, which is what stops the
+   * next `ui-number-input` finding a home.
+   */
+  it("has one content-sized Deck instance, with no second draft-owning widget", () => { const decks=on(camera).filter(n=>n.type==='ui-yonder-deck'); expect(decks).toHaveLength(1); expect(decks[0]).toMatchObject({id:'deck-camera',height:0,className:'yonder-content-height'}); });
+
+  /**
+   * **A countdown only where one will actually arm.**
+   *
+   * The page does not decide that and must not: `apply/reachability.ts` does,
+   * from `CAMERA_EXEMPT_LEAVES`, and `applyStatus` turns the daemon's answer
+   * into `pending` exactly when a deadline came back. So the toast carrying a
+   * countdown and a confirm control is reached by routing on that state — a
+   * page promising a confirm control that never comes, or omitting one that
+   * does, is K-32 on the camera page.
+   */
+  it("feeds authoritative pending state into the persistent camera workspace", () => { expect(flows.find(n=>n.id==='poll-pending')?.wires?.flat()).toContain('cam-workspace-pending'); expect(flows.find(n=>n.id==='cam-workspace-pending')?.rules).toEqual([{t:'set',p:'workspaceKind',pt:'msg',to:'pending',tot:'str'}]); expect(flows.find(n=>n.id==='cam-workspace-pending')?.wires).toEqual([['camera-workspace']]); });
+
+  /**
+   * A dismiss and a timeout leave the same output as the confirm. Only one of
+   * them is the operator saying they can still reach the device (R-CFG-03), so
+   * only one of them may reach `yonder-confirm`.
+   */
+  it("camera Keep and Revert require explicit keys and fresh pending status", () => { const request=flows.find(n=>n.id==='cam-transaction-request'); expect(request?.wires).toEqual([['poll-pending']]); const route=flows.find(n=>n.id==='cam-transaction-route'); expect((route?.rules as {v:string}[]).map(r=>r.v)).toEqual(['camera-confirm','camera-revert']); expect(route?.wires).toEqual([['cam-transaction-confirm'],['cam-transaction-revert']]); });
+
+  /**
+   * R-VID-13. The full rate is *held*, never toggled: an operator who forgot
+   * they had left it on would be spending most of a field uplink on a picture
+   * nobody was looking at, and would have no reason to suspect it.
+   */
+  it("reaches the full rate by holding a key, and says what holding it costs", () => {
+    const hold = flows.find((n) => n.type === "ui-yonder-holdkey");
+    expect(hold, "there is no full-rate key").toBeDefined();
+    // **The cost is read from the device, never typed in here.** It was
+    // `2.07 Mb/s while held` — `cameraStrip()`'s own figure for one
+    // configuration, frozen at deploy time and reachable by no message, so
+    // raising the bitrate left the key saying a quarter of the truth beside a
+    // readout strip that said all of it. R-VID-11 is about stating the cost
+    // *before* it is asked for, so a number that cannot move is the
+    // requirement failing.
+    expect(hold?.cost).toBe("");
+    const cost = flows.find((n) => n.id === "pick-cam-hold");
+    expect((cost?.wires as string[][])[0]).toEqual(["hold-cam-fullrate"]);
+    expect(JSON.stringify(cost?.rules)).toContain("payload.display.holdCost");
+    // And whether there is anything to hold at all: the full-rate stream
+    // exists only where an RTSP output does (R-UI-20).
+    expect(JSON.stringify(cost?.rules)).toContain("payload.display.fullRate");
+    expect((flows.find((n) => n.id === "camera-response")?.wires as string[][])[0])
+      .toContain("pick-cam-hold");
+
+    const edge = flows.find((n) => n.id === "cam-hold-edge");
+    expect((hold?.wires as string[][])[0]).toEqual(["cam-hold-edge"]);
+    const [down, up] = edge?.wires as string[][];
+    expect(down).toEqual(["cam-rate-full"]);
+    expect(up).toEqual(["cam-rate-preview"]);
+    // And both reach the picture, or the key is a control that does nothing.
+    for (const id of ["cam-rate-full", "cam-rate-preview"]) {
+      expect((flows.find((n) => n.id === id)?.wires as string[][])[0]).toEqual(["pic-camera", "pic-cockpit"]);
+    }
+  });
+
+  /**
+   * **The picture's own output must never come back to it.** `setMode` emits
+   * `mode:<mode>` when the operator changes it, so a flow that looped that
+   * back would be a picture commanding itself.
+   */
+  it("never lets the picture's own output come back to it as a command", () => {
+    const picture = flows.find((n) => n.type === "ui-yonder-picture");
+    const out = (picture?.wires as string[][]).flat();
+
+    // It has an output now — the operator asked for a Start on the picture —
+    // so "wired to nothing" is no longer the way to say this. What has to
+    // stay true is the thing that rule was protecting: `setMode` emits
+    // `mode:<mode>`, and a path that carried that back would be a picture
+    // commanding itself. Everything but `start` is dropped, by a switch whose
+    // `else` output goes nowhere at all.
+    for (const id of out) {
+      const router = flows.find((n) => n.id === id);
+      expect(router?.type, `${id} takes the picture's output and is not a switch`).toBe("switch");
+      const rules = (router?.rules as { t?: string; v?: string }[]) ?? [];
+      const wires = (router?.wires as string[][]) ?? [];
+      expect(rules).toHaveLength(wires.length);
+      const otherwise = rules.findIndex((r) => r.t === "else");
+      expect(otherwise, `${id} passes anything it does not recognise`).toBeGreaterThanOrEqual(0);
+      expect(wires[otherwise], `${id}'s else output leads somewhere`).toEqual([]);
+      for (const r of rules) {
+        if (r.t !== "else") expect(["start", "stop", "path"]).toContain(r.v);
+        if (r.v === "path") expect(wires[rules.indexOf(r)]).toEqual(["cam-pic-go"]);
+      }
+    }
+  });
+
+  /**
+   * R-UI-20 and R-CTL-10 together, and both now answered by one payload.
+   *
+   * The facts row and the two sliders were the same defect in two shapes:
+   * a capability list and a control range, each assembled by a `change`
+   * node in this file from `payload.capabilities.<key>.value.min`. Every one
+   * of those was a second place a capability could be wrong. `payload.deck`
+   * is the whole report — capabilities, descriptors in display units, the
+   * device's current readings and what was last commanded — composed once in
+   * `video/present.ts` and moved here whole. **Nothing in this file names a
+   * capability**, which is the assertion below, and the one that stops the
+   * list drifting from the model again (R-CAM-14).
+   */
+  it("feeds one complete workspace snapshot without embedding capability logic in flows", () => { const pick=flows.find(n=>n.id==='pick-cam-deck'); expect(pick?.rules).toEqual([{t:'set',p:'payload',pt:'msg',to:'payload.deck',tot:'msg'},{t:'set',p:'workspaceKind',pt:'msg',to:'report',tot:'str'}]); expect(pick?.wires).toEqual([['camera-workspace']]); expect(flows.find(n=>n.id==='camera-workspace')?.wires).toEqual([['deck-camera']]); });
+
+  /** A slider that echoed would post a control change on every read. */
+  it("lets no input on either deck echo what arrived", () => {
+    for (const n of on(camera).filter((w) => /ui-(slider|number-input|text-input)/.test(w.type))) {
+      expect(n.passthru ?? false, `${String(n.id)} echoes`).toBe(false);
+    }
+  });
+
+  /**
+   * **The stream address: all four receivers, each with a means of copying
+   * it** (R-VID-15, spec §3 — *"Receive line" is Stream address*).
+   *
+   * The page drew two of the four. `renderReceive()` has answered a GStreamer
+   * command line, a ground station's own settings, an appsink pipeline and an
+   * RTSP URL since M4, and the wiring picked the first and the last — so an
+   * operator holding a Mission Planner or a QGroundControl, which are the two
+   * the other two renderings exist for, found nothing on the page and had to
+   * read a document. That is R-VID-10's world, which R-VID-15 exists to
+   * replace.
+   *
+   * This is also the reason the capture gate checks every committed page for
+   * the device's real credential: the RTSP line carries a resolved one.
+   */
+  it("shows all four receivers, each with a means of copying it", () => {
+    // Explicit authenticated HTTP read in the deck replaces credential-bearing
+    // messages broadcast on camera selection. Route and component tests cover it.
+    expect(flows.some(n=>n.type==='yonder-stream-address')).toBe(false);
+  });
+
+  /**
+   * **R-UI-24: an output nothing can reach has its address marked unusable
+   * rather than offered** — and the mark is on the page, not only in the
+   * payload.
+   *
+   * The verdict and its sentence are `video/receive.ts`'s, from
+   * `outputReach()`; what this holds is that the page actually draws them.
+   * A `usable: false` nobody renders is R-UI-24 satisfied in a type and
+   * failed in front of the operator, which is the shape K-32 had.
+   *
+   * Two cells and not four, because the three UDP renderings are three ways
+   * of writing one output and share one verdict — three copies of one
+   * sentence is three chances to disagree about one fact.
+   */
+  it("draws each address's verdict beside it, in the words yonder-core chose", () => {
+    expect(flows.some(n=>n.id==='group-cam-receive'||n.id==='bar-cam-reach')).toBe(false);
+  });
+
+  /**
+   * **No camera's *name* is written into this file either** (R-UI-27).
+   *
+   * The companion to "names no camera in the wiring" below, which closed the
+   * same hole for a camera's *id*. The picture carried `"label": "Front
+   * camera"` — the capture fixture's name, frozen at deploy time — so a board
+   * whose camera the operator has called anything else had a page labelled
+   * with somebody else's camera. R-UI-27 makes the name the operator's; a
+   * name in this file is a name they cannot change.
+   *
+   * The name reaches the page the way every other fact about the camera does:
+   * composed in `video/present.ts` from the configuration, read whole.
+   */
+  it("writes no camera's name into the wiring, and draws the one it is sent", () => {
+    expect(flows.find(n=>n.id==='pic-camera')?.label).toBe('');
+    expect(flows.find(n=>n.id==='pick-cam-picture')?.rules).toContainEqual({t:'set',p:'payload',pt:'msg',to:'payload.picture',tot:'msg'});
+  });
+
+  /**
+   * **R-UI-03, per camera: the page the index opens is the page navigation
+   * shows, and it exists.**
+   *
+   * Dashboard 2 cannot create a page at run time — `ui-control` sets a page's
+   * `visible` and `disabled` and nothing else, and `ui_base.js` merges only
+   * that state into what it sends the browser — so "one page per detected
+   * camera" is served by the camera pages this file carries, shown and hidden
+   * from the sweep. That makes the join between them load-bearing and, until
+   * this test, unwatched: `cameras-show-page` names a page by **id**,
+   * `cam-open` navigates to one by **name**, and neither was resolved against
+   * the pages that exist. A page renamed in the editor leaves `ui-control`
+   * logging *No page with the name 'Camera' found* and the OPEN key doing
+   * nothing at all — at run time, on a board, with every test green.
+   *
+   * The last clause is what makes a second camera page a data change: a
+   * camera page nothing shows, or nothing hides, fails here.
+   */
+  it("shows and opens the same camera page, and leaves none of them unreachable", () => {
+    const pages = new Map(flows.filter((n) => n.type === "ui-page").map((p) => [p.id, p]));
+    const listed = (id: string, which: "show" | "hide"): string[] => {
+      const to = (flows.find((n) => n.id === id)?.rules as { to: string }[])[0].to;
+      return (JSON.parse(to) as { pages: Record<string, string[]> }).pages[which] ?? [];
+    };
+    const shown = listed("cameras-show-page", "show");
+    const hidden = listed("cameras-hide-page", "hide");
+    expect(shown.length).toBeGreaterThan(0);
+    expect(shown.slice().sort()).toEqual(hidden.slice().sort());
+    for (const id of shown) {
+      expect(pages.has(id), `navigation names ${id}, which is not a page`).toBe(true);
+    }
+    // Every camera page in the file is in that set. One that is not would be
+    // a section for a camera that is not there — R-UI-03 exactly backwards.
+    const cameraPages = [...pages.values()].filter((p) => p.id !== "page-cameras"
+      && groupsOn(p).some((g) => String(g.id).startsWith("group-cam-")));
+    expect(cameraPages.length).toBeGreaterThan(0);
+    for (const p of cameraPages) {
+      expect(shown, `${String(p.name)} is a camera page nothing shows`).toContain(p.id);
+    }
+    // And the index opens one of them, by the name that page actually has.
+    const open = (flows.find((n) => n.id === "cam-open")?.rules as { p: string; to: string }[])
+      .find((r) => r.p === "payload");
+    const named = (JSON.parse(String(open?.to)) as { page: string }).page;
+    const target = [...pages.values()].find((p) => p.name === named);
+    expect(target, `OPEN navigates to "${named}", which no page is called`).toBeDefined();
+    expect(shown, "the index opens a page navigation never shows").toContain(target?.id);
+  });
+
+  /**
+   * R-CAM-10: why Start would be refused, before it is pressed — and now
+   * **directly above the key it is about**.
+   *
+   * It used to be a `ui-text` in the readout group, four groups away from
+   * START and 121 px of sentence in a 48 px box, which the capture gate
+   * measured as 60% of it hidden. It is a data-bar cell on the Live rail
+   * instead: the strip's own `note` kind, which wraps a sentence onto a line
+   * of its own rather than asking a reading to shrink (R-UI-25), and the
+   * rail is the one group that is on screen whenever START is.
+   *
+   * A row labelled "cannot start" with nothing after it would read as *this
+   * camera cannot start*, which is the opposite of what a null refusal
+   * means — so the caption is checked as well as the value.
+   */
+  it("keeps the start refusal in the composed picture and deck", () => { expect(flows.find(n=>n.id==='camera-response')?.wires?.flat()).toContain('pick-cam-picture'); expect(flows.some(n=>n.id==='bar-cam-start')).toBe(false); });
+
+  /**
+   * **The picture's own Start, and why R-UI-10 still holds around it.**
+   *
+   * Starting a camera meant scrolling past the whole deck to the rail at the
+   * foot of the page, with nothing above saying that was where to go. The
+   * operator asked for it where they are already looking, and decided that
+   * the empty picture is the place — so `ui-yonder-picture` now draws one
+   * key, and it is the only action on this page that is not on the rail.
+   *
+   * It is not a second way of starting a camera: it sends the same `start`
+   * the rail's own key sends, through a switch that reaches the same
+   * `cam-at-stream`. The rule below still counts Dashboard widgets, and a key
+   * drawn inside the picture is not one — so this test is what says the
+   * exception exists deliberately, rather than leaving it to look like a gap.
+   */
+  it("keeps the picture Start and workspace Stop on the existing stream adapter", () => { expect(flows.find(n=>n.id==='cam-pic-act')?.wires?.[0]).toEqual(['cam-at-stream']); expect(flows.find(n=>n.id==='cam-video-msg')?.wires).toEqual([['cam-at-stream']]); });
+
+  /**
+   * The picture cannot offer to start a camera it has not been told is
+   * stopped, so the message that names the camera carries that too.
+   */
+  it("tells the picture whether its camera is running", () => {
+    const pick = flows.find((n) => n.id === "pick-cam-picture");
+    // The daemon composes run state, aim and recorder together; wiring projects the value.
+    expect(pick?.rules).toEqual([{ t: "set", p: "payload", pt: "msg", to: "payload.picture", tot: "msg" }]);
+  });
+
+  /** R-UI-10: every action on this page is on the rail, and only there. */
+  it("keeps primary actions in the camera workspace and bounded preview controls", () => { expect(flows.find(n=>n.id==='deck-camera')?.wires).toEqual([['cam-deck-route']]); expect(flows.find(n=>n.id==='hold-cam-fullrate')?.group).toBe('group-cam-picture'); expect(flows.some(n=>n.id==='keys-cam-live'||n.id==='keys-cam-setup')).toBe(false); });
+
+  /**
+   * And each rail carries only what can be done from the deck it belongs to —
+   * **and every key it sends is answered by the switch behind it.**
+   *
+   * The two halves were renamed in one commit and nothing held them together:
+   * `keys-cam-setup`'s third key became `address` and `cam-setup-keys`'s third
+   * rule became `address`, and setting either back leaves the whole suite
+   * green. The switch was `checkall: "false"` with no `else`, so a mismatch
+   * dropped the press in silence — a soft key that does nothing at all, on a
+   * board, with the capture gate blind to it because the gate presses deck
+   * keys and `NIGHT` and reaches Setup by a different route.
+   *
+   * So the actions and the rule values are compared to each other rather than
+   * each to a list written twice, and the `else` every rail's switch now has
+   * is asserted to reach the node that says so out loud (R-UI-05: an operator
+   * must be able to tell "nothing happened" from "this did nothing").
+   */
+  it("routes every camera workspace action to a real consumer", () => { const route=flows.find(n=>n.id==='cam-deck-route')!; const rules=route.rules as {v:string}[]; expect(rules.map(r=>r.v)).toEqual(['nativeControl','control','apply','shutter','captures','transaction','video','refresh']); expect(route.wires).toHaveLength(rules.length); for(const targets of route.wires!) expect(targets.length).toBeGreaterThan(0); });
+
+  /**
+   * A key that reached `yonder-stream` with anything but start or stop would
+   * spend a round trip to be told so, and the operator would read the daemon's
+   * refusal about the deck key they pressed.
+   */
+  it("has no layout mode command in the stream path", () => { expect(flows.find(n=>n.id==='cam-video-msg')?.rules).toEqual([{t:'set',p:'payload',pt:'msg',to:'payload.video',tot:'msg'}]); expect(flows.find(n=>n.id==='cam-pic-act')?.rules).toEqual([{t:'eq',v:'start',vt:'str'},{t:'eq',v:'stop',vt:'str'},{t:'hask',v:'path',vt:'str'},{t:'else'}]); });
+
+  /**
+   * **No camera's id is written into this file.**
+   *
+   * Five nodes carried `"camera": "front"` — the capture fixture's name — so
+   * the page was dead on every device whose camera is called anything else:
+   * `404 no camera is configured with the id "front"`, badged "not answering",
+   * every widget drawing nothing. The package was built to be dynamic —
+   * `adapter.ts` prefers `msg.camera` over the node's own field — and the
+   * wiring froze it.
+   *
+   * The id comes from `GET /cameras`, which already answers it, and reaches
+   * each node through one addressing node in front of it.
+   */
+  it("names no camera in the wiring, and addresses every camera node by message", () => {
+    const nodes = flows.filter(
+      (n) => ["yonder-camera", "yonder-stream", "yonder-stream-address"].includes(n.type),
+    );
+    expect(nodes.length).toBeGreaterThan(0);
+    for (const n of nodes) {
+      expect(n.camera, `${String(n.id)} still names a camera`).toBe("");
+      // Everything that feeds it sets `msg.camera` — either it is an
+      // addressing node itself, or every one of its inputs is.
+      const feeders = flows.filter((f) =>
+        ((f.wires as string[][] | undefined) ?? []).some((out) => out.includes(String(n.id))));
+      expect(feeders.length, `${String(n.id)} is fed by nothing`).toBeGreaterThan(0);
+      for (const f of feeders) {
+        expect(JSON.stringify(f.rules), `${String(f.id)} does not address a camera`)
+          .toContain('"p":"camera"');
+      }
+    }
+  });
+
+  /**
+   * **The camera a row was pressed on is the camera the page then reads.**
+   *
+   * `ui-yonder-index` posts `{ camera: id }`, correctly. The flow behind it
+   * discarded that id and set the page alone, and `flow.camera` — which every
+   * `cam-at-*` node reads — was written in exactly one place, to the *first*
+   * configured camera in the sweep. So on a two-camera board both rows' OPEN
+   * keys opened camera one, and the development board has one camera, so it
+   * would have shipped invisible.
+   *
+   * Two halves, and both are needed: `cam-open` has to record the choice, and
+   * the sweep that runs every few seconds afterwards must not overwrite it.
+   */
+  /**
+   * **The dead end, wired shut.**
+   *
+   * The operator plugged a second camera into a running board. Its row was
+   * drawn, marked *Not configured*, its OPEN key inert — correctly, since a
+   * camera with no configuration entry has no page — and nothing anywhere
+   * could give it one. He found that by using the console; no review could,
+   * because a review reads a diff and nothing in a diff is missing.
+   */
+  it("routes an ADD press to the one request that configures a camera", () => {
+    const route = flows.find((n) => n.id === "cam-index-route");
+    expect(route?.type).toBe("switch");
+    expect(route?.property, "routed on the press, not on a page name").toBe("payload.adopt");
+    // First output is the adoption; it must reach a node that talks to the
+    // daemon, not another page switch.
+    const adoptTarget = (route?.wires as string[][])[0]?.[0];
+    const adopt = flows.find((n) => n.id === adoptTarget);
+    expect(adopt?.type, "an adoption reaches the camera adapter").toBe("yonder-cameras");
+    // And afterwards the list is read again, or the row keeps the null id it
+    // was drawn with and the operator presses ADD twice.
+    const after = flows.find((n) => n.id === (adopt?.wires as string[][])[0]?.[0]);
+    expect(String(after?.name)).toContain("sweep again");
+    expect((after?.wires as string[][])[0]).toEqual(["cameras-read"]);
+  });
+
+  /**
+   * **The other half of the state the operator found a board in** (R-CAM-21).
+   *
+   * A camera had been moved between USB ports. Identity is the socket
+   * (R-CAM-05), so each move made it a different camera and left the previous
+   * entry behind — two configured cameras against ports with nothing in them,
+   * and no way to clear either short of editing `config.yaml` over SSH.
+   *
+   * **`cam-index-route` cannot carry this on its own.** A `switch` tests one
+   * property, and its property is `payload.adopt`, which is empty for an OPEN
+   * press and empty for a removal alike — so its `else` output is where both
+   * of them arrive and there is nothing left there to tell them apart. Hence
+   * a second switch rather than a third rule, and the rule/output check below
+   * is the one this repository has already shipped a defect against (7103700:
+   * a switch with two outputs and one rule, so OPEN reached nothing).
+   */
+  it("routes a removal press to the one request that takes a camera out of the configuration", () => {
+    const route = flows.find((n) => n.id === "cam-forget-route");
+    expect(route?.type).toBe("switch");
+    expect(route?.property, "routed on the press, not on a page name").toBe("payload.forget");
+    const rules = route?.rules as { t: string }[];
+    const wires = route?.wires as string[][];
+    expect(rules.length, "one rule per output, or an output is unreachable").toBe(wires.length);
+    expect(rules.at(-1)?.t, "the fall-through is a real rule").toBe("else");
+    // It is reached from the index's own switch, not wired to the widget in
+    // parallel — a widget has one output and both presses leave through it.
+    expect((flows.find((n) => n.id === "cam-index-route")?.wires as string[][])[1])
+      .toEqual(["cam-forget-route"]);
+    const forget = flows.find((n) => n.id === wires[0]?.[0]);
+    expect(forget?.type, "a removal reaches the camera adapter").toBe("yonder-cameras");
+    // And afterwards the list is read again, or the row the operator just
+    // removed stays on the page until the next poll.
+    const after = flows.find((n) => n.id === (forget?.wires as string[][])[0]?.[0]);
+    expect(String(after?.name)).toContain("sweep again");
+    expect((after?.wires as string[][])[0]).toEqual(["cameras-read"]);
+  });
+
+  it("opens the camera whose row was pressed, and keeps it open", () => {
+    const open = flows.find((n) => n.id === "cam-open");
+    const rules = open?.rules as { p: string; pt: string; to: string; tot: string }[];
+    // The choice is recorded before the page is set, and it comes off the
+    // press rather than out of a list.
+    expect(rules.find((r) => r.p === "camera")).toEqual({
+      t: "set", p: "camera", pt: "flow", to: "payload.camera", tot: "jsonata",
+    });
+    const page = rules.find(r => r.p === "payload");
+    expect(page?.p).toBe("payload");
+    expect(JSON.parse(String(page?.to))).toEqual({ page: "Camera" });
+    // **A press is routed before it is acted on**, because a row now sends
+    // two different things: `camera` to open one, `adopt` to configure one the
+    // board found and nothing is configured for. The index reaches `cam-open`
+    // through that switch rather than directly.
+    expect((flows.find((n) => n.type === "ui-yonder-index")?.wires as string[][])[0])
+      .toEqual(["cam-index-route"]);
+    const route = flows.find((n) => n.id === "cam-index-route");
+    expect(route?.property).toBe("payload.adopt");
+    // **A switch's second output exists only if a second rule feeds it.**
+    // Shipped once without the `else` and OPEN silently did nothing: the press
+    // matched no rule, so it went nowhere, and every test here passed because
+    // they all read wires rather than rules. The operator found it in a
+    // browser within minutes.
+    const routeRules = route?.rules as { t: string }[];
+    expect(routeRules.length, "one rule per output, or an output is unreachable")
+      .toBe((route?.wires as string[][]).length);
+    expect(routeRules.at(-1)?.t, "the fall-through is a real rule").toBe("else");
+    // **A press now falls through two switches, not one**, because a row
+    // sends three different things and a `switch` tests one property. What
+    // matters is that the last fall-through still lands on `cam-open`: an
+    // OPEN press must reach the node that records the choice however many
+    // hops are added in front of it. Walked rather than named, so a fourth
+    // press inserted later cannot quietly leave OPEN going nowhere.
+    let hop = flows.find((n) => n.id === (route?.wires as string[][])[1]?.[0]);
+    while (hop?.type === "switch") {
+      const rules = hop.rules as { t: string }[];
+      const wires = hop.wires as string[][];
+      expect(rules.length, `one rule per output on ${String(hop.id)}, or an output is unreachable`)
+        .toBe(wires.length);
+      expect(rules.at(-1)?.t, `${String(hop.id)}'s fall-through is a real rule`).toBe("else");
+      hop = flows.find((n) => n.id === wires.at(-1)?.[0]);
+    }
+    expect(hop?.id, "OPEN still reaches the node that records the choice").toBe("cam-open");
+
+    // And the sweep seeds the id only when there is nothing chosen, or when
+    // what was chosen is no longer attached. Without this, the next poll puts
+    // the operator back on camera one a few seconds after they left it.
+    const identify = String((flows.find((n) => n.id === "cam-identify")
+      ?.rules as { to: string }[])[0]?.to);
+    expect(identify).toContain('$flowContext("camera")');
+    expect(identify).toContain("payload.found[id != null].id");
+    // **And a sweep that failed leaves the choice alone.** `yonder-cameras`
+    // emits `payload: null` when the daemon does not answer, and without this
+    // guard the expression evaluated to nothing and deleted `flow.camera` —
+    // every widget on the camera page then asking about no camera at all. A
+    // read that failed is not evidence that anything was unplugged.
+    expect(identify).toContain("$exists(payload.found)");
+
+    // A refusal belongs to one camera. Opening another clears the stash the
+    // flow keeps, rather than leaving it to be drawn against the next
+    // camera's matching staged path.
+    const cleared = JSON.stringify(open?.rules);
+    expect(cleared).not.toContain('"p":"camproblems"'); // workspace model owns camera-scoped issues
+  });
+
+  /**
+   * **A refused apply is its own answer.**
+   *
+   * Every non-pending answer used to land on `toast-cam-kept`, the node named
+   * "applied, and kept", and the `problems` the route answers with reached no
+   * surface at all. The route half was right and proven; the browser threw
+   * the draft away before the refusal arrived, so there was no field left to
+   * mark. Now: a third branch, its own toast, and the problems into flow
+   * context where `pick-cam-deck` puts them on the deck's payload.
+   */
+  it("routes camera results to the package-backed inline workspace", () => { expect(flows.find(n=>n.id==='camera-settings')?.wires?.flat()).toContain('cam-workspace-result'); expect(flows.find(n=>n.id==='cam-workspace-result')?.wires).toEqual([['camera-workspace']]); expect(flows.some(n=>n.id==='toast-cam-refused')).toBe(false); });
+
+  it("takes that id from the sweep, which is the only thing that knows it", () => {
+    const identify = flows.find((n) => n.id === "cam-identify");
+    expect((flows.find((n) => n.id === "cameras-read")?.wires as string[][])[0])
+      .toContain("cam-identify");
+    // The configured id for a socket something was detected on, or null.
+    expect(JSON.stringify(identify?.rules)).toContain("payload.found[id != null]");
+    expect(JSON.stringify(identify?.rules)).toContain('"pt":"flow"');
+  });
+
+  /**
+   * R-VID-11 again, on the picture: both of its numbers were literals here.
+   * The path was too, which is the same defect as the ids above — a picture
+   * negotiating against `front-preview` on a device whose camera is `nose`
+   * gets a 404 and reports it as a camera that is not streaming.
+   */
+  it("tells the picture which camera it is of, and what watching it costs", () => {
+    const picture = flows.find((n) => n.type === "ui-yonder-picture");
+    expect(picture?.cost).toBe("");
+    expect(picture?.path).toBe("");
+    const from = flows.find((n) => n.id === "pick-cam-picture");
+    expect((from?.wires as string[][])[0]).toEqual(["pic-camera", "pic-cockpit"]);
+    expect(from?.rules).toEqual([{ t: "set", p: "payload", pt: "msg", to: "payload.picture", tot: "msg" }]);
+    expect((flows.find((n) => n.id === "camera-response")?.wires as string[][])[0])
+      .toContain("pick-cam-picture");
+  });
+
+  /**
+   * **R-UI-26: an action lives beside the thing it acts on.**
+   *
+   * The rail carries the page's own actions — start, stop, the deck flip,
+   * re-probe, the stream address, the full-rate hold. Record and Recentre are
+   * not among them and must not become so: Record belongs under the picture
+   * it is recording, in the deck's own Capture column, and Recentre belongs
+   * on the Aim panel beside the gimbal it moves. On a rail they would be two
+   * keys an operator has to look away from the picture to find, at the exact
+   * moment they are watching it.
+   *
+   * Checked over the rails' declared keys, which is where a key would have to
+   * be added for it to appear — `YonderShutter` and the Aim panel's own
+   * Recentre are drawn by their components and reach no rail at all.
+   */
+  it("keeps recording in camera controls and recentre in standalone Aim", () => { expect(flows.find(n=>n.id==='deck-camera')?.type).toBe('ui-yonder-deck'); expect(flows.find(n=>n.id==='aim-camera')?.type).toBe('ui-yonder-aim'); expect(flows.some(n=>n.id==='keys-cam-live'||n.id==='keys-cam-setup')).toBe(false); });
+
+  /**
+   * **Every press the deck makes has somewhere to go.**
+   *
+   * `YonderDeck` posts seven different shapes — an image control, an apply, a
+   * discard, an output switch, the shutter, the captures link and a deck flip
+   * — and Dashboard delivers all of them down one wire. A route that
+   * recognised six would leave the seventh silently doing nothing, which is
+   * exactly the failure `emitsActions` produces one layer up and is just as
+   * invisible.
+   *
+   * **It did.** The deck has posted `{ shutter: … }` since it was built and
+   * this switch had rules for four other keys, so pressing RECORD or PHOTO on
+   * the camera page did nothing at all, in silence, for as long as the key has
+   * been drawn. That is the defect Task 33b was named for, and it is the
+   * second time in this file: `7103700` is the identical shape one page along,
+   * where OPEN reached nothing because a switch had more outputs than rules.
+   *
+   * `discard` is deliberately not routed: it is the browser dropping its own
+   * draft and reaches the daemon by design (`YonderDeck.discard()` clears the
+   * store before it posts). The aim events are Task 38's; they are named here
+   * as unrouted so that adding a route is a change to this list rather than a
+   * discovery.
+   */
+  it("routes immediate camera controls and deliberate Apply separately", () => { const route=flows.find(n=>n.id==='cam-deck-route')!; const rules=route.rules as {v:string}[]; expect(route.wires?.[rules.findIndex(r=>r.v==='nativeControl')]).toEqual(['cam-native-control-msg']); expect(route.wires?.[rules.findIndex(r=>r.v==='control')]).toEqual(['cam-control-msg']); expect(route.wires?.[rules.findIndex(r=>r.v==='apply')]).toEqual(['cam-apply-msg']); expect(rules.some(r=>r.v==='output'||r.v==='mode')).toBe(false); expect(flows.find(n=>n.id==='cam-apply-msg')?.wires).toEqual([['cam-at-settings']]); });
+
+  /**
+   * **A shutter press reaches the node that works the shutter** (R-CAM-17,
+   * R-CAM-18).
+   *
+   * The route above proves the message leaves the switch; this proves where
+   * it lands, and the two together are the whole of the defect. A press that
+   * reached a `change` node and stopped there would satisfy the first and do
+   * nothing, which is what it did.
+   *
+   * **The mapping is the node's, not a rule's** (CLAUDE.md rule 2). What
+   * `shutter: "record"` means as an HTTP route is decided in
+   * `node-red-contrib-yonder-video/src/captures.ts`, where it has source and
+   * tests; a `change` node composing `{"action":"start"}` in JSONata beside a
+   * wire coordinate would be that decision serialised into an artefact nobody
+   * can review a diff of. So this asserts the press reaches the node
+   * *carrying its own payload* — nothing between the deck and the daemon
+   * rewrites it.
+   */
+  it("carries a shutter press to the captures node, unrewritten", () => {
+    const at = flows.find((n) => n.id === "cam-at-captures-act");
+    expect(at?.type).toBe("change");
+    // Addressing only: which camera this is about. Nothing composes a body.
+    expect(at?.rules).toEqual([{ t: "set", p: "camera", pt: "msg", to: '$exists(camera) ? camera : $flowContext("camera")', tot: "jsonata" }]);
+    const target = (at?.wires as string[][])[0]?.[0];
+    const node = flows.find((n) => n.id === target);
+    expect(node?.type, "a shutter press reaches the capture node").toBe("yonder-captures");
+
+    // And its answer goes three places: the annunciator, the still's own
+    // confirmation over the picture, and a fresh read of the camera — which
+    // is what redraws the key, the count beside it and the panel below.
+    expect((node?.wires as string[][])[0])
+      .toEqual(["cam-workspace-result", "cam-saved-gate", "cam-at-read"]);
+  });
+
+  /**
+   * **The captures panel is fed by the same read as everything else.**
+   *
+   * A panel fetched on its own could show a listing composed a poll apart
+   * from the `Captures (n)` link beside the shutter key — two answers to one
+   * question, on one screen. `yonder-core` composes both from one directory
+   * read; the flow only selects.
+   */
+  it("draws the captures panel from the camera read, and routes its one press", () => {
+    expect((flows.find((n) => n.id === "camera-response")?.wires as string[][])[0])
+      .toContain("pick-cam-captures");
+    const pick = flows.find((n) => n.id === "pick-cam-captures");
+    // Selection, not composition: the shape is the daemon's own.
+    expect(pick?.rules).toEqual([
+      { t: "set", p: "payload", pt: "msg", to: "payload.captures", tot: "msg" },
+    ]);
+    expect((pick?.wires as string[][])[0]).toEqual(["caps-camera"]);
+    const panel = flows.find((n) => n.id === "caps-camera");
+    expect(panel?.type).toBe("ui-yonder-captures");
+
+    // A delete is the one thing the panel sends, and it is routed rather than
+    // wired straight through — with an `else` that says so, because a press
+    // matching no rule is a press that does nothing in silence.
+    const route = flows.find((n) => n.id === "cam-caps-route");
+    expect((panel?.wires as string[][])[0]).toEqual(["cam-caps-route"]);
+    const rules = route?.rules as { t: string; v?: string }[];
+    expect(rules.map((r) => r.v)).toEqual(["remove", undefined]);
+    expect(rules.at(-1)?.t, "the fall-through is a real rule").toBe("else");
+    expect(rules.length, "one rule per output, or an output is unreachable")
+      .toBe((route?.wires as string[][]).length);
+    expect((route?.wires as string[][])[0]).toEqual(["cam-at-captures-act"]);
+  });
+
+  /**
+   * **Only a still that landed flashes the picture** (blueprint L-18).
+   *
+   * The one node behind the shutter answers three different things — a
+   * recorder state, a capture, and a bare name from a delete — and a banner
+   * reading *Saved · to this board* over a delete would be a lie about both.
+   * `held` is the field only a capture carries, and the gate is a switch
+   * rather than a sentence read back out of a payload.
+   */
+  it("confirms a still over the picture, and nothing else", () => {
+    const gate = flows.find((n) => n.id === "cam-saved-gate");
+    expect(gate?.type).toBe("switch");
+    expect(gate?.property).toBe("payload");
+    expect(gate?.rules).toEqual([{ t: "hask", v: "held", vt: "str" }]);
+    expect((gate?.rules as unknown[]).length).toBe((gate?.wires as string[][]).length);
+
+    const saved = flows.find((n) => n.id === (gate?.wires as string[][])[0]?.[0]);
+    // Copies, and no expression: the words for where it went are
+    // `heldWords()`'s, in the component that draws them.
+    expect(JSON.stringify(saved?.rules)).not.toContain("jsonata");
+    expect((saved?.wires as string[][])[0]).toEqual(["pic-camera", "pic-cockpit"]);
+  });
+
+  /**
+   * **The REC pill has a source** (blueprint L-16).
+   *
+   * It has been drawn since Task 19 and fed by nothing. The elapsed time is
+   * counted in the component from the recorder's own `since`, so what travels
+   * here is the recorder's state and not a formatted string — a five-second
+   * poll formatting a stopwatch would produce a clock that ticks in fives.
+   */
+  it("gives the picture the recorder's own state to count from", () => {
+    const pick = flows.find((n) => n.id === "pick-cam-picture");
+    const rules = pick?.rules as { p: string; to: string; tot: string }[];
+    expect(rules).toEqual([{ t: "set", p: "payload", pt: "msg", to: "payload.picture", tot: "msg" }]);
+    // The route test proves picture.recording is the recorder observation verbatim.
   });
 });
 
 /**
- * **R-UI-18.** `IF YOU LOSE THIS CONSOLE` — the one thing an operator needs
- * when nothing else on the page is true any more.
+ * The Telemetry page, against the artefact (R-MAV-10, R-DIA-04, R-UI-17).
+ *
+ * The page itself was settled by building it and looking at it; what this
+ * describes is the cutover underneath it — thirty-two static payloads
+ * replaced by four adapters over the daemon socket. Every assertion here is
+ * about a *wire*, because that is all this file may contain: the decisions
+ * are in `node-red-contrib-yonder-mavlink`, where they have source and tests
+ * of their own.
  */
-describe("flows/flows.json If you lose this console", () => {
+describe("flows/flows.json Telemetry page", () => {
   const byId = (id: string) => flows.find((n) => n.id === id);
-  const inPanel = flows.filter((n) => n.group === "group-status-wayback");
-  const wiresOf = (id: string) => (byId(id)?.wires ?? []) as string[][];
-
-  /**
-   * Below the mesh, so the page reads *the board → how you reach it → the
-   * mesh → the way back in*. Full width, because a bar of four cells at a
-   * third of the page would ellipsise the thing it exists to print.
-   */
-  it("is the last panel on Status, and the full width of it", () => {
-    const group = byId("group-status-wayback");
-    expect(group?.type).toBe("ui-group");
-    expect(group?.page).toBe("page-status");
-    expect(group?.name).toBe("If you lose this console");
-    expect(group?.width).toBe(12);
-    for (const above of ["group-status-pending", "group-board", "group-status-reach", "group-status-remote"]) {
-      expect(Number(group?.order)).toBeGreaterThan(Number(byId(above)?.order));
+  const wiresOf = (id: string) => ((byId(id)?.wires ?? []) as string[][]);
+  /** Everything wired downstream of a node, however many hops away. */
+  const reaches = (from: string): Set<string> => {
+    const seen = new Set<string>();
+    const queue = [from];
+    while (queue.length > 0) {
+      const id = queue.shift() as string;
+      for (const target of wiresOf(id).flat()) {
+        if (seen.has(target)) continue;
+        seen.add(target);
+        queue.push(target);
+      }
     }
-    // Always there. Unlike the pending banner, this is not news — it is the
-    // recovery card, and a card that appears only once things have gone wrong
-    // is one nobody has read before they needed it.
-    expect(group?.visible).toBe(true);
-  });
-
-  it("names the network, the passphrase, the address and the name", () => {
-    const bar = byId("bar-wayback");
-    expect(bar?.type).toBe("ui-yonder-databar");
-    expect(bar?.group).toBe("group-status-wayback");
-    expect(bar?.width).toBe(12);
-    // The gate does not mask these: they are the same on every run, and a
-    // committed picture with them behind a grey box is a picture of the panel
-    // with its content removed.
-    expect(bar?.className).toBe("yonder-fixed");
-    const cells = JSON.parse(String(bar?.cells ?? "[]")) as
-      { key: string; label: string; kind?: string }[];
-    expect(cells.map((c) => [c.key, c.label]))
-      .toEqual([["join", "JOIN"], ["passphrase", "PASSPHRASE"], ["at", "AT"], ["or", "OR"]]);
-    /**
-     * The three cells that are typed verbatim take the identifier tone; the
-     * passphrase does not, because that cell holds a sentence — *changed —
-     * the one you set* — whenever the operator has set their own, and a
-     * sentence in the colour reserved for names reads as a name.
-     */
-    expect(cells.filter((c) => c.kind === "id").map((c) => c.key)).toEqual(["join", "at", "or"]);
-    expect(cells.find((c) => c.key === "passphrase")?.kind).toBeUndefined();
-  });
+    return seen;
+  };
 
   /**
-   * The line beneath is prose, so it is a qualifier. `.nrdb-ui-text-value` is
-   * `text-align: right` — Task 8's defect, on a sentence the console had put
-   * in a readout's slot.
-   */
-  it("carries the line that says what to do with it, as prose", () => {
-    const note = byId("text-wayback-note");
-    expect(note?.type).toBe("ui-text");
-    expect(note?.group).toBe("group-status-wayback");
-    expect(note?.value).toBe("payload.note");
-    expect(note?.valueType).toBe("msg");
-    expect(note?.wrapText).toBe(true);
-    // `yonder-qualifier` is the prose class. `yonder-fixed` is what the
-    // capture gate reads: this sentence is a constant, so masking it would
-    // commit a picture of the panel with its explanation removed.
-    expect(String(note?.className).split(/\s+/).sort())
-      .toEqual(["yonder-fixed", "yonder-qualifier"]);
-    expect(Number(note?.order)).toBeGreaterThan(Number(byId("bar-wayback")?.order));
-  });
-
-  it("is fed by one poller, and feeds both halves of the panel", () => {
-    const poller = byId("poll-wayback");
-    expect(poller?.type).toBe("yonder-wayback");
-    expect(Number(poller?.interval) * 1000).toBeGreaterThanOrEqual(MIN_POLL_MS);
-    expect(wiresOf("poll-wayback")[0]).toEqual(["bar-wayback", "text-wayback-note"]);
-  });
-
-  /**
-   * **The decision about the passphrase is not in this file, and this is what
-   * asserts that.**
+   * Every widget on the page, and where its value has to have come from.
    *
-   * Nothing on this page compares anything, routes on anything or holds a
-   * literal passphrase. The daemon decides whether the value may be printed
-   * (`publishableApPassphrase`) and yonder-core turns the withheld case into
-   * words (`wayBackInView`); the flow carries what came back. A `switch` on
-   * the passphrase here would be the rule living in wiring — where an
-   * operator can edit it in the flow editor without knowing they have.
+   * `label-*` are the four captions beside the annunciators: an
+   * `ui-yonder-annunciator` carries no label of its own, so the word beside
+   * it is a `ui-text` whose *value* is deliberately empty — it has nothing to
+   * read from the device and still needs a message to render its label.
    */
-  it("decides nothing about the passphrase, and holds none", () => {
-    const wiring = JSON.stringify([...inPanel, byId("poll-wayback")]);
-    expect(wiring).not.toMatch(/yonder1234/);
-    expect(wiring).not.toMatch(/passphrase.*(changed|default)/i);
-    for (const node of [...inPanel, byId("poll-wayback")]) {
-      expect(node?.type, node?.id).not.toBe("function");
-      expect(node?.type, node?.id).not.toBe("switch");
+  const FROM_STATE = [
+    "tel-ann-link", "tel-port", "tel-speed", "tel-vehicle", "tel-hb", "tel-heard",
+    "tel-ann-recv", "tel-answered", "tel-gcs-0", "tel-gcs-1", "tel-gcs-2",
+    "tel-spark", "tel-ann-state", "stat-ann-feed", "stat-flow",
+  ];
+  const FROM_CONFIG = [
+    "tel-atboot", "tel-ingest",
+    "tel-host-0", "tel-port-0", "tel-host-1", "tel-port-1", "tel-host-2", "tel-port-2",
+  ];
+  const COMPOSITE = ["tel-tcp", "stat-tel-bar"];
+  const FROM_CHECK = ["tel-chain-1", "tel-chain-2", "tel-chain-3"];
+
+  it("reads the link from the daemon, and nothing on the page invents one", () => {
+    const measured = reaches("tel-state");
+    for (const widget of [...FROM_STATE, ...COMPOSITE]) {
+      expect(measured.has(widget), `${widget} is not downstream of yonder-mav-state`).toBe(true);
     }
-    // And nothing anywhere in the shipped flows carries the published value,
-    // which would be a second copy of it going stale beside profiles.ts.
-    expect(text).not.toMatch(/yonder1234/);
+    expect(byId("tel-state")?.type).toBe("yonder-mav-state");
   });
+
+  it("seeds every box from the configuration the console already read (R-UI-17)", () => {
+    expect(byId("seed-tel-endpoints")?.type).toBe("yonder-mav-endpoints");
+    // One read of `/config` for both forms on this console. A second reader
+    // on its own schedule is what would overwrite a half-typed host box.
+    expect(wiresOf("read-config").flat()).toContain("seed-tel-endpoints");
+    const seeded = reaches("seed-tel-endpoints");
+    for (const widget of FROM_CONFIG) {
+      expect(seeded.has(widget), `${widget} is not downstream of yonder-mav-endpoints`).toBe(true);
+    }
+    // Seven outputs, in the order the node documents them: the rail's facts,
+    // then host and port for each of the three rows. A pair crossed here puts
+    // a port in a host box on a real device and nothing else would say so.
+    const outputs = wiresOf("seed-tel-endpoints");
+    expect(outputs).toHaveLength(7);
+    expect(outputs.slice(1).map((o) => o[0]))
+      .toEqual(["tel-host-0", "tel-port-0", "tel-host-1", "tel-port-1", "tel-host-2", "tel-port-2"]);
+  });
+
+  /**
+   * **Two readouts have no single source, and this is the wiring that joins
+   * them.**
+   *
+   * `tel-tcp` is the TCP server's port — configuration — beside how many
+   * clients are on it — a measurement. `stat-tel-bar` is two settings beside
+   * two measurements. `/mav/state` carries neither setting and `config.yaml`
+   * carries neither measurement, so no node could have sent either payload
+   * whole: the configured half is put in flow context when the console opens
+   * and the measured half arrives on every poll.
+   */
+  it("joins the two readouts that are half configured and half measured", () => {
+    const remember = byId("remember-tel-facts");
+    const rules = (remember?.rules ?? []) as { p: string; pt: string }[];
+    expect(rules.map((r) => `${r.pt}.${r.p}`))
+      .toEqual(["flow.telAtBoot", "flow.telIngest", "flow.telTcpAddress", "flow.telTcpServing"]);
+    expect(reaches("seed-tel-endpoints").has("remember-tel-facts")).toBe(true);
+
+    for (const join of ["join-tel-tcp", "join-stat-tel-bar"]) {
+      const node = byId(join);
+      expect(node?.type, join).toBe("change");
+      expect(JSON.stringify(node), join).toMatch(/\$flowContext/);
+      expect(reaches("tel-state").has(join), `${join} never sees a measurement`).toBe(true);
+    }
+    // Only ever what those four names hold. Caching the configuration
+    // itself in flow context is the defect the top-level test forbids: a
+    // change node reads and writes context by reference, so the cache and
+    // the document being applied become one object.
+    expect(JSON.stringify(byId("join-tel-tcp"))).toMatch(/telTcpAddress/);
+    expect(JSON.stringify(byId("join-stat-tel-bar"))).toMatch(/telAtBoot/);
+  });
+
+  /**
+   * **The TCP line never counts clients on a socket nothing is listening on**
+   * (R-MAV-04, R-MAV-07).
+   *
+   * `router/config.ts` writes `TcpServerPort = 0` — mavlink-router's way of
+   * being told to run no TCP server — unless `tcp_server.enabled` *and*
+   * `ingest.loopback_only === false`. On the shipped defaults that is no
+   * listener at all, and this row read `:5760 · no clients`: a port an
+   * operator could hand a ground station, beside a count of connections to a
+   * socket that does not exist.
+   *
+   * `yonder-mav-endpoints` decides — it is the only node that sees the
+   * configuration — and sends `tcpServing` beside the words. All this join
+   * does is stop appending a measurement when there is nothing to measure.
+   */
+  it("appends the TCP client count only when there is a server to be on", () => {
+    const rule = ((byId("join-tel-tcp")?.rules ?? []) as { to: string; tot: string }[])[0];
+    expect(rule?.tot).toBe("jsonata");
+    expect(rule?.to).toContain("telTcpServing");
+    // The count is inside the branch the flag guards, and never outside it.
+    const branches = rule.to.split(" : ");
+    expect(branches, "expected one `cond ? serving : off` conditional").toHaveLength(2);
+    expect(branches[0]).toContain("tcpClients");
+    expect(branches[1]).not.toContain("tcpClients");
+  });
+
+  /**
+   * R-MAV-09's one control, and the reply it acts on.
+   *
+   * `toggle` — a button carrying no payload of its own, so the node reads the
+   * current state and acts on the opposite of `telemetryRunning`. Its answer
+   * is the same `MavlinkStateBody` the poll reads, so it feeds the same
+   * widgets: the page turns over on the reply instead of on the next poll.
+   */
+  it("wires the one Stop/Start control, and lets its answer redraw the page", () => {
+    expect(wiresOf("tel-runstop").flat()).toEqual(["run-telemetry"]);
+    const run = byId("run-telemetry");
+    expect(run?.type).toBe("yonder-mav-run");
+    expect(run?.action).toBe("toggle");
+    expect(wiresOf("run-telemetry")).toEqual(wiresOf("tel-state"));
+  });
+
+  /**
+   * **R-MAV-16's operator action, which had no operator.**
+   *
+   * Re-detection has to stop `mavlink-router` to get the serial port back, so
+   * the requirement makes it "an operator action with the interruption stated
+   * first, never something Yonder decides on its own". Every half of it was
+   * built — the mockups draw the button, `yonder-mav-run` implements and
+   * documents `detect`, the daemon implements `POST /mav/detect`,
+   * `detectNow()`, `SweepInProgressError` and its 409 — and the only
+   * `yonder-mav-run` in this file was configured `toggle`. So `detectNow`,
+   * the 409 branch, `outcomeMessage()` and `payload.outcome` were all
+   * unreachable from the console, and R-MAV-16's operator action did not
+   * exist. The second unwired control found on this page; the Send button was
+   * the first, and both were found by a person pressing them.
+   *
+   * The interruption is stated in a row of its own above the button, in the
+   * same shape the two settings above it already use, rather than in prose
+   * the page has no budget for — and the sweep's own answer goes to the toast
+   * the console already uses for what just happened, because it is one
+   * sentence about an action, not a reading that stays on the page.
+   */
+  it("wires Look again now to a re-detect, states what it costs, and says what it found (R-MAV-16)", () => {
+    expect(wiresOf("tel-detect").flat()).toEqual(["detect-telemetry"]);
+    const detect = byId("detect-telemetry");
+    expect(detect?.type).toBe("yonder-mav-run");
+    expect(detect?.action).toBe("detect");
+
+    // Its answer is the same MavlinkStateBody the poll reads, plus the one
+    // extra sentence, so the page turns over on the reply — everything
+    // `tel-state` feeds, and nothing skipped.
+    for (const target of wiresOf("tel-state").flat()) {
+      expect(wiresOf("detect-telemetry").flat(), `${target} is not redrawn after a re-detect`)
+        .toContain(target);
+    }
+    expect(reaches("detect-telemetry").has("join-toast"), "the sweep's outcome reaches nobody").toBe(true);
+    expect(JSON.stringify(byId("say-tel-outcome"))).toMatch(/payload\.outcome/);
+
+    // R-MAV-16's "with the interruption stated first": a row above the
+    // button, on the page, before it is pressed.
+    const note = byId("tel-detect-note");
+    expect(note?.type).toBe("ui-text");
+    expect(note?.group).toBe(byId("tel-detect")?.group);
+    expect(Number(note?.order)).toBeLessThan(Number(byId("tel-detect")?.order));
+    expect(reaches("tel-poll").has("tel-detect-note"), "the cost line is never filled in").toBe(true);
+    const said = ((byId("note-tel-detect")?.rules ?? []) as { to: string }[])[0]?.to ?? "";
+    expect(said).toMatch(/stops receiving/i);
+  });
+
+  it("wires Check the path to the chain, and draws all three links (R-DIA-04)", () => {
+    expect(wiresOf("tel-check").flat()).toEqual(["check-path"]);
+    expect(byId("check-path")?.type).toBe("yonder-mav-check");
+    const checked = reaches("check-path");
+    for (const row of FROM_CHECK) {
+      expect(checked.has(row), `${row} is not downstream of yonder-mav-check`).toBe(true);
+    }
+  });
+
+  /**
+   * R-MAV-07 and R-UI-15 together. Where MAVLink is accepted from is
+   * configuration and is **not** exempt from the confirmation window, so
+   * pressing either key applies a whole document and the change pends — which
+   * is why nothing here confirms anything: the banner every surface already
+   * carries is what offers that.
+   */
+  it("routes the ingest keys through a switch, and applies the whole document", () => {
+    expect(wiresOf("tel-keys-ingest").flat()).toEqual(["route-tel-ingest"]);
+    const route = byId("route-tel-ingest");
+    expect(route?.type).toBe("switch");
+    const offered = (JSON.parse(String(byId("tel-keys-ingest")?.keys ?? "[]")) as { action: string }[])
+      .map((k) => k.action);
+    const routed = ((route?.rules ?? []) as { v: string }[]).map((r) => r.v);
+    expect(routed, "a key the rail offers that the switch does not route is a dead control")
+      .toEqual(offered);
+    // Every branch ends at the apply, and the apply posts a whole document —
+    // `yonder-apply` is the node that starts the confirmation clock, and a
+    // fragment is not something the daemon will validate.
+    for (const branch of wiresOf("route-tel-ingest").flat()) {
+      expect(reaches(branch).has("apply-tel-ingest"), `${branch} never reaches the apply`).toBe(true);
+    }
+    expect(byId("apply-tel-ingest")?.type).toBe("yonder-apply");
+    expect(reaches("apply-tel-ingest").has("join-toast")).toBe(true);
+  });
+
+  /**
+   * **R-MAV-07's rail says which way it is set, and the capture can see it.**
+   *
+   * `ui-yonder-softkeys` lights whichever key its own configuration marks
+   * `active` unless a message carries a list — and that configuration lights
+   * `THIS DEVICE` always, which is right for the shipped default and a lie
+   * the moment ingest is opened. The seed node computes the list off the same
+   * field as the words above it, and this is the wire that delivers it.
+   *
+   * `yonder-fixed` on the two settings is the other half. Both are
+   * configuration, not readings, so their text is the same on every run — and
+   * without it the committed picture of the ingest-open state came out
+   * byte-identical to the base one, because the only thing that differs
+   * between them is inside a masked `.nrdb-ui-text-value`. A state captured
+   * under its own name that asserts nothing is worse than not capturing it.
+   */
+  it("tells the ingest rail which way the device is actually set", () => {
+    expect(wiresOf("seed-tel-endpoints")[0]).toContain("tel-keys-ingest");
+    for (const id of ["tel-atboot", "tel-ingest"]) {
+      expect(String(byId(id)?.className), id).toContain("yonder-fixed");
+    }
+  });
+
+  it("polls the link no faster than the floor, and only from one place", () => {
+    const poll = byId("tel-poll");
+    expect(poll?.type).toBe("inject");
+    expect(Number(poll?.repeat) * 1000).toBeGreaterThanOrEqual(MIN_POLL_MS);
+    expect(wiresOf("tel-poll").flat()).toContain("tel-state");
+    // Nothing else asks the daemon for the link state on a timer.
+    const askers = flows.filter((n) => n.type === "yonder-mav-state").map((n) => n.id);
+    expect(askers).toEqual(["tel-state"]);
+  });
+
+  it("ships no function node", () => {
+    const wiring = [
+      ...FROM_STATE, ...FROM_CONFIG, ...COMPOSITE, ...FROM_CHECK,
+      ...reaches("tel-poll"), ...reaches("tel-keys-ingest"),
+      ...reaches("tel-runstop"), ...reaches("tel-check"), ...reaches("tel-detect"),
+    ];
+    for (const id of new Set(wiring)) {
+      expect(byId(id)?.type, id).not.toBe("function");
+    }
+  });
+});
+
+
+/**
+ * **What the console shows of the configuration follows the configuration**
+ * (R-UI-20).
+ *
+ * The defect: every value on this console that comes from `config.yaml` was
+ * read once — an `inject` with `once: true` and an empty `repeat` — and never
+ * again, while every other poller on the page repeated. So a saved change did
+ * not reach the screen until somebody redeployed the flows.
+ *
+ * It was found on *Accepting from*, the readout saying whether the board
+ * takes MAVLink from anything that can reach it or only from itself
+ * (R-MAV-07). A run opened ingest, the daemon took the change, and the page
+ * went on reading `Loopback only` with `THIS DEVICE` lit — so the committed
+ * reference for that state was a picture of the opposite state. K-25 recorded
+ * the same fault on a theme dropdown, where being wrong is untidy; this is it
+ * on the control that decides who may command the aircraft.
+ *
+ * **The fix is not a `repeat` on the inject, and that matters.** Ten
+ * `ui-text-input` boxes hang off the same read. Re-seeding them on a clock
+ * would overwrite a half-typed ground-station address or APN, which is why
+ * the one-shot was chosen and is a real constraint rather than an oversight.
+ * `yonder-config-watch` reads on a timer and *sends only when the document
+ * changed*, so the read repeats and the re-seed does not.
+ */
+describe("flows/flows.json reads the configuration again", () => {
+  const byId = (id: string) => flows.find((n) => n.id === id);
+  const wiresOf = (id: string) => ((byId(id)?.wires ?? []) as string[][]);
+  const reaches = (from: string): Set<string> => {
+    const seen = new Set<string>();
+    const queue = [from];
+    while (queue.length > 0) {
+      const id = queue.shift() as string;
+      for (const target of wiresOf(id).flat()) {
+        if (seen.has(target)) continue;
+        seen.add(target);
+        queue.push(target);
+      }
+    }
+    return seen;
+  };
+
+  /** Every control on the console whose value is read out of `config.yaml`. */
+  const FROM_CONFIG = [
+    // The two readouts and the rail the defect was found on.
+    "tel-atboot", "tel-ingest", "tel-keys-ingest",
+    // The six ground-station boxes beside them.
+    "tel-host-0", "tel-port-0", "tel-host-1", "tel-port-1", "tel-host-2", "tel-port-2",
+    // And the Cellular page's four, which are the same read.
+    "input-cell-apn", "input-cell-dial", "input-cell-username", "input-cell-password",
+  ];
+
+  it("watches the configuration rather than reading it once", () => {
+    const watch = byId("watch-config");
+    expect(watch?.type).toBe("yonder-config-watch");
+    expect(wiresOf("watch-config")[0]).toEqual(["seed-cell-form", "seed-tel-endpoints"]);
+  });
+
+  /**
+   * **The defect, stated as a rule.** Every other poller on this console
+   * repeats — the mesh every two seconds, the way out every five, the
+   * telemetry link every two. One inject did not, and it was the one feeding
+   * everything read from the configuration.
+   *
+   * There is now no inject on this console that fires once and never again,
+   * and there should not be one: a value worth putting on a page once is a
+   * value worth keeping right.
+   */
+  it("leaves no reading on the console that is taken once and never again", () => {
+    const oneShot = flows.filter(
+      (n) => n.type === "inject" && n.once === true && String(n.repeat ?? "") === "",
+    );
+    expect(
+      oneShot.map((n) => n.id),
+      "an inject that fires once seeds a widget that then goes stale for ever. "
+      + "That is K-25, and on `Accepting from` it is a page saying nothing can command "
+      + "the aircraft while anything on the network can.",
+    ).toEqual([]);
+  });
+
+  it("brings every configured control downstream of that watch (R-UI-20)", () => {
+    const seeded = reaches("watch-config");
+    for (const id of FROM_CONFIG) {
+      expect(seeded.has(id), `${id} is not downstream of watch-config`).toBe(true);
+    }
+  });
+
+  /**
+   * One watcher, and it asks no faster than the floor (R-UI-06). A second one
+   * would be a second schedule reading the same document, which is how two
+   * halves of one page come to disagree about it.
+   */
+  it("asks once, on one schedule", () => {
+    const watchers = flows.filter((n) => n.type === "yonder-config-watch");
+    expect(watchers.map((n) => n.id)).toEqual(["watch-config"]);
+    expect(Number(watchers[0].interval) * 1000).toBeGreaterThanOrEqual(MIN_POLL_MS);
+  });
+
+  /**
+   * The input-driven read stays, wired to the same two seeders, and the
+   * *Refresh* button on the Network page stays wired to it.
+   *
+   * They are different reads for different reasons: this one answers a
+   * person, so it has to produce a message even when the daemon does not
+   * answer, and `yonder-config-watch` deliberately produces nothing at all in
+   * that case so a dropped socket cannot blank a form full of settings.
+   */
+  it("keeps the read a person can ask for by hand", () => {
+    expect(byId("read-config")?.type).toBe("yonder-config");
+    expect(wiresOf("button-reread").flat()).toContain("read-config");
+    expect(wiresOf("read-config")[0]).toEqual(wiresOf("watch-config")[0]);
+  });
+});
+
+describe('Cockpit restoration — R-UI-28', () => {
+  const node = (id: string) => flows.find(n => n.id === id);
+  const targets = (id: string) => node(id)?.wires?.flat() ?? [];
+
+  it('serves the existing 8+4 picture and aim layout independently of a deck', () => {
+    expect(node('page-cockpit')).toMatchObject({ type: 'ui-page', name: 'Cockpit', path: '/cockpit', layout: 'grid', visible: true, disabled: false, order: 5, theme: 'palette' });
+    expect(node('group-cockpit-picture')).toMatchObject({ page: 'page-cockpit', width: 8 });
+    expect(node('group-cockpit-aim')).toMatchObject({ page: 'page-cockpit', width: 4 });
+    const groups = new Set(flows.filter(n => n.page === 'page-cockpit').map(n => n.id));
+    const widgets = flows.filter(n => n.group && groups.has(n.group));
+    expect(widgets.map(n => n.type).sort()).toEqual(['ui-yonder-aim', 'ui-yonder-annunciator', 'ui-yonder-picture', 'ui-yonder-softkeys']);
+    expect(node('pic-cockpit')).toMatchObject({ type: 'ui-yonder-picture', path: '' });
+    expect(node('aim-cockpit')).toMatchObject({ type: 'ui-yonder-aim' });
+  });
+
+  it('feeds standalone widgets with the current source-composed picture and private-aim status contracts', () => {
+    expect(targets('camera-read')).toEqual(['camera-response']);
+    expect(targets('camera-response')).toEqual(expect.arrayContaining(['pick-cam-picture', 'pick-cam-aim']));
+    expect(node('pick-cam-picture')?.rules).toEqual([{ t: 'set', p: 'payload', pt: 'msg', to: 'payload.picture', tot: 'msg' }]);
+    expect(targets('pick-cam-picture')).toEqual(['pic-camera', 'pic-cockpit']);
+    expect(targets('pick-cam-aim')).toEqual(['aim-camera', 'aim-cockpit']);
+    expect(node('pick-cam-aim')?.rules).toEqual([{ t: 'set', p: 'payload', pt: 'msg', to: 'payload.aim', tot: 'jsonata' }]);
+    for (const id of ['cam-rate-full', 'cam-rate-preview', 'cam-caps-saved']) expect(targets(id)).toEqual(['pic-camera', 'pic-cockpit']);
+    // Native controls remain routed through the new Task40 adapter.
+    expect((node('cam-deck-route')?.rules as { v: string }[]).map(r => r.v)).toContain('nativeControl');
+  });
+
+  it('changes the selected camera on the strip without navigating out of Cockpit or echoing picture commands', () => {
+    expect(targets('pic-cockpit')).toEqual(['cam-pic-act']);
+    const route = node('cam-pic-act')!;
+    const rules = route.rules as { t: string; v?: string }[];
+    const path = rules.findIndex(r => r.t === 'hask' && r.v === 'path');
+    expect(route.wires?.[path]).toEqual(['cam-pic-go']);
+    expect(route.wires?.[rules.findIndex(r => r.t === 'else')]).toEqual([]);
+    expect(node('cam-pic-go')?.rules).toEqual([
+      { t: 'set', p: 'camera', pt: 'flow', to: 'payload.path', tot: 'msg' },
+      { t: 'delete', p: 'topic', pt: 'msg' },
+      { t: 'set', p: 'payload', pt: 'msg', to: '', tot: 'str' },
+      { t: 'delete', p: 'camera', pt: 'msg' },
+    ]);
+    expect(targets('cam-pic-go')).toEqual(['cam-at-read','cam-workspace-selection']);
+    expect(targets('cam-at-read')).toEqual(['camera-read']);
+    expect(node('cam-thumb-select')).toBeUndefined();
+  });
+
+  it('keeps pending confirmation reachable and visible for the Cockpit surface', () => {
+    expect(node('group-cockpit-pending')).toMatchObject({ page: 'page-cockpit', visible: false });
+    expect(targets('poll-pending')).toEqual(expect.arrayContaining(['ann-pending-cockpit', 'keys-pending-cockpit']));
+    expect(targets('keys-pending-cockpit')).toEqual(['tag-pending-key']);
+    expect(JSON.parse(node('keys-pending-cockpit')?.keys as string).map((key: { action: string }) => key.action)).toEqual(['confirm', 'revert']);
+    for (const operation of ['show', 'hide']) {
+      const rule = (node(`${operation}-pending-banner`)?.rules as { to: string }[])[0];
+      expect(JSON.parse(rule.to).groups[operation]).toContain('group-cockpit-pending');
+    }
+  });
+});
+
+describe('unified Camera workspace wiring — R-UI-29', () => {
+  const node = (id: string) => flows.find(n => n.id === id);
+  it('has one Camera Deck and one separate Aim, content-sized controls and a bounded preview', () => {
+    const groups = new Set(flows.filter(n => n.page === 'page-camera').map(n => n.id));
+    const widgets = flows.filter(n => groups.has(String(n.group)));
+    expect(widgets.filter(n => n.type === 'ui-yonder-deck')).toHaveLength(1);
+    expect(widgets.filter(n => n.type === 'ui-yonder-aim')).toHaveLength(1);
+    expect(node('aim-camera')?.height).toBe(0); expect(Number(node('pic-camera')?.height)).toBeGreaterThan(0);
+    expect(node('deck-setup')).toBeUndefined(); expect(node('deck-live')).toBeUndefined();
+  });
+  it('keeps camera confirmation authoritative and inline instead of routing through popups', () => {
+    expect(node('camera-workspace')?.type).toBe('yonder-camera-workspace');
+    expect(node('cam-workspace-pending')?.wires?.flat()).toContain('camera-workspace');
+    expect(node('poll-pending')?.wires?.flat()).toContain('cam-transaction-route');
+    expect(node('cam-transaction-confirm')?.type).toBe('yonder-confirm'); expect(node('cam-transaction-revert')?.type).toBe('yonder-revert');
+    for (const id of ['cam-transaction-confirm','cam-transaction-revert']) {
+      expect(node(id)?.wires?.flat()).toContain('cam-workspace-result');
+      expect(node(id)?.wires?.flat()).not.toContain('say-pending');
+    }
+    expect(flows.some(n => n.type === 'ui-notification' && n.id.startsWith('toast-cam'))).toBe(false);
+    expect(node('ann-camera')).toBeUndefined();
+  });
+});
+
+
+it('retires the workspace from every camera selection writer and preserves rendered action targets', () => {
+  for (const id of ['cam-open', 'cam-pic-go', 'cam-identify']) expect(flows.find(n => n.id === id)?.wires?.flat()).toContain('cam-workspace-selection');
+  expect(flows.find(n => n.id === 'cam-workspace-selection')?.rules).toEqual([
+    { t: 'set', p: 'camera', pt: 'msg', to: 'camera', tot: 'flow' },
+    { t: 'set', p: 'workspaceKind', pt: 'msg', to: 'selection', tot: 'str' },
+  ]);
+  for (const id of ['cam-at-controls', 'cam-at-settings', 'cam-at-captures-act', 'cam-at-stream', 'cam-at-refresh', 'cam-at-read']) expect(flows.find(n => n.id === id)?.rules).toEqual([
+    { t: 'set', p: 'camera', pt: 'msg', to: '$exists(camera) ? camera : $flowContext("camera")', tot: 'jsonata' },
+  ]);
+});
+
+it('gates read and refresh DTOs before every shared camera surface', () => {
+  expect(flows.find(n => n.id === 'camera-read')?.wires).toEqual([['camera-response']]);
+  expect(flows.find(n => n.id === 'camera-refresh')?.wires).toEqual([['camera-response', 'cam-workspace-result']]);
+  expect(flows.find(n => n.id === 'cam-workspace-selection')?.wires?.flat()).toContain('camera-response');
+  expect(flows.find(n => n.id === 'camera-response')?.type).toBe('yonder-camera-response');
+  expect(flows.find(n => n.id === 'camera-response')?.wires?.flat()).toEqual(expect.arrayContaining(['pick-cam-picture', 'pick-cam-aim', 'pick-cam-deck']));
+});
+
+
+it('serves the flight display separately while preserving the camera Cockpit — R-FLT-25 / R-UI-28', () => {
+  const page = flows.find(n => n.id === 'page-flight');
+  expect(page).toMatchObject({type:'ui-page',name:'Flight',path:'/flight',className:'yonder-cockpit-page'});
+  expect(flows.find(n => n.id === 'group-cockpit')).toMatchObject({page:'page-flight'});
+  expect(flows.find(n => n.id === 'cockpit-display')).toMatchObject({type:'ui-yonder-cockpit',group:'group-cockpit'});
+  expect(flows.find(n => n.id === 'page-cockpit')).toMatchObject({path:'/cockpit',className:''});
+  expect(flows.find(n => n.id === 'group-cockpit-picture')).toMatchObject({page:'page-cockpit'});
 });

@@ -1,0 +1,60 @@
+<!-- SPDX-License-Identifier: GPL-3.0-or-later -->
+<!--
+  The editor half of the hold key. Node-RED finds this by basename beside the
+  node's .js; without it the widget registers and shows as "unknown node".
+  A form and a registration, nothing else (CLAUDE.md rule 2, R-UI-01).
+-->
+<script type="text/html" data-template-name="ui-yonder-holdkey">
+  <div class="form-row"><label for="node-input-group"><i class="fa fa-table"></i> Group</label>
+    <input type="text" id="node-input-group" /></div>
+  <div class="form-row"><label for="node-input-name"><i class="fa fa-tag"></i> Name</label>
+    <input type="text" id="node-input-name" placeholder="Name" /></div>
+  <div class="form-row"><label for="node-input-label"><i class="fa fa-font"></i> Label</label>
+    <input type="text" id="node-input-label" placeholder="Full rate" /></div>
+  <div class="form-row"><label for="node-input-action"><i class="fa fa-bolt"></i> Action</label>
+    <input type="text" id="node-input-action" placeholder="fullrate" /></div>
+  <div class="form-row"><label for="node-input-cost"><i class="fa fa-tachometer"></i> Cost</label>
+    <input type="text" id="node-input-cost" placeholder="2.0 Mb/s" /></div>
+  <div class="form-row"><label for="node-input-tone"><i class="fa fa-paint-brush"></i> Tone</label>
+    <select id="node-input-tone">
+      <option value="plain">plain</option>
+      <option value="act">act</option>
+      <option value="warn">warn &mdash; takes the page away</option>
+    </select></div>
+  <div class="form-tips">
+    <b>Cost is stated before it is asked.</b> A held key with no cost on it is
+    a key whose consequence is a surprise. Tones match the soft keys rail
+    (R-UI-10): <code>warn</code> is reserved for a control that takes the page
+    away from the operator, of which a page has at most one.
+  </div>
+</script>
+<script type="text/html" data-help-name="ui-yonder-holdkey">
+<p>A soft key that acts while it is held, for an action whose cost is paid
+only while it is asked for &mdash; the full-rate picture is the reason this
+exists (R-VID-13), and the cost stated here before it is pressed is R-VID-11
+doing work rather than reporting a number.</p>
+<p>Sends <code>&lt;action&gt;:down</code> on <code>msg.payload</code> when
+pressed and <code>&lt;action&gt;:up</code> when released. Release is not only
+letting go of the button: dragging off it, the browser taking the gesture away
+mid-hold, and the page going to the background all release it too, so nothing
+keeps running unwatched.</p>
+<p>For an action that does not need to be held, use the soft keys rail
+instead (R-UI-10) &mdash; this widget is for the one gesture a click cannot
+express.</p>
+</script>
+<script type="text/javascript">
+  RED.nodes.registerType("ui-yonder-holdkey", {
+    category: "dashboard 2", color: "#c7e0d4",
+    defaults: {
+      name: { value: "" },
+      group: { type: "ui-group", required: true },
+      order: { value: 0 }, width: { value: 0 }, height: { value: 0 },
+      label: { value: "" }, action: { value: "" }, cost: { value: "" },
+      tone: { value: "plain" }
+    },
+    inputs: 1, outputs: 1,
+    icon: "font-awesome/fa-hand-pointer-o",
+    paletteLabel: "yonder hold key",
+    label: function () { return this.name || this.label || "yonder hold key"; }
+  });
+</script>

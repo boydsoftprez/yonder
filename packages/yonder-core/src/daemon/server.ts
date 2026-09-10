@@ -1,15 +1,21 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 import { createServer, type Server } from "node:http";
-import { unlinkSync, existsSync, mkdirSync, chmodSync } from "node:fs";
+import { unlinkSync, existsSync, mkdirSync, chmodSync, accessSync, constants } from "node:fs";
 import { dirname, join } from "node:path";
-import { pathToFileURL } from "node:url";
+import { fileURLToPath, pathToFileURL } from "node:url";
 import { ApplyEngine } from "../apply/engine.js";
 import { warn, note, trace } from "../log.js";
-import { createRouter, type DiagProbes } from "./routes.js";
+import { VehicleService } from "../mav/vehicle.js";
+import { TerrainPackService } from "../terrain/service.js";
+import { CockpitData } from "../cockpit/data.js";
+import type { HostInstrumentOptions } from '../cockpit/host-instruments.js';
+import { createRouter, type CameraProbes, type DiagProbes } from "./routes.js";
 import { AdminCredential } from "../console/credential.js";
 import { ConsoleRenderer } from "../console/renderer.js";
+import { resetConsoleAuth } from "../console/reset-auth.js";
 import { consolePaths, type ConsolePaths } from "../console/settings.js";
 import { loadConfig } from "../config/load.js";
+import { answerableAddresses } from "../net/dial-in.js";
 import { seedConfigIfAbsent } from "../config/defaults.js";
 import { SecretStore } from "../secrets/store.js";
 import { NmcliClient } from "../net/nmcli/client.js";
@@ -27,15 +33,39 @@ import { HostnameRenderer } from "../system/hostname.js";
 import { FallbackWatchdog } from "../net/watchdog.js";
 import { joinSucceeded } from "../net/joined.js";
 import { networkState } from "../net/state.js";
+import { readInterfaces, defaultRouteDevice } from "../net/interfaces.js";
+import { DiagnosticJobs, systemDiagnosticRunner, type DiagnosticRunner } from "../diag/jobs.js";
 import { readRemoteState } from "../remote/state.js";
 import { RemoteRenderer } from "../remote/renderer.js";
+import { MediaRenderer, MEDIA_CONFIG_PATH } from "../media/renderer.js";
+import { Supervisor, systemSpawner, type ProcessSpawner } from "../video/supervisor.js";
+import { PipelineRenderer } from "../video/renderer.js";
+import { CameraAutostart } from "../video/autostart.js";
+import { detectCameras, probeCamera, detectWithAccessory } from "../video/probe/camera.js";
+import { AccessorySources } from '../video/accessory/source.js';
+import { probeEncoder, type Encoder } from "../video/probe/encoder.js";
+import { applyControls } from "../video/controls.js";
+import { EncoderChannel } from "../video/encoder.js";
+import { Viewers } from "../video/viewers.js";
+import { Adaptation } from "../video/adaptation.js";
+import { RtspFeedback, type RtspFeedbackOptions } from "../video/rtsp-feedback.js";
+import { MEDIA_OBSERVER_SECRET } from "../media/config.js";
+import { CAPTURES_ROOT, Recorder } from "../video/recorder.js";
+import { Stills, STILLS_ROOT } from "../video/stills.js";
+import { freeSpaceOn, systemReader } from "../system/read.js";
+import { readSupply } from "../system/supply.js";
 import { ZeroTierCli } from "../remote/zerotier/cli.js";
 import { readTraffic } from "../remote/traffic.js";
 import { TrafficSampler } from "../remote/sampler.js";
+import { MavlinkRenderer, ROUTER_CONF_PATH } from "../mav/renderer.js";
+import { openPortWith } from "../mav/serial.js";
+import { LinkTracker } from "../mav/link.js";
+import { LoopbackListener } from "../mav/listener.js";
+import type { OpenPort } from "../mav/detect.js";
 import { AP_CONNECTION, DEFAULT_AP_PASSPHRASE } from "../net/profiles.js";
 import { scanForNetworks } from "../net/scan.js";
 import { ping, reachable } from "../diag/probe.js";
-import { systemRunner, type CommandRunner } from "../net/runner.js";
+import { inFlightRunner, redactArgv, systemRunner, type CommandRunner } from "../net/runner.js";
 import { systemClock, type Clock, type Renderer } from "../apply/types.js";
 import { DEFAULT_CONFIG, type Config } from "../schema/config.js";
 
@@ -62,10 +92,51 @@ export const PROVISION_RESTART_DELAY_MS = 1_500;
  */
 export const SIGNAL_POLL_SECONDS = 2;
 
+/**
+ * One answer for the life of the process, from the first call that succeeds.
+ *
+ * For a question whose answer is a property of the machine rather than of the
+ * moment. **The encoder is the case this exists for** (K-66): every read of a
+ * camera's page asks for it, the console polls those pages (K-55), and on a
+ * Rockchip board each ask shells out to `gst-inspect-1.0`, which spawns a
+ * plugin scanner, which loads the MPP plugin and initialises MPP hardware —
+ * measured at 3,030 initialisations in twenty minutes and most of a four-core
+ * board. A board's encoder is silicon and does not change while the daemon
+ * runs, so asking once is not a cache with a staleness problem; it is the
+ * right number of times to ask.
+ *
+ * **A rejection is not remembered.** A probe that threw says something about
+ * the moment — a runner that failed, a tool briefly absent — and a daemon
+ * that remembered it would answer "no encoder" for its whole life over one
+ * bad second. Callers arriving while the first call is still out share it,
+ * so a burst of polls at start-up is still one probe.
+ */
+export function onceAsync<T>(fn: () => Promise<T>): () => Promise<T> {
+  let held: Promise<T> | null = null;
+  return () => {
+    if (held === null) {
+      held = fn().catch((e: unknown) => {
+        held = null;
+        throw e;
+      });
+    }
+    return held;
+  };
+}
+
 export interface ServerOptions {
+  /** Observation dependencies for isolated integration tests. Not configuration. */
+  rtspObservation?: Pick<RtspFeedbackOptions, 'sessions' | 'tcp' | 'localAddresses'>;
+  diagnosticRunner?: DiagnosticRunner;
+  /** Only production main enables Linux accessory ownership; tests inject explicitly. */
+  accessory?: boolean | AccessorySources;
+  /** Injected file/space readers for instrumentation; production supplies Linux readers below. */
+  hostInstruments?: Pick<HostInstrumentOptions, 'readFile' | 'freeBytes'>;
   socketPath: string;
   configPath: string;
   journalPath: string;
+  /** Volatile still directory; production uses the daemon's runtime tmpfs. */
+  stillsRoot?: string;
   renderers: Renderer[];
   /** Where the device's secrets (the access-point passphrase, later the administrator password, …) live. */
   secretsPath?: string;
@@ -97,9 +168,76 @@ export interface ServerOptions {
    * Absent means no ConsoleRenderer is assembled — see BuildRenderersOptions.
    */
   console?: Partial<ConsolePaths>;
+  /**
+   * Where the media server's generated configuration goes. **Given, never
+   * defaulted**, like `console`: absent means no MediaRenderer is assembled,
+   * so nothing in a test can write to — or delete from — a real
+   * /etc/mediamtx by forgetting to override a path. main() supplies the
+   * production value.
+   */
+  mediaConfigPath?: string;
+  /**
+   * The camera layer, given whole instead of probed for.
+   *
+   * **Test-only, exactly like `runner` and `clock` above, and `main()` never
+   * supplies it.** There is no environment variable for it and there must not
+   * be: a switch that makes this daemon report the cameras a file names rather
+   * than the ones the board has is a device lying about its own hardware, and
+   * an aircraft is the wrong place to discover that somebody set it.
+   * Supplying it takes writing a different program, which is what
+   * `scripts/pages-daemon.mjs` is.
+   *
+   * It exists because the capture gate (R-UI-12) has no camera. With none
+   * attached there is no camera page, so the gate covers none of the camera
+   * work and does not complain — from its point of view there is nothing
+   * there. Given whole rather than as a fake `runner`, because
+   * `detectCameras` reads `/dev/v4l/by-path` as well as running `v4l2-ctl`,
+   * and a machine with no `/dev/v4l` answers `byPathStable: false` — which is
+   * the one thing the Cameras page exists to report honestly (R-CAM-05).
+   */
+  cameraLayer?: CameraLayer;
+  /**
+   * How a pipeline is started, handed straight to `buildRenderers`.
+   *
+   * **Test-only, and `main()` never supplies it**, exactly like `cameraLayer`
+   * above and for the same reason: with a default, a test of this daemon
+   * would run `gst-launch-1.0` on whatever machine the suite is on.
+   *
+   * It exists because the runtime half of the video layer — the rate
+   * controller and the register of who is watching — is assembled in
+   * `startServer` and nowhere else, and the only honest way to prove that a
+   * browser's statistic arriving at this socket reaches a running encoder is
+   * to have a pipeline this daemon actually started and can actually talk to.
+   * Without this option that join could only be asserted one layer down,
+   * which is precisely the layer where every part already worked and nothing
+   * connected them.
+   */
+  spawner?: ProcessSpawner;
+   /**
+   * How to open a serial port, and where the two telemetry files live.
+   * Absent means neither a `MavlinkRenderer` nor the loopback listener is
+   * assembled, and every `/mav/*` route says so — see
+   * BuildRenderersOptions.mavlink, which explains why it is not defaulted.
+   */
+  mavlink?: BuildRenderersOptions["mavlink"];
+}
+
+/**
+ * Everything about cameras this daemon would otherwise ask the board for.
+ *
+ * All three together, not one at a time: a probe that answered from a fixture
+ * beside an encoder read off the host would be a view no device has ever had.
+ */
+export interface CameraLayer {
+  cameras: CameraProbes;
+  encoder: () => Promise<Encoder>;
+  /** What `GET /cameras/:id/stream-address` resolves. See ServerOptions.cameraLayer. */
+  rtspPassword: () => string | null;
 }
 
 export interface BuildRenderersOptions {
+  accessory?: AccessorySources;
+  cameraLayer?: CameraLayer;
   secretsPath: string;
   runner?: CommandRunner;
   log?: (line: string) => void;
@@ -142,6 +280,55 @@ export interface BuildRenderersOptions {
    * one would be `/var/lib/yonder`.
    */
   remoteStatePath: string;
+  /**
+   * Where the media server's generated configuration goes. **Given, never
+   * defaulted**, for the same reason as `console` and `remoteStatePath`:
+   * absent means no MediaRenderer is assembled, and a path with a default is
+   * a path a test writes to by forgetting to override it — this one would be
+   * a real media server's configuration, credential and all.
+   */
+  mediaConfigPath?: string;
+  /**
+   * How a pipeline is started. Defaults to `systemSpawner`, which runs
+   * `gst-launch-1.0`.
+   *
+   * Injected for exactly the reason `runner` is: **no test in this repository
+   * spawns a real pipeline.** Without it, the only way to see whether
+   * `PipelineRenderer` is genuinely wired to the supervisor the camera routes
+   * use would be to start `gst-launch-1.0` on the machine running the suite —
+   * so the join would go untested, which is the failure this renderer exists
+   * to end, one layer up.
+   */
+  spawner?: ProcessSpawner;
+   /**
+   * Everything the telemetry renderer needs, or nothing at all.
+   *
+   * **Present only when a caller supplies a way to open a serial port.**
+   * `MavlinkRenderer` resolves the autopilot's port and speed by sweeping it
+   * (R-MAV-01), so a renderer built without an `OpenPort` could not do the
+   * first thing it exists for. `mav/serial.ts` implements one against real
+   * hardware and `main()` supplies it; this stays given-and-never-defaulted
+   * so that a *test* which forgets to override it gets no telemetry renderer
+   * rather than a real `/dev` and a real `stty`. The same shape as `console`
+   * above, and the same rule for its two paths, so no test writes to
+   * `/etc/mavlink-router` by forgetting to override one.
+   */
+  mavlink?: {
+    open: OpenPort;
+    /** `/etc/mavlink-router/main.conf` in production — `ROUTER_CONF_PATH`. */
+    confPath: string;
+    /** The remembered port and speed, under /var/lib/yonder (R-MAV-13). */
+    hintPath: string;
+    /**
+     * Overrides `LOOPBACK_PORT` for the listener on the control plane's own
+     * feed. **Test-only**, exactly like `runner` and `clock` above: a test
+     * binds an ephemeral port (`0`) so the suite neither collides with a
+     * daemon that is already running nor depends on a fixed port being free
+     * on whatever machine it runs on. There is deliberately no matching
+     * override for the *address* — see `LOOPBACK_ADDRESS` and R-MAV-07.
+     */
+    loopbackPort?: number;
+  };
 }
 
 /**
@@ -172,6 +359,43 @@ export function buildRenderers(opts: BuildRenderersOptions): {
   /** Talks to the installed zerotier-cli, over the same runner as everything else. */
   zerotier: ZeroTierCli;
   remoteRenderer: RemoteRenderer;
+  /** Present only when `opts.mediaConfigPath` said where the file goes. */
+  mediaRenderer?: MediaRenderer;
+  /** The board's encoder, probed once and shared by every daemon consumer. */
+  encoder: () => Promise<Encoder>;
+  /**
+   * The one supervisor this process owns, for the whole of its life.
+   *
+   * Built here, beside the renderers, and deliberately not inside a Node-RED
+   * node: a redeploy destroys and recreates every node, so a supervisor in one
+   * would drop every camera's pipeline the moment somebody edited a flow —
+   * including, on a flying aircraft, the feed a ground station is watching.
+   *
+   * Not a renderer. Starting and stopping a stream is a runtime action that
+   * survives no apply and no reboot (R-CTL-01), so it has no place in a
+   * sequence whose whole purpose is to make a configuration true.
+   *
+   * **A renderer drives it, which is a different claim.** `PipelineRenderer`
+   * below restarts a pipeline that is *already running* when the applied
+   * configuration would compose a different launch line for it (K-48), and
+   * starts nothing that is not running. The runtime action stays the
+   * operator's; what the apply owns is that a camera on the air is on the air
+   * with the settings that were kept.
+   */
+  supervisor: Supervisor;
+  encoders: EncoderChannel;
+  pipelineRenderer: PipelineRenderer;
+  cameraAutostart: CameraAutostart;
+  /** Present only when `opts.mavlink` said how to open a serial port. */
+  mavlinkRenderer?: MavlinkRenderer;
+  /**
+   * The control plane's own feed off `127.0.0.1:14559` (R-MAV-05), sharing
+   * one `LinkTracker` with the renderer above. Assembled here and *started*
+   * by `startServer`, the same division `TrafficSampler` follows: this
+   * function builds, the daemon opens sockets.
+   */
+  mavlinkListener?: LoopbackListener;
+  vehicle?: VehicleService;
   generated: string[];
 } {
   const log = opts.log ?? note;
@@ -226,6 +450,80 @@ export function buildRenderers(opts: BuildRenderersOptions): {
       log,
     });
 
+  // Last of all, and deliberately the opposite of the console's reasoning.
+  //
+  // Renderers run in sequence and a failure stops the ones behind it, so the
+  // question is what each one is allowed to prevent. A media server that will
+  // not start must not stop the console being re-rendered: the console is how
+  // an operator fixes a device, and video is not. Nothing is behind this one,
+  // so nothing is at risk from it.
+  const mediaRenderer = opts.mediaConfigPath === undefined
+    ? undefined
+    : new MediaRenderer({
+      path: opts.mediaConfigPath,
+      runner: opts.runner ?? systemRunner,
+      secrets,
+      log,
+    });
+  // Last, and deliberately. Telemetry rides on a network that has already
+  // settled, and this is the renderer that can take longest — a full sweep is
+  // four speeds on each of two devices, and §3's whole point is that spending
+  // it costs nothing. Nothing is behind it to be stopped by a failure, which
+  // matters less than it looks because render() does not throw at all (K-19,
+  // and §5: no telemetry fault is worth reverting a whole configuration for).
+  if (opts.mavlink === undefined) {
+    // **Say it.** Without this, a device with no serial opener accepted an
+    // apply that configured three ground stations, wrote no
+    // /etc/mavlink-router/main.conf, started no router, and put nothing
+    // anywhere saying why — a successful apply that did nothing, which is the
+    // worst shape a missing capability can take. Not `degraded`: that refuses
+    // *every* apply, and a board without telemetry must still be configurable
+    // (rule 6). One line an operator can act on, on the same channel the rest
+    // of the renderers report on.
+    log(
+      "mavlink: telemetry is not configured on this device — this daemon was started without a way to open "
+        + "a serial port, so mavlink-router is neither configured nor started and the Telemetry page will "
+        + "stay empty (R-MAV-01, R-MAV-08)",
+    );
+  }
+  // **One tracker, two writers.** The renderer supplies the sweep's outcome
+  // and the router's own counters (`observed`, `sampled`); the listener
+  // supplies heartbeats off the loopback copy (`heard`). Handing both the same
+  // instance is what makes GET /mav/state one answer rather than two halves
+  // stitched together at the route — and it is why the listener depends on
+  // `LinkTracker` rather than on the renderer. Built here, where both are, so
+  // no caller can get it wrong by forgetting.
+  //
+  // The two are built together rather than each on its own line, because the
+  // tracker is what they share and a block is the only shape that says so.
+  // The listener exists exactly when the renderer does: without one, no
+  // /etc/mavlink-router/main.conf is written and no router is started, so
+  // nothing anywhere sends to :14559 — a socket held open for a feed that
+  // cannot exist is a port held for nothing.
+  let mavlinkRenderer: MavlinkRenderer | undefined;
+  let mavlinkListener: LoopbackListener | undefined;
+  let vehicle: VehicleService | undefined;
+  if (opts.mavlink !== undefined) {
+    const tracker = new LinkTracker({ clock: opts.clock ?? systemClock });
+    mavlinkRenderer = new MavlinkRenderer({
+      run: opts.runner ?? systemRunner,
+      open: opts.mavlink.open,
+      confPath: opts.mavlink.confPath,
+      hintPath: opts.mavlink.hintPath,
+      tracker,
+      log,
+      clock: opts.clock,
+    });
+    vehicle = new VehicleService({clock: opts.clock ?? systemClock, log, send: bytes => mavlinkListener!.send(bytes)});
+    mavlinkListener = new LoopbackListener({
+      onDatagram: bytes => vehicle!.receive(bytes),
+      now: () => (opts.clock ?? systemClock).now(),
+      tracker,
+      log,
+      ...(opts.mavlink.loopbackPort === undefined ? {} : { port: opts.mavlink.loopbackPort }),
+    });
+  }
+
   // First, and deliberately.
   //
   // K-19: renderers run in sequence and a failure stops the ones behind it,
@@ -238,10 +536,71 @@ export function buildRenderers(opts: BuildRenderersOptions): {
   // hostname on the DHCP request the network render is about to make.
   const hostname = new HostnameRenderer({ runner: opts.runner ?? systemRunner, log });
 
+  // One supervisor for automatic boot startup and the runtime Start/Stop routes.
+  const supervisor = new Supervisor({
+    spawner: opts.spawner ?? systemSpawner,
+    ...(opts.clock === undefined ? {} : { clock: opts.clock }),
+  });
+
+  const encoder = onceAsync(() => probeEncoder({ runner: opts.runner ?? systemRunner }));
+
+  /**
+   * K-48: an applied bitrate reaching the running encoder.
+   *
+   * **Last of all, behind the media server**, for two reasons that point the
+   * same way. A pipeline publishes into mediamtx, so the server has to be in
+   * the shape this configuration asks for before a pipeline is restarted into
+   * it. And a camera that cannot be restarted must be able to cost nothing
+   * else: nothing runs behind this, so nothing is at risk from it — the same
+   * reasoning that put the media renderer behind the console, one step
+   * further along.
+   *
+   * **Unconditional, unlike the console and media renderers.** Those are
+   * built only when a caller says where their file goes, because a defaulted
+   * path is a path a test writes to by accident. This one writes nothing and
+   * reads no path: it holds the supervisor built above and does nothing at
+   * all until something has actually started a pipeline. A renderer that is
+   * assembled only sometimes is a fix that is applied only sometimes, and
+   * this branch has been bitten by exactly that before.
+   */
+  const encoders = new EncoderChannel({ supervisor, clock: opts.clock });
+  const pipelineRenderer = new PipelineRenderer({
+    accessory: identity => opts.accessory?.input(identity),
+    supervisor,
+    channel: encoders,
+    // The same memo the start route composes with, over the same runner as
+    // everything else here — so a test injecting a fake runner cannot reach a
+    // real `v4l2-ctl`, and the line this renderer builds for a camera and the
+    // line a Start would build for it cannot differ by their encoder. Sharing
+    // the memo makes that agreement true by construction rather than intent.
+    encoder,
+    log,
+  });
+
+  // One list, both subsystems. The order is the order they run in: the
+  // hostname and the network first, then the console, then the things that
+  // depend on a configured device — media, telemetry — and the camera
+  // pipelines last, because a pipeline is composed from what the renderers
+  // above it have already settled.
+  const cameraAutostart = new CameraAutostart({
+    accessory: identity => opts.accessory?.input(identity),
+    supervisor,
+    detect: () => detectWithAccessory(() => opts.cameraLayer?.cameras.detect() ?? detectCameras({ runner: opts.runner ?? systemRunner }),
+      () => opts.accessory?.detect() ?? { found: [], rejected: [] }),
+    encoder: () => opts.cameraLayer?.encoder() ?? encoder(),
+    clock: opts.clock,
+    log,
+  });
+
+  const renderers: Renderer[] = [hostname, renderer, remoteRenderer];
+  if (consoleRenderer !== undefined) renderers.push(consoleRenderer);
+  if (mediaRenderer !== undefined) renderers.push(mediaRenderer);
+  if (mavlinkRenderer !== undefined) renderers.push(mavlinkRenderer);
+  if (opts.accessory) renderers.push({ name: 'accessory', render: async config => { opts.accessory!.resume(config.cameras); } });
+  renderers.push(pipelineRenderer, cameraAutostart);
+
   return {
-    renderers: consoleRenderer === undefined
-      ? [hostname, renderer, remoteRenderer]
-      : [hostname, renderer, remoteRenderer, consoleRenderer],
+    renderers,
     renderer,
     ...(consoleRenderer === undefined ? {} : { consoleRenderer }),
     secrets,
@@ -249,6 +608,15 @@ export function buildRenderers(opts: BuildRenderersOptions): {
     modemClient,
     zerotier,
     remoteRenderer,
+    ...(mediaRenderer === undefined ? {} : { mediaRenderer }),
+    encoder,
+    supervisor,
+    encoders,
+    pipelineRenderer,
+    cameraAutostart,
+    ...(mavlinkRenderer === undefined ? {} : { mavlinkRenderer }),
+    ...(mavlinkListener === undefined ? {} : { mavlinkListener }),
+    ...(vehicle === undefined ? {} : { vehicle }),
     generated,
   };
 }
@@ -268,6 +636,49 @@ export function consolePathsFromEnv(env: NodeJS.ProcessEnv = process.env): Conso
   if (env.YONDER_CONSOLE_CORE_TREE !== undefined) overrides.coreTree = env.YONDER_CONSOLE_CORE_TREE;
   if (env.YONDER_CONSOLE_UNIT !== undefined) overrides.unit = env.YONDER_CONSOLE_UNIT;
   return consolePaths(overrides);
+}
+
+/**
+ * The apply journal's own path on a real device.
+ *
+ * A constant rather than a literal in `main()` because two production
+ * decisions are derived from it — the mesh record and the telemetry hint both
+ * live beside it — and a second copy of the default is how the three come to
+ * disagree on a board whose `YONDER_JOURNAL` is set.
+ */
+export const DEFAULT_JOURNAL_PATH = "/var/lib/yonder/apply.json";
+
+/**
+ * Everything the telemetry renderer needs on a real device (R-MAV-01).
+ *
+ * The same shape and the same purpose as `consolePathsFromEnv` above: the
+ * only thing that decides a production path is this function, and the only
+ * thing that decides a test path is the test. Without it these three values
+ * would live inside `main()`, which nothing can call and nothing therefore
+ * checks — and a hint written to the wrong place is a sweep on every boot,
+ * silently, for ever.
+ *
+ * `run` is a parameter for the same reason every renderer takes one: nothing
+ * in a test may reach a real `stty`. `opts` is there for the same reason
+ * again, one level down: without it the opener this function builds is welded
+ * to the wall clock and to no journal at all, so the first test that wires
+ * this function through would sleep on real time and lose whatever the opener
+ * had to say. `main()` passes the real ones.
+ */
+export function mavlinkFromEnv(
+  run: CommandRunner = systemRunner,
+  env: NodeJS.ProcessEnv = process.env,
+  opts: { clock?: Clock; log?: (line: string) => void } = {},
+): NonNullable<ServerOptions["mavlink"]> {
+  return {
+    open: openPortWith(run, opts),
+    confPath: ROUTER_CONF_PATH,
+    // Beside the apply journal and the mesh record — one state directory for
+    // this daemon, not a third one the telemetry renderer invented. It
+    // follows YONDER_JOURNAL so a board running out of an alternate state
+    // directory keeps all three together.
+    hintPath: join(dirname(env.YONDER_JOURNAL ?? DEFAULT_JOURNAL_PATH), "mavlink-link.json"),
+  };
 }
 
 export async function startServer(opts: ServerOptions): Promise<{ close(): Promise<void> }> {
@@ -311,6 +722,16 @@ export async function startServer(opts: ServerOptions): Promise<{ close(): Promi
       return DEFAULT_CONFIG;
     }
   };
+  const accessory = opts.accessory === true ? new AccessorySources({ cameras: () => reachConfig().cameras,
+    onFailure: failure => warn(`Pocket 2 transport: ${JSON.stringify(failure)}`),
+    mediaCapability: async () => {
+      try { accessSync('/usr/local/bin/yonder-pipeline', constants.X_OK); }
+      catch { return 'Accessory video requires the packaged yonder-pipeline host'; }
+      const answer = await (opts.runner ?? systemRunner)(['gst-inspect-1.0', 'avdec_h264']);
+      return answer.code === 0 ? null : 'Accessory video requires the avdec_h264 GStreamer decoder';
+    },
+  }) : opts.accessory || undefined;
+  accessory?.resume();
   /** `usb` is in the schema's interface list and no renderer writes one. */
   const reachOrder = (config: Config): PathName[] =>
     config.network.priority.filter((i): i is PathName => i !== "usb");
@@ -401,6 +822,7 @@ export async function startServer(opts: ServerOptions): Promise<{ close(): Promi
 
   try {
     built = buildRenderers({
+      accessory,
       secretsPath: opts.secretsPath ?? "/etc/yonder/secrets.yaml",
       runner: opts.runner,
       clock,
@@ -409,7 +831,11 @@ export async function startServer(opts: ServerOptions): Promise<{ close(): Promi
       // The same directory the apply journal already lives in — one state
       // directory for this daemon, not a second one this renderer invented.
       remoteStatePath: join(dirname(opts.journalPath), "remote.json"),
+      ...(opts.mediaConfigPath === undefined ? {} : { mediaConfigPath: opts.mediaConfigPath }),
       ...(opts.console === undefined ? {} : { console: opts.console }),
+      ...(opts.spawner === undefined ? {} : { spawner: opts.spawner }),
+      ...(opts.mavlink === undefined ? {} : { mavlink: opts.mavlink }),
+      ...(opts.cameraLayer === undefined ? {} : { cameraLayer: opts.cameraLayer }),
     });
   } catch (e) {
     const message = (e as Error).message;
@@ -431,6 +857,27 @@ export async function startServer(opts: ServerOptions): Promise<{ close(): Promi
   // reason as the nmcli client above.
   const modemClient = built?.modemClient
     ?? new MmcliClient(opts.runner ?? systemRunner, trace);
+
+  /**
+   * Read-only clients for the status routes and reach watch.
+   *
+   * `ReachMonitor.state()` asks three views of the same instant in parallel;
+   * each used to spawn its own identical nmcli and mmcli processes. The
+   * wrapper shares only commands that are still in flight and forgets them as
+   * soon as they settle. Separate client instances keep the renderer, radio
+   * verification, scan and fallback on `client`/`modemClient` above, over the
+   * direct runner: a poll begun before a write can never satisfy its fresh
+   * post-write check (R-CFG-03, R-NET-07).
+   *
+   * Log under the shared call rather than in both clients, so the journal says
+   * how many processes actually ran instead of how many readers wanted one.
+   */
+  const observationRunner = inFlightRunner(async (argv, options) => {
+    trace(redactArgv(argv).join(" "));
+    return (opts.runner ?? systemRunner)(argv, options);
+  });
+  const observationClient = new NmcliClient(observationRunner);
+  const observationModemClient = new MmcliClient(observationRunner);
 
   /**
    * Turn on ModemManager's detailed signal reporting, once per modem.
@@ -470,6 +917,16 @@ export async function startServer(opts: ServerOptions): Promise<{ close(): Promi
       }
     }
   };
+  const readModemState = async (configureSignal: boolean) => {
+    const config = loadConfig(opts.configPath);
+    const paths = await modemClient.modems();
+    if (paths.length === 0) return modemState(config, null, null, { rssi: null, rsrq: null, rsrp: null, snr: null });
+    const modem = await modemClient.modem(paths[0]);
+    if (configureSignal) await armSignal(modem.path);
+    const bearer = await modemClient.connectedBearer(modem);
+    const signal = await modemClient.signal(modem.path);
+    return modemState(config, modem, bearer, signal);
+  };
 
   // The one poll loop for the mesh's throughput, running on `clock` like
   // every other timer this daemon owns. Started unconditionally — it costs
@@ -485,6 +942,148 @@ export async function startServer(opts: ServerOptions): Promise<{ close(): Promi
   // traffic; readRemoteState only ever reads what the sampler already has.
   const sampler = new TrafficSampler({ clock });
   sampler.start();
+
+  /**
+   * The video layer's runtime half: who is watching, and the rate that
+   * follows from it (R-VID-07, R-VID-11; spec §8.1, §8.2).
+   *
+   * **This is the join that was missing.** `video/rate.ts` was built, proved
+   * on a board and left with no production caller at all: every link
+   * measurement it reasoned about was supplied by hand, so an operator who
+   * turned Adaptive on got a switch that changed nothing. Three parts and one
+   * seam between them:
+   *
+   *   - `EncoderChannel` is how a rate reaches an encoder that is already
+   *     running, without respawning the pipeline (K-48). Constructed here,
+   *     once, because it holds what each camera's encoder last confirmed and
+   *     registers a listener on the supervisor that must survive every
+   *     restart of every pipeline.
+   *   - `Viewers` is who is watching and what it costs. It stamps a browser's
+   *     statistic with **this** clock as it arrives and hands it on once,
+   *     then. Nothing re-dates it: `rate.ts` refuses to read a stale report as
+   *     headroom, and that refusal is only worth anything if what feeds it
+   *     cannot manufacture freshness.
+   *   - `Adaptation` runs one controller per camera on this daemon's own
+   *     clock and carries every decision back to `Viewers`, which is what
+   *     puts the reason on the picture.
+   *
+   * Assembled here rather than in `buildRenderers`, and deliberately: none of
+   * it is a renderer — an apply must not wait on it and a rollback must not
+   * re-run it — and all three need the applied configuration read fresh,
+   * which is what `reachConfig()` above already is. Beside the sampler,
+   * because it is the other thing this daemon runs on a timer of its own.
+   *
+   * Absent when `buildRenderers` threw, which is a `secrets.yaml` this daemon
+   * could not read: there is no supervisor to command an encoder through, and
+   * `POST …/viewers/:viewer` says so rather than accepting statistics nothing
+   * would act on.
+   */
+  const encoders = built?.encoders;
+  // The same object the channel above was built on, named here because the
+  // recorder needs it too. The two are absent together — there is one
+  // condition, `buildRenderers` having thrown — and the pair below says so.
+  const supervisor = built?.supervisor;
+  let viewers: Viewers | undefined;
+  let adaptation: Adaptation | undefined;
+  let rtspFeedback: RtspFeedback | undefined;
+  let recorder: Recorder | undefined;
+  let stills: Stills | undefined;
+  if (encoders !== undefined && supervisor !== undefined) {
+    const channel = encoders;
+    const watching = new Viewers({
+      cameras: () => reachConfig().cameras,
+      // What the pipeline is running, never what the configuration asks for.
+      // The pair that disagrees is K-48, and this is the side of it that is
+      // true.
+      inForce: (id) => channel.inForce(id),
+      clock,
+      // Handed on as it arrives, with the stamp it arrived under. `Viewers`
+      // has already decided whether this browser is an active video
+      // subscriber of that camera, which is the filter §8.2 asks for.
+      onReport: (report) => { adaptation?.observe(report); },
+      rtspFeedback: (id) => rtspFeedback?.state(id) ?? null,
+      stillFor: (id) => stills?.latest(id) ?? null,
+    });
+    viewers = watching;
+    adaptation = new Adaptation({
+      channel,
+      // Manual apply/rollback drains the same channel before reading rates.
+      // Do not enqueue an adaptive decision from a policy being replaced.
+      cameras: () => built?.pipelineRenderer.busy || ["applying", "reverting"].includes(engine.status().state)
+        ? [] : reachConfig().cameras,
+      clock,
+      // Before anything is decided, so a Full rate hold nobody renewed is not
+      // still being charged to the path when the allowance is worked out.
+      onTick: (now) => { watching.sweep(now); },
+      onDecisions: (decisions) => { watching.decided(decisions); },
+    });
+    adaptation.start();
+    rtspFeedback = new RtspFeedback({
+      ...opts.rtspObservation,
+      cameras: () => reachConfig().cameras,
+      password: () => built?.secrets.get(MEDIA_OBSERVER_SECRET) ?? null,
+      report: report => adaptation?.observe(report),
+      forget: (camera, viewer) => adaptation?.forget(camera, viewer),
+      blockIncrease: (camera, blocked) => adaptation?.blockRtspIncrease(camera, blocked),
+      clock,
+    });
+    rtspFeedback.start();
+
+    /**
+     * Recording to the board and taking a still (R-CAM-17, R-CAM-18,
+     * R-STO-06).
+     *
+     * Beside the three above, on the same supervisor and the same clock, and
+     * for the identical reason: a redeploy destroys every Node-RED node, and a
+     * recorder in one would forget which cameras were recording the moment
+     * somebody edited a flow — leaving a branch on a tee that nothing could
+     * stop.
+     *
+     * **The reserve is read fresh on every look**, so an apply that changes it
+     * is in force at the next tick of the watch rather than at the next
+     * reboot. And `inForce` is the same channel `Viewers` reads, so the
+     * remaining time is worked out from the rate the encoder is actually
+     * holding rather than from the document (K-48).
+     */
+    recorder = new Recorder({
+      onCamera: accessory?.medium,
+      channel: supervisor,
+      cameras: () => reachConfig().cameras,
+      reserveMb: () => reachConfig().storage.reserve_mb,
+      // The one reader in this daemon that measures the card. Injected here
+      // rather than defaulted inside the recorder, so no test that merely
+      // reached that file would be measuring the machine it ran on.
+      freeBytes: freeSpaceOn,
+      root: CAPTURES_ROOT,
+      clock,
+      inForce: (id) => channel.inForce(id),
+    });
+    stills = new Stills({
+      channel: supervisor,
+      cameras: () => reachConfig().cameras,
+      wanted: () => watching.wantingStills(),
+      generation: (id) => supervisor.generation(id),
+      root: opts.stillsRoot ?? STILLS_ROOT,
+      clock,
+    });
+    stills.start();
+  }
+  // The telemetry equivalent, and on its own clock for the same reason
+  // (R-NET-10's argument, applied to the router's own counters): the sparkline
+  // and the per-station lamps must already be drawn when the Telemetry page is
+  // opened, not start flat and fill in while an operator watches. Absent on a
+  // device with no serial opener — see BuildRenderersOptions.mavlink.
+  built?.mavlinkRenderer?.startSampling();
+
+  // The control plane's own copy of the traffic (R-MAV-05), bound to loopback
+  // and nothing else (R-MAV-07). Awaited because binding a socket takes
+  // microseconds and a daemon whose state is settled before it serves is one
+  // less race — and safe to await because `start()` never rejects: K-19's rule
+  // says nothing on this path may be able to take the daemon down, and a port
+  // already in use costs a Telemetry page its heartbeat, never a device its
+  // console (rule 6). The ground stations are unaffected either way; raw
+  // MAVLink never passes through this process (R-MAV-06).
+  await built?.mavlinkListener?.start();
 
   // No secret is ever printed. That mechanism existed to surface a random
   // per-device access-point passphrase and there is no longer one to surface
@@ -510,6 +1109,7 @@ export async function startServer(opts: ServerOptions): Promise<{ close(): Promi
     configPath: opts.configPath,
     journalPath: opts.journalPath,
     renderers: [...opts.renderers, ...netRenderers],
+    ...(built?.consoleRenderer ? { appearanceRenderer: built.consoleRenderer } : {}),
     renderTimeoutMs: opts.renderTimeoutMs,
     timeoutMs: windows.timeout * 1000,
     radioTimeoutMs: windows.radioTimeout * 1000,
@@ -569,7 +1169,11 @@ export async function startServer(opts: ServerOptions): Promise<{ close(): Promi
   // is wiring, not a second place that decides what a modem is. What may be
   // remembered about a modem and what may not is R-CEL-13, stated there with
   // its tests.
-  const modemPort = new ModemNetPort(modemClient, clock);
+  const modemPort = new ModemNetPort(observationModemClient, clock);
+  // The fallback is checked once and is deliberately outside observation
+  // sharing. Its answer decides whether the access point comes up (R-NET-07),
+  // so it reads through the direct clients even if a page read is in flight.
+  const fallbackModemPort = new ModemNetPort(modemClient, clock);
 
   // Which way out is working, assembled from the parts in net/reach/.
   //
@@ -582,12 +1186,13 @@ export async function startServer(opts: ServerOptions): Promise<{ close(): Promi
   // Every input is read fresh on each call rather than captured — see
   // reachConfig, above, which is where that is done and why.
   const reach = new ReachMonitor({
+    routeDevice: () => defaultRouteDevice(observationClient.runner),
     standing,
     probe: commandProbe(opts.runner ?? systemRunner),
     ...(opts.counters !== undefined ? { counters: opts.counters } : {}),
     devices: async () => {
       const config = reachConfig();
-      const [devices, net] = await Promise.all([client.devices(), modemPort.interfaceFor(config)]);
+      const [devices, net] = await Promise.all([observationClient.devices(), modemPort.interfaceFor(config)]);
       return pathDevices(config, devices, net);
     },
     // What NetworkManager says about the interfaces themselves, so a port
@@ -597,14 +1202,14 @@ export async function startServer(opts: ServerOptions): Promise<{ close(): Promi
     // `cdc-wdm0` and has no entry at all for the `wwan0` the bytes go out of.
     down: async () => {
       const config = reachConfig();
-      const [devices, net] = await Promise.all([client.devices(), modemPort.interfaceFor(config)]);
+      const [devices, net] = await Promise.all([observationClient.devices(), modemPort.interfaceFor(config)]);
       return pathsDown(devices, pathDevices(config, devices, net), pathDevices(config, devices));
     },
     order: () => reachOrder(reachConfig()),
     holding: async () => {
       const config = reachConfig();
       const [devices, addresses, net] = await Promise.all([
-        client.devices(), client.activeIpv4(), modemPort.interfaceFor(config),
+        observationClient.devices(), observationClient.activeIpv4(), modemPort.interfaceFor(config),
       ]);
       return pathsHolding(
         reachOrder(config),
@@ -646,7 +1251,19 @@ export async function startServer(opts: ServerOptions): Promise<{ close(): Promi
     // ask — so wiring this in can only ever make the fallback fire *more*
     // readily than the address check alone, never less. That direction is the
     // one rule 6 allows.
-    carrying: () => reach.carrying(),
+    carrying: () => reach.carrying(async () => {
+      const config = reachConfig();
+      const [devices, addresses, net] = await Promise.all([
+        client.devices(), client.activeIpv4(), fallbackModemPort.interfaceFor(config),
+      ]);
+      return pathsHolding(
+        reachOrder(config),
+        pathDevices(config, devices, net),
+        addresses,
+        config.network.ap.address.split("/")[0] ?? "",
+        pathDevices(config, devices),
+      );
+    }),
     // The fallback's only action is `nmcli connection up yonder-ap`, and that
     // profile exists only because a render created it. On a cold boot the
     // render may still be waiting for the radio when the deadline lands —
@@ -710,6 +1327,7 @@ export async function startServer(opts: ServerOptions): Promise<{ close(): Promi
   // a network change, and there is no reason for setting one to issue a
   // single nmcli command.
   let provisionTimer: unknown;
+  let passwordTimer: unknown;
   const consoleRenderer = built?.consoleRenderer;
   const onProvisioned = consoleRenderer === undefined ? undefined : (): void => {
     if (provisionTimer !== undefined) clock.clearTimer(provisionTimer);
@@ -732,16 +1350,56 @@ export async function startServer(opts: ServerOptions): Promise<{ close(): Promi
   // use. Built here rather than defaulted inside the router so that a test
   // injecting a fake runner cannot reach a real `ping` — see DiagProbes.
   const probeRunner = opts.runner ?? systemRunner;
+  const interfaces = () => readInterfaces(probeRunner, () => client.devices(), () => clock.now());
+  const diagnosticJobs = new DiagnosticJobs({
+    runner: opts.diagnosticRunner ?? systemDiagnosticRunner,
+    devices: async () => (await interfaces()).interfaces.map(i => i.device),
+  });
   const diag: DiagProbes = {
     ping: (host, count) => ping(host, { runner: probeRunner, clock, ...(count === undefined ? {} : { count }) }),
     reachable: () => reachable({ runner: probeRunner, clock }),
   };
 
+  const cockpitData = new CockpitData({now: () => clock.now()});
+  let terrainPack: TerrainPackService | undefined;
+  try { terrainPack = await TerrainPackService.open(fileURLToPath(new URL("../terrain/assets/cove", import.meta.url))); }
+  catch { note("cockpit: prepared terrain pack unavailable; regional terrain remains optional"); }
   const route = createRouter({
+    interfaces, diagnosticJobs,
+    onPasswordChanged: () => {
+      diagnosticJobs.close();
+      if (!opts.console) return;
+      if (passwordTimer !== undefined) clock.clearTimer(passwordTimer);
+      passwordTimer = clock.setTimer(PROVISION_RESTART_DELAY_MS, () => {
+        passwordTimer = undefined;
+        const paths = consolePaths(opts.console!);
+        void resetConsoleAuth(probeRunner, paths.unit, paths.userDir)
+          .catch(() => warn("Could not invalidate all console/editor sessions after the password change; restart the console and remove its saved editor sessions."));
+      });
+    },
+    rebootRefusal: () => built?.vehicle?.snapshot({ details: false }).telemetry.armed === true
+      ? "Disarm the aircraft before rebooting Yonder." : null,
+    reboot: async () => {
+      const result = await probeRunner(["shutdown", "-r", "+1"]);
+      if (result.code !== 0) throw new Error("Could not schedule system reboot");
+    },
+    accessory,
+    cockpit: {vehicle: built?.vehicle, data: cockpitData, terrain: terrainPack},
+    hostInstruments: {
+      now: () => clock.now(),
+      readFile: opts.hostInstruments?.readFile ?? systemReader,
+      freeBytes: opts.hostInstruments?.freeBytes ?? (() => freeSpaceOn(CAPTURES_ROOT)),
+      // R-FLT-26: instrumentation reads cached modem reports; opening an instrument never enables reporting.
+      ...(built ? { modem: () => readModemState(false) } : {}),
+    },
     engine,
     configPath: opts.configPath,
     credential,
     diag,
+    // Outside the block below on purpose: reading the supply register needs no
+    // secret store, and a board whose secrets.yaml is unreadable is exactly the
+    // one whose brownouts an operator wants recorded (R-SYS-09).
+    supply: () => readSupply({ runner: probeRunner }),
     // Absent when buildRenderers threw. GET /net/scan then says this device
     // cannot scan, which is true, rather than reporting an empty air; and
     // POST /net/join refuses rather than applying a configuration whose
@@ -749,30 +1407,16 @@ export async function startServer(opts: ServerOptions): Promise<{ close(): Promi
     ...(built === undefined ? {} : {
       scan: () => scanForNetworks(client),
       netState: async () => {
-        const [devices, addresses] = await Promise.all([client.devices(), client.activeIpv4()]);
+        const [devices, addresses] = await Promise.all([
+          observationClient.devices(), observationClient.activeIpv4(),
+        ]);
         return networkState(loadConfig(opts.configPath), devices, addresses);
       },
       // What the modem says about itself, read from ModemManager and never
       // from the configuration — the APN comes off the connected bearer, so
       // this reports what the link is actually using rather than what was
       // asked for, which is the pair that disagrees exactly when it matters.
-      modemState: async () => {
-        const config = loadConfig(opts.configPath);
-        const paths = await modemClient.modems();
-        // No modem is an ordinary answer, not a failure. A board without one
-        // is an ordinary board, and an appliance is a named adapter
-        // ModemManager will never have heard of — modemState says which of
-        // those this is, and the nulls are what "not measured" looks like.
-        // Never zeroes: 0 dBm is a real and extraordinary reading.
-        if (paths.length === 0) {
-          return modemState(config, null, null, { rssi: null, rsrq: null, rsrp: null, snr: null });
-        }
-        const modem = await modemClient.modem(paths[0]);
-        await armSignal(modem.path);
-        const bearer = await modemClient.connectedBearer(modem);
-        const signal = await modemClient.signal(modem.path);
-        return modemState(config, modem, bearer, signal);
-      },
+      modemState: () => readModemState(true),
       secrets: built.secrets,
       // The interface's kernel byte counters, not ZeroTier's own /metrics —
       // measured empty (0 bytes) on a real board. This is the same call the
@@ -785,20 +1429,107 @@ export async function startServer(opts: ServerOptions): Promise<{ close(): Promi
         readTraffic,
         throughput: (iface) => sampler.forInterface(iface),
       }),
+      // The camera layer, over the same runner as everything else — so a test
+      // injecting a fake runner gets a fake v4l2-ctl for free, and nothing
+      // reaches a real one by omission.
+      cameras: {
+        detect: () => detectWithAccessory(() => detectCameras({ runner: probeRunner }), () => accessory?.detect() ?? { found: [], rejected: [] }),
+        probe: async (node, card) => node.startsWith('pocket2:') && accessory ? accessory.probe(node) : probeCamera(node, card, { runner: probeRunner }),
+      },
+      // The very same successful answer the pipeline renderer uses. Camera
+      // page polls and an apply can arrive together; both share one in-flight
+      // probe and can never compose against different encoders.
+      encoder: built.encoder,
+      // Over the same runner as everything else in this block, for the same
+      // reason: a test that injects a fake runner must get a fake v4l2-ctl
+      // for POST …/controls too, not a real one by omission.
+      applyControls: (opts) => applyControls({ ...opts, runner: probeRunner }),
+      // One supervisor, for the process's lifetime. See buildRenderers.
+      supervisor: built.supervisor,
+      pipelineRenderer: built.pipelineRenderer,
+      // The one value this router can reach in the secret store, and the one
+      // route that spends it is GET /cameras/:id/stream-address (R-SEC-10).
+      // Absent until the media server has been configured once, which the
+      // rendering says in words rather than printing a URL that would not work.
+      rtspPassword: () => built.secrets.get("rtsp_password") ?? null,
+      // Every address this device answers on: what the radio holds, then what
+      // the mesh assigned. The stream address names one of these and lists the
+      // rest beneath it, because a board on a mesh has several and only one of
+      // them is the one the operator is actually reaching it on (R-VID-15).
+      addresses: async () => {
+        const config = reachConfig();
+        const [local, mesh, devices, net] = await Promise.all([
+          observationClient.activeIpv4(),
+          readRemoteState(config, built.zerotier, { readTraffic }),
+          observationClient.devices(),
+          modemPort.interfaceFor(config),
+        ]);
+        /**
+         * **Which path a peer would reach each address over** (R-UI-24,
+         * `RouterDeps.addresses`). Assembled here because every reading it
+         * needs is here, and decided in `net/dial-in.ts`, because that
+         * decision is the join the whole of R-UI-24 rests on.
+         *
+         * **The same pair of device maps `holding` and `down` take**, and for
+         * the identical reason: NetworkManager binds the modem's address to
+         * the control port `cdc-wdm0` and ModemManager names the net port
+         * `wwan0`, so a comparison against one of them alone is trivially
+         * true. `pathDevices(config, devices, net)` names the second and
+         * `pathDevices(config, devices)` the first. Passing only the first was
+         * this join's own defect: it marked the CGNAT address dialable on
+         * every board in auto mode, which is the flying case.
+         */
+        return answerableAddresses({
+          local,
+          mesh: mesh.addresses,
+          devices: pathDevices(config, devices, net),
+          alsoKnownAs: pathDevices(config, devices),
+          apAddress: config.network.ap.address,
+        });
+      },
     }),
+    // Last, so it wins over the real probes above rather than sitting beside
+    // them. Absent in production: main() never sets it (ServerOptions.cameraLayer).
+    ...(opts.cameraLayer === undefined ? {} : {
+      cameras: opts.cameraLayer.cameras,
+      encoder: opts.cameraLayer.encoder,
+      rtspPassword: opts.cameraLayer.rtspPassword,
+    }),
+    // Outside the `built` block above because it is a `let` that block
+    // cannot narrow, and the condition is the same one: no supervisor, no
+    // register of who is watching.
+    ...(viewers === undefined ? {} : { viewers }),
+    // The other half of the same block above: no supervisor, no recorder to
+    // command a pipeline through, and every capture route says so rather than
+    // answering with an empty list that would read as *nothing was recorded*.
+    ...(recorder === undefined ? {} : { recorder }),
+    ...(stills === undefined ? {} : { stills }),
+    clock,
     // Not behind `built`: the reach monitor is assembled from the runner and
     // the nmcli client, neither of which depends on the secret store, so a
     // board whose secrets.yaml is unreadable can still say which way out is
     // working — which is most of what an operator needs to fix it.
     reachState: () => reach.state(),
     testPath: async (path) => reach.test(path),
+    // The renderer itself: it already has the shape `MavlinkControl` asks for,
+    // and it is the only object that knows both what was measured and whether
+    // `mavlink-router` is on the air. Absent on a device with no serial
+    // opener, and every /mav/* route then says so.
+    ...(built?.mavlinkRenderer === undefined ? {} : { mavlink: built.mavlinkRenderer }),
     ...(onProvisioned === undefined ? {} : { onProvisioned }),
   });
 
   const server: Server = createServer((req, res) => {
     const chunks: Buffer[] = [];
-    req.on("data", (c: Buffer) => chunks.push(c));
+    let cockpitLength = 0;
+    let cockpitTooLarge = false;
+    req.on("data", (c: Buffer) => {
+      cockpitLength += c.length;
+      if ((req.url ?? "").startsWith("/cockpit/") && cockpitLength > 512 * 1024) { cockpitTooLarge = true; chunks.length = 0; }
+      if (!cockpitTooLarge) chunks.push(c);
+    });
     req.on("end", () => {
+      if (cockpitTooLarge) { res.writeHead(413, {"content-type": "application/json"}); res.end(JSON.stringify({error: "Cockpit request exceeds size limit"})); return; }
       let body: unknown;
       if (chunks.length > 0) {
         try {
@@ -810,6 +1541,21 @@ export async function startServer(opts: ServerOptions): Promise<{ close(): Promi
         }
       }
       void route(req.method ?? "GET", req.url ?? "/", body).then((r) => {
+        // **One route answers with bytes**: a capture an operator downloads
+        // (R-CAM-18). It says so by carrying a content type, and its body is
+        // written as it stands. Everything else is a document a page reads,
+        // and is serialised exactly as it always was — the flag is what keeps
+        // the one exception from turning every other answer into something a
+        // caller has to inspect first.
+        if (r.contentType !== undefined && Buffer.isBuffer(r.body)) {
+          res.writeHead(r.status, {
+            ...r.headers,
+            "content-type": r.contentType,
+            "content-length": r.body.length,
+          });
+          res.end(r.body);
+          return;
+        }
         res.writeHead(r.status, { "content-type": "application/json" });
         res.end(JSON.stringify(r.body));
       });
@@ -877,7 +1623,11 @@ export async function startServer(opts: ServerOptions): Promise<{ close(): Promi
         // other timer this daemon owns, and a poll loop outliving its daemon
         // would go on questioning NetworkManager — and could still reach a
         // render — on behalf of a process that has already closed.
+        built?.cameraAutostart.close();
+        for (const run of built?.supervisor.all() ?? []) built?.supervisor.stop(run.id);
         watchdog.stop();
+        diagnosticJobs.close();
+        if (passwordTimer !== undefined) clock.clearTimer(passwordTimer);
         // Stopped with it, and for the same reason one step further: a tick
         // loop outliving its daemon would go on running `curl` on somebody's
         // metered link on behalf of a process that has closed its socket.
@@ -893,9 +1643,25 @@ export async function startServer(opts: ServerOptions): Promise<{ close(): Promi
         // would go on reading sysfs for an interface this process no longer
         // answers questions about.
         sampler.stop();
+        // The fifth. A rate controller still ticking after close() would go
+        // on writing bitrates into a running pipeline on behalf of a process
+        // that has already let go of its socket — and, unlike the others,
+        // it would be commanding hardware while it did it.
+        rtspFeedback?.stop();
+        adaptation?.stop();
+        stills?.stop();
+        // The fifth: the telemetry sampler, and with it any sweep this
+        // renderer had scheduled for thirty seconds' time.
+        built?.mavlinkRenderer?.close();
+        // And the socket it shares a tracker with. A listener outliving its
+        // daemon would hold :14559 against the next one to start.
+        built?.vehicle?.close();
+        cockpitData.close();
+        terrainPack?.clearCache();
+        built?.mavlinkListener?.close();
         server.close(() => {
           if (existsSync(opts.socketPath)) unlinkSync(opts.socketPath);
-          resolve();
+          void (accessory?.close() ?? Promise.resolve()).catch(error => warn(`accessory cleanup: ${String(error)}`)).finally(resolve);
         });
       }),
   };
@@ -903,14 +1669,36 @@ export async function startServer(opts: ServerOptions): Promise<{ close(): Promi
 
 async function main(): Promise<void> {
   await startServer({
+    accessory: true,
     socketPath: process.env.YONDER_SOCKET ?? "/run/yonder/core.sock",
     configPath: process.env.YONDER_CONFIG ?? "/etc/yonder/config.yaml",
-    journalPath: process.env.YONDER_JOURNAL ?? "/var/lib/yonder/apply.json",
+    journalPath: process.env.YONDER_JOURNAL ?? DEFAULT_JOURNAL_PATH,
     secretsPath: process.env.YONDER_SECRETS ?? "/etc/yonder/secrets.yaml",
     renderers: [],
     // The one place production console paths are decided. Everywhere else
     // they are given, so nothing can write to /opt/yonder by default.
     console: consolePathsFromEnv(),
+    // The one place the production path is decided, as with the console
+    // above, so nothing else can reach a real /etc/mediamtx by default. No
+    // environment override, deliberately: mediamtx.service names this path
+    // literally, and a daemon writing somewhere else would be a media server
+    // whose listeners never change with the configuration.
+    mediaConfigPath: MEDIA_CONFIG_PATH,
+    /**
+     * **The one place a real serial port is opened** (R-MAV-01), and the
+     * line that stops the telemetry renderer being inert: without it
+     * `buildRenderers` assembles no `MavlinkRenderer` at all, every `/mav/*`
+     * route answers 503 and no `mavlink-router` is ever started.
+     *
+     * Given here rather than defaulted inside `buildRenderers`, for the same
+     * reason `console` is: a default that touches hardware is a default a
+     * test reaches by forgetting to override it, and this one would open a
+     * node under `/dev` and run a real `stty`. Every call to what
+     * `openPortWith` returns comes from `MavlinkRenderer` by way of
+     * `detect()`, so every `stty` still runs on a renderer's stack and
+     * through the injected runner (ADR-0006).
+     */
+    mavlink: mavlinkFromEnv(systemRunner, process.env, { log: warn }),
   });
   note("yonder-core listening");
 }

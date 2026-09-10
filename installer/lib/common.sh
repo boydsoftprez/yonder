@@ -13,6 +13,56 @@
 # inside the root it is installing to, chroot or board alike.
 : "${YONDER_SYSTEMD_DIRS:=/etc/systemd/system /usr/lib/systemd/system /lib/systemd/system}"
 
+# The Raspberry Pi boot-firmware directory: config.txt and cmdline.txt live
+# here on every board R-HW-01 and R-HW-02 name. R-HW-03's Radxa boards do
+# not use this layout at all and are out of scope until M8 (docs/roadmap.md),
+# which is why 40-uart.sh treats its absence as "nothing to do" rather than
+# a failure. Overridable for the same reason YONDER_SYSTEMD_DIRS is: a role
+# that owns a stanza in config.txt is worth testing against a fixture
+# directory, not the real /boot/firmware. An install never sets it.
+: "${YONDER_BOOT_DIR:=/boot/firmware}"
+
+# A binary this root already runs, used as the reference an architecture
+# check compares a staged one against. Overridable for the same reason
+# YONDER_BOOT_DIR is: the check is worth testing, and the machine a test runs
+# on does not always have an ELF file at this path at all — a Mac's /bin/sh
+# is Mach-O. An install never sets it.
+: "${YONDER_ELF_REFERENCE:=/bin/sh}"
+
+# Where 15-mavlink-router.sh puts the router, and the directory the daemon
+# generates the router's configuration into.
+#
+# Each is half of a pair. The first is the other half of `ExecStart=` in
+# systemd/mavlink-router.service, and assert_unit_exec is what makes the two
+# halves agree; the second is the other half of ROUTER_CONF_PATH in
+# packages/yonder-core/src/mav/renderer.ts and of the `-/etc/mavlink-router`
+# entry in yonder-core.service's ReadWritePaths, and installer.test.ts is
+# what makes those agree. Overridable for the same reason YONDER_BOOT_DIR is:
+# a role is worth running in a test, and a test may write to neither /usr/bin
+# nor /etc. An install never sets either.
+: "${YONDER_MAVLINK_BIN:=/usr/bin/mavlink-routerd}"
+: "${YONDER_MAVLINK_ETC:=/etc/mavlink-router}"
+
+# Where 52-gst-rockchip.sh puts the MPP plugin and the two libraries it links,
+# the device node whose presence says this is a Rockchip board (R-HW-04: the
+# board decides at boot, by what it has), and the registry caches GStreamer
+# keeps per user. Overridable for the same reason YONDER_BOOT_DIR is: a role
+# that copies into /usr/lib is worth running against a fixture directory. An
+# install never sets any of them.
+: "${YONDER_MPP_DEVICE:=/dev/mpp_service}"
+: "${YONDER_GST_LIBDIR:=/usr/lib/aarch64-linux-gnu}"
+: "${YONDER_GST_PLUGIN_DIR:=/usr/lib/aarch64-linux-gnu/gstreamer-1.0}"
+: "${YONDER_GST_REGISTRY_DIRS:=/root/.cache/gstreamer-1.0 /var/cache/gstreamer-1.0 /home/yonder/.cache/gstreamer-1.0}"
+
+# Armbian's boot layout, which R-HW-03's boards use: one file of key=value
+# pairs u-boot reads, the kernel's overlays, and the directory user overlays
+# are loaded from. Overridable for the same reason YONDER_BOOT_DIR is: a role
+# that rewrites a boot file is worth testing against a fixture. An install
+# never sets any of them.
+: "${YONDER_ARMBIAN_ENV:=/boot/armbianEnv.txt}"
+: "${YONDER_DTB_OVERLAY_DIR:=/boot/dtb/rockchip/overlay}"
+: "${YONDER_USER_OVERLAY_DIR:=/boot/overlay-user}"
+
 # The one path the systemd unit's ExecStart names, and a symlink this
 # installer points at whichever node the install actually resolved.
 #
@@ -227,6 +277,38 @@ link_node() {
     # existing symlink-to-a-directory creates the link *inside* it.
     run rm -f "$YONDER_NODE_LINK"
     run ln -s "$node_bin" "$YONDER_NODE_LINK"
+}
+
+# The architecture an ELF file was built for, as ELF's own e_machine number,
+# printing nothing at all when the file is not a little-endian ELF.
+#
+#     elf_machine <file>
+#
+# The numbers are never interpreted here — 62 is x86-64 and 183 is aarch64 —
+# because the question this answers is not "which architecture is this" but
+# "is this the same architecture as the one this root already runs". A role
+# staging a prebuilt binary knows nothing about the board it is installing
+# to; comparing against a binary that is demonstrably running there needs no
+# such knowledge and cannot be fooled by `uname`, which reports the *host*
+# kernel's machine inside the chroot an image is built in.
+#
+# Pure file reading, so it is safe in that chroot: executing a foreign-
+# architecture binary to ask it what it is would need qemu-user registered,
+# which an image build cannot assume.
+#
+# The header, by offset: 0-3 the magic, 5 EI_DATA, 18-19 e_machine. Nothing
+# else is read. A big-endian ELF (EI_DATA 2) is not misread, it is declined —
+# no board or build host this installer supports is one, and guessing at a
+# byte order is how a check starts lying.
+elf_machine() {
+    em_file="$1"
+    [ -f "$em_file" ] || return 0
+    # shellcheck disable=SC2046 # the byte list is a deliberate word split
+    set -- $(od -A n -t u1 -N 20 "$em_file" 2>/dev/null)
+    [ $# -ge 20 ] || return 0
+    [ "$1" = "127" ] && [ "$2" = "69" ] && [ "$3" = "76" ] && [ "$4" = "70" ] || return 0
+    [ "$6" = "1" ] || return 0
+    printf '%s\n' "$(( ${19} + ${20} * 256 ))"
 }
 
 # The post-condition on a unit this installer has just written: the binary its
@@ -487,7 +569,22 @@ assert_daemon_can_write() {
         return 0
     fi
 
-    adcw_roots=$(sed -n 's/^ReadWritePaths=//p' "$adcw_unit" | tr ' ' '\n' | grep -v '^$' || true)
+    # A leading `-` on an entry is systemd's "tolerate this one being absent",
+    # not part of the path — `yonder-core.service` carries
+    # `-/etc/mavlink-router` for exactly that reason, because the directory
+    # exists only on a board whose installer carried the router. Left on, it
+    # becomes a literal root named `-/etc/mavlink-router` that no real path can
+    # ever be under, so the `case` below can never match and the first caller
+    # naming a file in there dies for a write the service can perfectly well
+    # make. `installer.test.ts` already reads the same field the right way;
+    # this is the copy that had drifted from it.
+    #
+    # Only `-` is stripped. systemd's other prefixes (`+`, `!`, `!!`) appear in
+    # no unit this repository ships, and a prefix this does not know stays
+    # literal — which fails loudly here rather than quietly widening what the
+    # sandbox is believed to allow.
+    adcw_roots=$(sed -n 's/^ReadWritePaths=//p' "$adcw_unit" \
+        | tr ' ' '\n' | sed 's/^-//' | grep -v '^$' || true)
     [ -n "$adcw_roots" ] \
         || die "$adcw_unit is ProtectSystem=strict and names no ReadWritePaths; it can write nothing at all"
 

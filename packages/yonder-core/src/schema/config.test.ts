@@ -1,8 +1,20 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
+import { readFileSync } from "node:fs";
+import { dirname, join } from "node:path";
+import { fileURLToPath } from "node:url";
 import { describe, it, expect } from "vitest";
-import { ConfigSchema, DEFAULT_CONFIG } from "./config.js";
+import { parse as parseYaml } from "yaml";
+import {
+  Camera, CameraControls, ConfigSchema, DEFAULT_CONFIG,
+} from "./config.js";
 import { withoutRetiredKeys } from "./retired.js";
 import { formatIssues } from "../config/errors.js";
+// Imported rather than restated: the point of the guard under test is that
+// these four numbers have one home, so a test asserting literals would be the
+// second copy it exists to prevent.
+import {
+  RTSP_PORT, SRT_PORT, WEBRTC_LOCAL_UDP_PORT, WEBRTC_PORT,
+} from "../media/ports.js";
 
 /** A config.yaml as a build before the pool was removed would have written it. */
 function seededByAnEarlierBuild(): unknown {
@@ -131,6 +143,53 @@ describe("apply", () => {
       ...DEFAULT_CONFIG,
       apply: { timeout: 120, radioTimeoutSeconds: 300 },
     }).success).toBe(false);
+  });
+});
+
+/**
+ * The reserve recording may not consume (R-STO-06). A new section, so
+ * nothing retires — the same reasoning `apply` above is introduced with.
+ */
+describe("storage", () => {
+  it("keeps a gigabyte back by default", () => {
+    expect(DEFAULT_CONFIG.storage).toEqual({ reserve_mb: 1024 });
+  });
+
+  it("is optional, so a configuration written before it existed still loads", () => {
+    const without = structuredClone(DEFAULT_CONFIG) as Record<string, unknown>;
+    delete without.storage;
+    expect(ConfigSchema.parse(without).storage).toEqual({ reserve_mb: 1024 });
+  });
+
+  /**
+   * **Device-wide, not per camera.** Asserted here because it is the decision
+   * the shape encodes: the medium is one card, so the floor is one number,
+   * and two cameras recording at once share it. A reserve that lived on a
+   * camera would let the second one eat the first one's headroom while the
+   * first went on counting down.
+   */
+  it("is one number for the device, and no camera carries one of its own", () => {
+    const one = { id: "cam0", name: "Nose", source: "usb", device: "usb-0000:01:00.0-1.2" };
+    expect(Object.keys(Camera.parse(one))).not.toContain("reserve_mb");
+    const perCamera = { ...DEFAULT_CONFIG, cameras: [{ ...one, reserve_mb: 512 }] };
+    expect(ConfigSchema.safeParse(perCamera).success).toBe(false);
+  });
+
+  it("allows no reserve at all, for an operator who means to fill the card", () => {
+    expect(ConfigSchema.parse({ ...DEFAULT_CONFIG, storage: { reserve_mb: 0 } }).storage)
+      .toEqual({ reserve_mb: 0 });
+  });
+
+  it("refuses a reserve that is not a whole number of megabytes, or is negative", () => {
+    for (const reserve_mb of [-1, 1.5]) {
+      expect(ConfigSchema.safeParse({ ...DEFAULT_CONFIG, storage: { reserve_mb } }).success,
+        String(reserve_mb)).toBe(false);
+    }
+  });
+
+  it("is strict, so a misspelled reserve is a refusal and not a silent default", () => {
+    expect(ConfigSchema.safeParse({ ...DEFAULT_CONFIG, storage: { reserve: 1024 } }).success)
+      .toBe(false);
   });
 });
 
@@ -292,5 +351,483 @@ describe("remote", () => {
         remote: { zerotier: { netwrok_id: "9fef8a3bf9000001" } },
       }),
     ).toThrow();
+  });
+});
+
+describe("cameras", () => {
+  it("defaults cameras to an empty list", () => {
+    const cfg = ConfigSchema.parse({
+      version: 1, network: { ap: { psk: { secret: "ap_psk" } } }, ui: { editor: {} },
+    });
+    expect(cfg.cameras).toEqual([]);
+  });
+
+  it("fills a camera's defaults from its identity alone", () => {
+    const cfg = ConfigSchema.parse({
+      version: 1, network: { ap: { psk: { secret: "ap_psk" } } }, ui: { editor: {} },
+      cameras: [{ id: "cam0", name: "Nose", source: "usb", device: "usb-0000:01:00.0-1.2" }],
+    });
+    const cam = cfg.cameras[0];
+    expect(cam).toMatchObject({
+      enabled: true, autostart: false,
+      width: 1280, height: 720, framerate: 30,
+      codec: "h264", bitrate_kbps: 2000, outputs: [],
+    });
+    expect(cam.preview).toEqual({
+      mode: "adaptive", size: "auto", ladder_top: "1280x720", ladder_bottom: "640x360",
+      floor_kbps: 300, ceiling_kbps: 2000, bitrate_kbps: 400, framerate: 15,
+    });
+    expect(cam.stream).toEqual({ mode: "fixed", floor_kbps: 2000, ceiling_kbps: 2000 });
+    expect(cam.controls).toEqual({
+      brightness: null, contrast: null, rotation: 0,
+      zoom: null, focus: null, exposureTime: null, whiteBalanceTemperature: null,
+      gain: null, backlightCompensation: null, gamma: null, sharpness: null,
+      saturation: null, hue: null, powerLineFrequency: null,
+      autoExposure: null, autoWhiteBalance: null, autoFocus: null,
+      horizontalFlip: null, verticalFlip: null,
+    });
+  });
+
+  it("refuses two cameras with the same id", () => {
+    const r = ConfigSchema.safeParse({
+      version: 1, network: { ap: { psk: { secret: "ap_psk" } } }, ui: { editor: {} },
+      cameras: [
+        { id: "cam0", name: "A", source: "usb", device: "usb-1" },
+        { id: "cam0", name: "B", source: "usb", device: "usb-2" },
+      ],
+    });
+    expect(r.success).toBe(false);
+    expect(JSON.stringify(r.error?.issues)).toContain("cam0");
+  });
+
+  it("refuses an srt output on the console's own port", () => {
+    // A bind race after a reboot is a configuration that confirms while it looks
+    // fine and bites on the next boot. The confirmation window never catches it,
+    // because on the day it is applied nothing collides.
+    //
+    // `srt` because `srt` is the one port-carrying kind that opens a socket on
+    // this board, and the check is scoped to it. Narrow that scope any further
+    // and this test is what goes red.
+    const r = ConfigSchema.safeParse({
+      version: 1, network: { ap: { psk: { secret: "ap_psk" } } },
+      ui: { port: 3000, editor: {} },
+      cameras: [{
+        id: "cam0", name: "Nose", source: "usb", device: "usb-1",
+        outputs: [{ kind: "srt", port: 3000 }],
+      }],
+    });
+    expect(r.success).toBe(false);
+    expect(JSON.stringify(r.error?.issues)).toContain("ui.port");
+  });
+
+  it("leaves a ground station's port alone when it matches the console's", () => {
+    // The same reasoning as the media-server check below, applied to the same
+    // pair of kinds: an `rtp` output's port is a port on the *other* machine —
+    // `udpsink host=… port=…` sends there and binds nothing on this device — so
+    // it cannot collide with the console whatever number it carries, and
+    // refusing it would refuse a configuration that works.
+    const r = ConfigSchema.safeParse({
+      version: 1, network: { ap: { psk: { secret: "ap_psk" } } },
+      ui: { port: 3000, editor: {} },
+      cameras: [{
+        id: "cam0", name: "Nose", source: "usb", device: "usb-1",
+        outputs: [{ kind: "rtp", host: "192.168.1.50", port: 3000 }],
+      }],
+    });
+    expect(JSON.stringify(r.error?.issues ?? [])).not.toContain("ui.port");
+    expect(r.success).toBe(true);
+  });
+
+  it("refuses two cameras that would publish to one media path", () => {
+    // Unique ids are not enough: a camera's preview is served at its id plus
+    // `-preview`, so `nose` and `nose-preview` both want `nose-preview`.
+    // mediamtx takes one publisher per path, so the second pipeline's ANNOUNCE
+    // is refused with 400 and that camera dies while the first goes on
+    // working — the hardest shape of fault to read off a page.
+    const r = ConfigSchema.safeParse({
+      version: 1, network: { ap: { psk: { secret: "ap_psk" } } }, ui: { editor: {} },
+      cameras: [
+        { id: "nose", name: "A", source: "usb", device: "usb-1" },
+        { id: "nose-preview", name: "B", source: "usb", device: "usb-2" },
+      ],
+    });
+    expect(r.success).toBe(false);
+    expect(JSON.stringify(r.error?.issues)).toContain("nose-preview");
+  });
+
+  it("refuses an output on a port the media server binds", () => {
+    // The same class as ui.port above, and the one that was open: mediamtx
+    // does not degrade when two of its servers want one port, it exits — so
+    // an SRT output on 8890 takes *every* camera on the device off the air,
+    // including the browser's, on a boot with nobody watching a countdown.
+    // 8890 was the branch's own fixture value.
+    const withPort = (port: number) => ConfigSchema.safeParse({
+      version: 1, network: { ap: { psk: { secret: "ap_psk" } } },
+      ui: { port: 1880, editor: {} },
+      cameras: [{
+        id: "cam0", name: "Nose", source: "usb", device: "usb-1",
+        outputs: [{ kind: "srt", port }],
+      }],
+    });
+    for (const port of [RTSP_PORT, WEBRTC_PORT, WEBRTC_LOCAL_UDP_PORT, SRT_PORT]) {
+      const r = withPort(port);
+      expect(r.success, `port ${port}`).toBe(false);
+      expect(JSON.stringify(r.error?.issues)).toContain("media server");
+    }
+    // And nothing else: a port the device does not bind is an operator's to
+    // choose, and a schema refusing one of those refuses a working device.
+    expect(withPort(9998).success).toBe(true);
+  });
+
+  it("leaves a ground station's own port alone, because nothing here binds it", () => {
+    // An `rtp` output names a port on the *other* machine — `udpsink` binds
+    // nothing on this device — so 8554 there is not this board's RTSP server
+    // and refusing it would refuse a configuration that works.
+    const r = ConfigSchema.safeParse({
+      version: 1, network: { ap: { psk: { secret: "ap_psk" } } }, ui: { editor: {} },
+      cameras: [{
+        id: "cam0", name: "Nose", source: "usb", device: "usb-1",
+        outputs: [{ kind: "rtp", host: "192.168.1.50", port: RTSP_PORT }],
+      }],
+    });
+    expect(r.success).toBe(true);
+  });
+
+  it("holds an RTSP password by reference, never inline", () => {
+    const ok = ConfigSchema.safeParse({
+      version: 1, network: { ap: { psk: { secret: "ap_psk" } } }, ui: { editor: {} },
+      cameras: [{
+        id: "cam0", name: "Nose", source: "usb", device: "usb-1",
+        outputs: [{ kind: "rtsp", password: { secret: "rtsp_password" } }],
+      }],
+    });
+    expect(ok.success).toBe(true);
+    const inline = ConfigSchema.safeParse({
+      version: 1, network: { ap: { psk: { secret: "ap_psk" } } }, ui: { editor: {} },
+      cameras: [{
+        id: "cam0", name: "Nose", source: "usb", device: "usb-1",
+        outputs: [{ kind: "rtsp", password: "hunter2" }],
+      }],
+    });
+    expect(inline.success).toBe(false);
+  });
+
+  it("defaults to enabled, so an existing config means what it meant", () => {
+    // Every config.yaml in the field predates this field. Defaulting to
+    // false would stop an aircraft's stream on upgrade, with nothing in the
+    // file changed to explain it.
+    const cfg = ConfigSchema.parse({
+      version: 1, network: { ap: { psk: { secret: "ap_psk" } } }, ui: { editor: {} },
+      cameras: [{
+        id: "cam0", name: "Nose", source: "usb", device: "usb-1",
+        outputs: [{ kind: "rtp", host: "10.0.0.9", port: 5600 }],
+      }],
+    });
+    expect(cfg.cameras[0].outputs[0].enabled).toBe(true);
+  });
+
+  it("defaults to enabled for an rtsp output too, not only rtp", () => {
+    // enabled is declared separately on each of the three discriminated-union
+    // members; a default added to two of three is exactly the kind of gap
+    // this plan has shipped before.
+    const cfg = ConfigSchema.parse({
+      version: 1, network: { ap: { psk: { secret: "ap_psk" } } }, ui: { editor: {} },
+      cameras: [{
+        id: "cam0", name: "Nose", source: "usb", device: "usb-1",
+        outputs: [{ kind: "rtsp", password: { secret: "rtsp_password" } }],
+      }],
+    });
+    expect(cfg.cameras[0].outputs[0].enabled).toBe(true);
+  });
+
+  it("defaults to enabled for an srt output too, not only rtp", () => {
+    const cfg = ConfigSchema.parse({
+      version: 1, network: { ap: { psk: { secret: "ap_psk" } } }, ui: { editor: {} },
+      cameras: [{
+        id: "cam0", name: "Nose", source: "usb", device: "usb-1",
+        outputs: [{ kind: "srt", port: 9998 }],
+      }],
+    });
+    expect(cfg.cameras[0].outputs[0].enabled).toBe(true);
+  });
+
+  it("keeps its path and its secret while disabled", () => {
+    // Stopping an output is not forgetting it. A disabled output that dropped
+    // its credential would come back needing one typed again, and the
+    // operator stopped it to stop the traffic, not to surrender the setting.
+    const cfg = ConfigSchema.parse({
+      version: 1, network: { ap: { psk: { secret: "ap_psk" } } }, ui: { editor: {} },
+      cameras: [{
+        id: "cam0", name: "Nose", source: "usb", device: "usb-1",
+        outputs: [{ kind: "rtsp", enabled: false, password: { secret: "cam1-rtsp" } }],
+      }],
+    });
+    const out = cfg.cameras[0].outputs[0];
+    expect(out.enabled).toBe(false);
+    expect(out).toMatchObject({ kind: "rtsp", password: { secret: "cam1-rtsp" } });
+  });
+
+  it("keeps its address while disabled, for the other two kinds too", () => {
+    const cfg = ConfigSchema.parse({
+      version: 1, network: { ap: { psk: { secret: "ap_psk" } } }, ui: { editor: {} },
+      cameras: [{
+        id: "cam0", name: "Nose", source: "usb", device: "usb-1",
+        outputs: [
+          { kind: "rtp", enabled: false, host: "192.168.1.50", port: 5600 },
+          { kind: "srt", enabled: false, port: 9998 },
+        ],
+      }],
+    });
+    const [rtp, srt] = cfg.cameras[0].outputs;
+    expect(rtp).toMatchObject({ enabled: false, host: "192.168.1.50", port: 5600 });
+    expect(srt).toMatchObject({ enabled: false, port: 9998 });
+  });
+});
+
+/**
+ * `stream` and `preview`'s policy fields (spec §11): a fixed-rate stream by
+ * default, an adaptive preview bounded 100-4000 kb/s, and the width/height to
+ * size migration. `Camera.parse` directly, as the brief's own tests do,
+ * rather than through `ConfigSchema` — these are facts about one camera, not
+ * about the document it sits in.
+ */
+describe("camera stream and preview policy", () => {
+  const minimal = { id: "cam0", name: "Nose", source: "usb" as const, device: "usb-1" };
+
+  it("defaults: stream fixed, preview adaptive at 300–2000 kb/s, ladder at the supported ends", () => {
+    const c = Camera.parse(minimal);
+    expect(c.stream.mode).toBe("fixed");
+    expect(c.preview).toMatchObject({ mode: "adaptive", floor_kbps: 300, ceiling_kbps: 2000, size: "auto" });
+  });
+
+  it("keeps the economical 720p default while permitting an explicit 1080p preview", () => {
+    const c = Camera.parse(minimal);
+    expect(c.preview.ladder_top).toBe("1280x720");
+    expect(c.preview.ladder_bottom).toBe("640x360");
+    expect(Camera.parse({ ...minimal, width: 1920, height: 1080,
+      preview: { size: '1920x1080', ladder_top: '1920x1080', framerate: 30 },
+    }).preview).toMatchObject({ size: '1920x1080', ladder_top: '1920x1080', framerate: 30 });
+  });
+
+  it("migrates preview width/height into size, and refuses two sources", () => {
+    expect(Camera.parse({ ...minimal, preview: { width: 640, height: 360 } }).preview.size).toBe("640x360");
+    expect(() => Camera.parse({ ...minimal, preview: { width: 640, height: 360, size: "854x480" } })).toThrow();
+  });
+
+  // The given test above only ever migrates the default pair. An
+  // implementation that special-cased "640x360" rather than genuinely
+  // reading width/height would still pass it.
+  it("migrates a second size pair too, not only the default one", () => {
+    expect(Camera.parse({ ...minimal, preview: { width: 1280, height: 720 } }).preview.size).toBe("1280x720");
+  });
+
+  it("accepts a size set directly, with no width/height involved at all", () => {
+    expect(Camera.parse({ ...minimal, preview: { size: "854x480" } }).preview.size).toBe("854x480");
+  });
+
+  it("refuses width without height, and height without width, saying so specifically", () => {
+    // Both throw even without this file's own "needs both together" check —
+    // the lone field left standing is `undefined` where a number is
+    // expected, which the numeric check below would also catch. The message
+    // is what proves this check, not that backstop, is the one that fired.
+    const widthOnly = Camera.safeParse({ ...minimal, preview: { width: 640 } });
+    expect(widthOnly.success).toBe(false);
+    if (!widthOnly.success) expect(widthOnly.error.issues[0]?.message).toContain("together");
+    const heightOnly = Camera.safeParse({ ...minimal, preview: { height: 360 } });
+    expect(heightOnly.success).toBe(false);
+    if (!heightOnly.success) expect(heightOnly.error.issues[0]?.message).toContain("together");
+  });
+
+  /**
+   * The old schema accepted any 160–1280 × 90–720 pair; this one names
+   * exactly three pictures. A legacy value naming a fourth is refused by
+   * name rather than silently rounded to the nearest offered size, which
+   * would be this schema repairing a draft the same way `validateDraft`
+   * refuses to (R-CMD-04, Coordinator resolution 5).
+   */
+  it("refuses a width/height pair naming no size this schema offers, and names width", () => {
+    const result = Camera.safeParse({ ...minimal, preview: { width: 800, height: 450 } });
+    expect(result.success).toBe(false);
+    if (result.success) return;
+    // A bare `.toThrow()` here cannot tell this file's own membership check
+    // apart from `size`'s own enum rejecting "800x450" as a backstop — both
+    // throw. Naming the path and the message is what proves this file's
+    // check is the one that actually fired, pointing at the field an
+    // operator actually wrote rather than `size`, which they did not.
+    expect(result.error.issues[0]?.path).toEqual(["preview", "width"]);
+    expect(result.error.issues[0]?.message).toContain("800x450");
+  });
+
+  it("a preview ceiling of 4000 is accepted and 4001 is not", () => {
+    expect(Camera.parse({ ...minimal, preview: { ceiling_kbps: 4000 } })
+      .preview.ceiling_kbps).toBe(4000);
+    expect(() => Camera.parse({ ...minimal, preview: { ceiling_kbps: 4001 } })).toThrow();
+  });
+
+  it("bounds the preview's fixed target at the same 100–4000 kb/s range", () => {
+    expect(Camera.parse({ ...minimal, preview: { bitrate_kbps: 4000 } }).preview.bitrate_kbps).toBe(4000);
+    expect(() => Camera.parse({ ...minimal, preview: { bitrate_kbps: 4001 } })).toThrow();
+  });
+
+  it("accepts preview mode adaptive or fixed, and refuses anything else", () => {
+    expect(Camera.parse({ ...minimal, preview: { mode: "fixed" } }).preview.mode).toBe("fixed");
+    expect(() => Camera.parse({ ...minimal, preview: { mode: "manual" } })).toThrow();
+  });
+
+  it("refuses a ladder endpoint naming no size this schema offers", () => {
+    expect(() => Camera.parse({ ...minimal, preview: { ladder_top: "2560x1440" } })).toThrow();
+  });
+
+  it("seeds a stream's adaptive envelope from its fixed target", () => {
+    const c = Camera.parse({ ...minimal, bitrate_kbps: 3000 });
+    expect(c.stream.floor_kbps).toBe(3000);
+    expect(c.stream.ceiling_kbps).toBe(3000);
+  });
+
+  it("seeds the default camera's stream envelope too, from the default bitrate", () => {
+    const c = Camera.parse(minimal);
+    expect(c.stream.floor_kbps).toBe(2000);
+    expect(c.stream.ceiling_kbps).toBe(2000);
+  });
+
+  // An implementation that always reseeds from bitrate_kbps — rather than
+  // only filling what is missing — would still pass the two tests above,
+  // since neither one sets stream.floor_kbps or ceiling_kbps explicitly.
+  it("keeps an explicit stream floor or ceiling rather than reseeding it", () => {
+    const c = Camera.parse({ ...minimal, bitrate_kbps: 3000, stream: { floor_kbps: 1000 } });
+    expect(c.stream.floor_kbps).toBe(1000);
+    expect(c.stream.ceiling_kbps).toBe(3000);
+  });
+
+  it("defaults stream mode to fixed, and accepts adaptive", () => {
+    expect(Camera.parse(minimal).stream.mode).toBe("fixed");
+    expect(Camera.parse({ ...minimal, stream: { mode: "adaptive" } }).stream.mode).toBe("adaptive");
+  });
+
+  it("bounds a stream's floor and ceiling at bitrate_kbps's own 100–20000 kb/s range", () => {
+    expect(Camera.parse({ ...minimal, stream: { ceiling_kbps: 20000 } }).stream.ceiling_kbps).toBe(20000);
+    expect(() => Camera.parse({ ...minimal, stream: { ceiling_kbps: 20001 } })).toThrow();
+  });
+});
+
+describe("CameraControls", () => {
+  /**
+   * Every one of the fourteen keys Task 5 added to `CameraCapabilities`, in
+   * this schema's own field names — `exposure`/`whiteBalance` there are
+   * `exposureTime`/`whiteBalanceTemperature` here, deliberately (see the
+   * schema's own comment on `CameraControls`).
+   *
+   * Named out in full rather than sampled: a test asserting only four of
+   * these — as this plan's own brief once did — leaves ten free to default
+   * to `0` instead of `null` and stay green. `noCapabilities()` set the
+   * precedent this test follows: state the whole set, not a sample of it.
+   */
+  const NEW_CONTROLS = [
+    "zoom", "focus", "exposureTime", "whiteBalanceTemperature", "gain",
+    "backlightCompensation", "gamma", "sharpness", "saturation", "hue",
+    "powerLineFrequency", "autoExposure", "autoWhiteBalance", "autoFocus",
+  ] as const satisfies readonly (keyof CameraControls)[];
+
+  it("accepts every control the bench camera answers", () => {
+    const p = CameraControls.parse({
+      brightness: 12, gain: 200, exposureTime: 156, autoExposure: 1, autoFocus: false,
+    });
+    expect(p.exposureTime).toBe(156);
+    expect(p.autoFocus).toBe(false);
+  });
+
+  it("defaults every control to null, never to zero", () => {
+    const p = CameraControls.parse({});
+    for (const k of NEW_CONTROLS) expect(p[k]).toBeNull();
+  });
+
+  /**
+   * `null` is not zero (the schema's own header comment), and this is the
+   * test that can tell them apart: zero is a legal reading for several of
+   * these — `gain: 0` is the bench camera's own floor — so a schema that
+   * quietly turned an explicit `0` into `null`, or the reverse, would stop
+   * an operator's setting from ever reaching the device. Both directions
+   * are asserted, on both a control this task adds (`gain`) and one that
+   * already existed (`brightness`), because the bug this guards against —
+   * treating `0` as falsy and folding it into "absent" — is exactly as
+   * likely in code that predates this task as in code this task adds.
+   */
+  it("keeps an explicit 0 distinguishable from an absent field", () => {
+    const zeroed = CameraControls.parse({ gain: 0, brightness: 0 });
+    expect(zeroed.gain).toBe(0);
+    expect(zeroed.brightness).toBe(0);
+    const absent = CameraControls.parse({});
+    expect(absent.gain).toBeNull();
+    expect(absent.brightness).toBeNull();
+  });
+
+  it("refuses a value outside any UVC range", () => {
+    expect(() => CameraControls.parse({ gain: 10_000_000 })).toThrow();
+  });
+
+  // Menu membership is the adapter's job (Task 9): the schema cannot know a camera's menu.
+  it("accepts any int for a menu control at the schema", () => {
+    expect(CameraControls.parse({ autoExposure: 2 }).autoExposure).toBe(2);
+  });
+
+  /**
+   * R-CTL-05. Two switches, not a third rotation: 180° is both flips
+   * together, and neither flip alone is any rotation at all, so a mirror
+   * cannot be stored as degrees. Stored the way the other two switches are —
+   * `null` leaves the camera alone, and `false` is a picture the operator has
+   * said is *not* mirrored, which is a different instruction from having said
+   * nothing.
+   */
+  it("stores a mirror and a flip as switches, each with its own field", () => {
+    const p = CameraControls.parse({ horizontalFlip: true, verticalFlip: false });
+    expect(p.horizontalFlip).toBe(true);
+    expect(p.verticalFlip).toBe(false);
+    const absent = CameraControls.parse({});
+    expect(absent.horizontalFlip).toBeNull();
+    expect(absent.verticalFlip).toBeNull();
+  });
+
+  it("refuses degrees for a flip, because a flip is not a rotation", () => {
+    // The collapse this field pair exists to prevent, stated as a test: a
+    // schema that took a number here would accept `rotation`'s own values
+    // for a control that has none.
+    expect(() => CameraControls.parse({ horizontalFlip: 180 })).toThrow();
+    expect(() => CameraControls.parse({ verticalFlip: 0 })).toThrow();
+    // And the converse still holds — rotation is degrees, never a switch.
+    expect(() => CameraControls.parse({ rotation: true })).toThrow();
+  });
+});
+
+describe("cameras[].codec", () => {
+  const ROOT = join(dirname(fileURLToPath(import.meta.url)), "..", "..", "..", "..");
+  const seed = parseYaml(readFileSync(join(ROOT, "config", "defaults", "config.yaml"), "utf8")) as Record<string, unknown>;
+  const camera = (codec: string) => ({
+    id: "cam0", name: "Nose", source: "usb",
+    device: "platform-fd500000.pcie-pci-0000:01:00.0-usb-0:1.3:1.0-video-index0",
+    enabled: true, autostart: false,
+    width: 1280, height: 720, framerate: 30, codec, bitrate_kbps: 2000,
+    preview: {
+      mode: "adaptive", size: "auto", ladder_top: "1280x720", ladder_bottom: "640x360",
+      floor_kbps: 300, ceiling_kbps: 2000, bitrate_kbps: 400, framerate: 15,
+    },
+    controls: { brightness: null, contrast: null, rotation: 0 },
+    outputs: [],
+    stream: { mode: "fixed", floor_kbps: 2000, ceiling_kbps: 2000 },
+  });
+
+  it("accepts h265 (R-CAM-08)", () => {
+    const r = ConfigSchema.safeParse({ ...seed, cameras: [camera("h265")] });
+    expect(r.success).toBe(true);
+    if (r.success) expect(r.data.cameras[0].codec).toBe("h265");
+  });
+
+  it("still defaults to h264, and still refuses a codec it does not have", () => {
+    const { codec: _dropped, ...without } = camera("h264");
+    const r = ConfigSchema.safeParse({ ...seed, cameras: [without] });
+    expect(r.success).toBe(true);
+    if (r.success) expect(r.data.cameras[0].codec).toBe("h264");
+    const bad = ConfigSchema.safeParse({ ...seed, cameras: [camera("hevc")] });
+    expect(bad.success).toBe(false);
+    if (!bad.success) expect(bad.error.issues[0].path).toEqual(["cameras", 0, "codec"]);
   });
 });

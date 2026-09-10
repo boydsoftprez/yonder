@@ -1,0 +1,27 @@
+{
+  "platform": "darwin",
+  "viewport": {
+    "w": 1280,
+    "h": 900
+  },
+  "widgets": [
+    {
+      "key": "nrdb-ui-group",
+      "box": {
+        "x": 268,
+        "y": 76,
+        "w": 1000,
+        "h": 453
+      }
+    },
+    {
+      "key": "nrdb-ui-widget.nrdb-ui-yonder-settings",
+      "box": {
+        "x": 285,
+        "y": 148,
+        "w": 966,
+        "h": 364
+      }
+    }
+  ]
+}

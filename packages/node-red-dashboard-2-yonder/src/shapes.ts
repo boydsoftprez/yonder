@@ -23,8 +23,16 @@ export interface DataCell {
    * character — an SSID, an address, a version — which is set in the mono
    * face for the reason `theme.ts` gives: a slashed zero and a fixed width
    * are what make an identifier checkable.
+   *
+   * `note` is the third: a **sentence** rather than a reading — a run state
+   * with the supervisor's failure reason on it, or why a start would be
+   * refused. It wraps, on a line of its own, because a reading's own rules
+   * (never shrink below the value, never break the line) are what make a bar
+   * of readings legible and are exactly what a sentence cannot live under:
+   * one 104-character reason took the camera strip 798 px wide inside a
+   * 710 px page. `YonderDataBar.vue`'s own doc comment carries the rest.
    */
-  kind?: "plain" | "id";
+  kind?: "plain" | "id" | "note";
 }
 
 /** One key of the soft-key rail. */
@@ -41,3 +49,19 @@ export interface SoftKey {
   /** Marks the key for the page currently shown. */
   active?: boolean;
 }
+
+/**
+ * One row of the facts row (R-UI-20), and one output on the budget track
+ * (R-VID-11) — **both from yonder-core, not declared again here.**
+ *
+ * `capabilityFacts()` and `uplinkBudget()` produce these and the daemon sends
+ * them; these components draw them. Two declarations of the same shape is two
+ * things to keep in step, and the one that drifts is the one nothing imports:
+ * a state added to `capability.ts` later would leave this file's union
+ * quietly wrong and the row drawing an unknown state as a known one.
+ *
+ * From `yonder-core/presentation` rather than the package's main entry, which
+ * pulls in the config loader and `node:fs` — the reason that second entry
+ * point exists.
+ */
+export type { CapabilityFact, BudgetSegment } from "yonder-core/presentation";

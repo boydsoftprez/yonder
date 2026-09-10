@@ -1,0 +1,198 @@
+{
+  "platform": "darwin",
+  "viewport": {
+    "w": 1440,
+    "h": 900
+  },
+  "widgets": [
+    {
+      "key": "nrdb-ui-group#0",
+      "box": {
+        "x": 268,
+        "y": 76,
+        "w": 769,
+        "h": 442
+      }
+    },
+    {
+      "key": "nrdb-ui-widget.nrdb-ui-yonder-picture",
+      "box": {
+        "x": 285,
+        "y": 93,
+        "w": 735,
+        "h": 408
+      }
+    },
+    {
+      "key": "nrdb-ui-group#1",
+      "box": {
+        "x": 1049,
+        "y": 76,
+        "w": 379,
+        "h": 442
+      }
+    },
+    {
+      "key": "nrdb-ui-widget.nrdb-ui-yonder-aim",
+      "box": {
+        "x": 1066,
+        "y": 93,
+        "w": 345,
+        "h": 228
+      }
+    },
+    {
+      "key": "nrdb-ui-widget.nrdb-ui-yonder-annunciator",
+      "box": {
+        "x": 1066,
+        "y": 333,
+        "w": 345,
+        "h": 48
+      }
+    },
+    {
+      "key": "nrdb-ui-group#2",
+      "box": {
+        "x": 268,
+        "y": 530,
+        "w": 1160,
+        "h": 82
+      }
+    },
+    {
+      "key": "nrdb-ui-widget.nrdb-ui-yonder-databar",
+      "box": {
+        "x": 285,
+        "y": 547,
+        "w": 1126,
+        "h": 48
+      }
+    },
+    {
+      "key": "nrdb-ui-group.yonder-deck-setup#0",
+      "box": {
+        "x": 268,
+        "y": 624,
+        "w": 1160,
+        "h": 1222
+      }
+    },
+    {
+      "key": "nrdb-ui-widget.nrdb-ui-yonder-deck",
+      "box": {
+        "x": 285,
+        "y": 641,
+        "w": 1126,
+        "h": 1188
+      }
+    },
+    {
+      "key": "nrdb-ui-group.yonder-captures",
+      "box": {
+        "x": 268,
+        "y": 1858,
+        "w": 1160,
+        "h": 145
+      }
+    },
+    {
+      "key": "nrdb-ui-widget.nrdb-ui-yonder-captures",
+      "box": {
+        "x": 285,
+        "y": 1875,
+        "w": 1126,
+        "h": 111
+      }
+    },
+    {
+      "key": "nrdb-ui-group#3",
+      "box": {
+        "x": 268,
+        "y": 2015,
+        "w": 1160,
+        "h": 112
+      }
+    },
+    {
+      "key": "nrdb-ui-widget.nrdb-ui-yonder-databar",
+      "box": {
+        "x": 285,
+        "y": 2032,
+        "w": 1126,
+        "h": 78
+      }
+    },
+    {
+      "key": "nrdb-ui-group.yonder-deck-setup#1",
+      "box": {
+        "x": 268,
+        "y": 2139,
+        "w": 1160,
+        "h": 352
+      }
+    },
+    {
+      "key": "nrdb-ui-widget.nrdb-ui-yonder-identity#0",
+      "box": {
+        "x": 285,
+        "y": 2156,
+        "w": 1126,
+        "h": 48
+      }
+    },
+    {
+      "key": "nrdb-ui-widget.nrdb-ui-yonder-identity#1",
+      "box": {
+        "x": 285,
+        "y": 2216,
+        "w": 1126,
+        "h": 48
+      }
+    },
+    {
+      "key": "nrdb-ui-widget.nrdb-ui-yonder-identity#2",
+      "box": {
+        "x": 285,
+        "y": 2276,
+        "w": 1126,
+        "h": 48
+      }
+    },
+    {
+      "key": "nrdb-ui-widget.nrdb-ui-yonder-identity#3",
+      "box": {
+        "x": 285,
+        "y": 2336,
+        "w": 1126,
+        "h": 48
+      }
+    },
+    {
+      "key": "nrdb-ui-widget.nrdb-ui-yonder-databar",
+      "box": {
+        "x": 285,
+        "y": 2396,
+        "w": 1126,
+        "h": 78
+      }
+    },
+    {
+      "key": "nrdb-ui-group.yonder-deck-setup.yonder-rail",
+      "box": {
+        "x": 268,
+        "y": 818,
+        "w": 1160,
+        "h": 82
+      }
+    },
+    {
+      "key": "nrdb-ui-widget.nrdb-ui-yonder-softkeys",
+      "box": {
+        "x": 285,
+        "y": 835,
+        "w": 1126,
+        "h": 48
+      }
+    }
+  ]
+}

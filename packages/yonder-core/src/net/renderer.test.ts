@@ -300,6 +300,41 @@ const argvOf = (calls: string[][], verb: string, name: string) =>
   calls.find((c) => c[1] === "connection" && c[2] === verb && c[3] === name);
 
 describe("NetworkRenderer", () => {
+  it("reads modem routes on the IP interface and reapplies the NetworkManager control device", async () => {
+    const config = structuredClone(DEFAULT_CONFIG);
+    config.network.ap.enabled = false; config.network.modem.enabled = true;
+    for (const oldMetric of [700, 800]) {
+      const { renderer, calls } = harness({
+        devices: "cdc-wdm0:gsm:connected:yonder-modem\n", connections: [MODEM_CONNECTION],
+        fails: {
+          "nmcli -g GENERAL.IP-IFACE device show cdc-wdm0": { code: 0, stdout: "wwan0\n", stderr: "" },
+          "ip -j -4 route show default dev cdc-wdm0": { code: 1, stdout: "", stderr: 'Cannot find device "cdc-wdm0"' },
+          "ip -j -6 route show default dev cdc-wdm0": { code: 1, stdout: "", stderr: 'Cannot find device "cdc-wdm0"' },
+          "ip -j -4 route show default dev wwan0": { code: 0, stdout: JSON.stringify([{ dst: "default", metric: oldMetric }]), stderr: "" },
+          "ip -j -6 route show default dev wwan0": { code: 0, stdout: "[]", stderr: "" },
+        },
+      });
+      await renderer.render(config);
+      expect(calls.some(c => c[0] === "ip" && c.includes("cdc-wdm0"))).toBe(false);
+      expect(calls.some(c => c.join(" ") === "ip -j -4 route show default dev wwan0")).toBe(true);
+      expect(calls.some(c => c.join(" ") === "nmcli device reapply cdc-wdm0")).toBe(oldMetric !== 700);
+    }
+  });
+  it("takes changed default-route metrics live without reapplying already-correct routes", async () => {
+    const config = structuredClone(DEFAULT_CONFIG); config.network.ap.enabled = false;
+    for (const oldMetric of [100, 800]) {
+      const { renderer, calls } = harness({
+        devices: "eth0:ethernet:connected:yonder-eth\n", connections: [ETHERNET_CONNECTION],
+        fails: {
+          "ip -j -4 route show default dev eth0": { code: 0, stdout: JSON.stringify([{ dst: "default", dev: "eth0", metric: oldMetric }]), stderr: "" },
+          "ip -j -6 route show default dev eth0": { code: 0, stdout: "[]", stderr: "" },
+        },
+      });
+      await renderer.render(config);
+      expect(calls.some(c => c.join(" ") === "nmcli device reapply eth0")).toBe(oldMetric !== 100);
+      expect(calls.some(c => c[1] === "connection" && ["down", "up"].includes(c[2]!))).toBe(false);
+    }
+  });
   it("creates the access point and the ethernet profile", async () => {
     const { renderer, calls } = harness();
     await renderer.render(DEFAULT_CONFIG);
@@ -1122,6 +1157,19 @@ describe("NetworkRenderer and a modem whose settings changed", () => {
     });
     await renderer.render(onApn("ereseller"));
     expect(verbs(calls)).toEqual(["modify"]);
+  });
+
+  it("does not cancel boot dialling because nmcli masks the password (R-CEL-06)", async () => {
+    const { renderer, calls } = harness({
+      devices: MODEM_DEVICES.replace("gsm:connected:", "gsm:connecting (prepare):"),
+      connections: [AP_CONNECTION, ETHERNET_CONNECTION, MODEM_CONNECTION],
+      dialled: { "gsm.apn": "ereseller", "gsm.password": "<hidden>" },
+    });
+    await renderer.render(onApn("ereseller"));
+    expect(verbs(calls)).toEqual(["modify"]);
+    const modify = argvOf(calls, "modify", MODEM_CONNECTION)!;
+    expect(modify[modify.indexOf("connection.autoconnect-retries") + 1]).toBe("0");
+    expect(calls.some((c) => c.includes("--show-secrets"))).toBe(false);
   });
 
   it("does not cycle the link when only the route metric moved", async () => {

@@ -1,0 +1,18 @@
+# SPDX-License-Identifier: GPL-3.0-or-later
+[Unit]
+Description=SeekerHD automatic exposure and white balance
+Requires=yonder-seekerhd.service
+After=yonder-seekerhd.service
+Before=yonder-core.service
+
+[Service]
+Type=notify
+Environment=LD_LIBRARY_PATH=/usr/local/lib/yonder-seekerhd
+ExecStart=/usr/local/lib/yonder-seekerhd/rkaiq_3A_server
+ExecStartPost=/usr/bin/python3 /usr/local/lib/yonder-seekerhd/prepare.py
+Restart=on-failure
+RestartSec=3
+TimeoutStartSec=45
+
+[Install]
+WantedBy=multi-user.target

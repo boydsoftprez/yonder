@@ -1,6 +1,7 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 import { systemClock, type Clock, type Renderer } from "../apply/types.js";
 import type { Config } from "../schema/config.js";
+import { routeMetricDiffers } from "./route-metrics.js";
 import type { SecretStore } from "../secrets/store.js";
 import { NmcliClient, type DeviceInfo } from "./nmcli/client.js";
 import { enableWifiRadio, radioWanted } from "./radio.js";
@@ -383,6 +384,27 @@ export class NetworkRenderer implements Renderer {
           + `created again as a ${profile.type} one`,
         );
       }
+    }
+
+    // Stored metrics do not update an already active connection. Reapply
+    // only a present, connected profile we just wrote, never a missing
+    // modem or its in-progress boot dial. No second profile write is needed.
+    for (const profile of desired) {
+      if (!EGRESS_CONNECTIONS.some(([name]) => name === profile.name)) continue;
+      if (profile.name === MODEM_CONNECTION && redial.length > 0) continue;
+      const active = devices.find(d => d.connection === profile.name && d.state === "connected");
+      const metric = Number(profile.settings.find(([name]) => name === "ipv4.route-metric")?.[1]);
+      if (!active || !Number.isFinite(metric)) continue;
+      // NetworkManager addresses a modem by its control port (cdc-wdm0);
+      // the kernel routes packets on its IP interface (wwan0). Reapply still
+      // goes to the NM device, but route observations must use the IP name.
+      const ipDevice = active.type === "gsm"
+        ? (await this.client.exec(["nmcli", "-g", "GENERAL.IP-IFACE", "device", "show", active.device])).trim()
+        : active.device;
+      if (!ipDevice || ipDevice === "--") continue; // IP layer not present yet.
+      if (!/^[a-zA-Z0-9][a-zA-Z0-9_.:-]{0,14}$/.test(ipDevice)) throw new Error("Invalid IP interface reported by NetworkManager");
+      if (await routeMetricDiffers(this.client.runner, ipDevice, metric))
+        await this.client.reapply(active.device);
     }
 
     // The radio, arbitrated (K-13). One radio can be an access point or a

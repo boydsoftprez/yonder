@@ -1,0 +1,252 @@
+<style>
+  .y-wrap { --display:#04060a; --pane:#090d12; --divider:#2b333c; --label:#7f8a95;
+            --value:#e8ecf0; --track:#161b21; --select:#2ad4f0; --irrev:#f03fce;
+            --good:#35d06a; --waiting:#ffcf28; --neutral:#6b7580;
+            font-family: ui-sans-serif, system-ui, -apple-system, "Segoe UI", Roboto, sans-serif; }
+
+  /* the airframe: carbon, exactly as theme.ts generates it */
+  .y-panel {
+    background-color:#12151a;
+    background-image:
+      radial-gradient(120% 80% at 22% 0%, rgba(255,255,255,0.07), transparent 62%),
+      repeating-linear-gradient(45deg, rgba(255,255,255,0.03) 0 1px, transparent 1px 3px),
+      linear-gradient(45deg,#1e242b 25%,transparent 25%,transparent 75%,#1e242b 75%),
+      linear-gradient(45deg,#1e242b 25%,transparent 25%,transparent 75%,#1e242b 75%),
+      linear-gradient(135deg,#0d1014 25%,transparent 25%,transparent 75%,#0d1014 75%),
+      linear-gradient(135deg,#0d1014 25%,transparent 25%,transparent 75%,#0d1014 75%);
+    background-size:100% 100%,4px 4px,10px 10px,10px 10px,10px 10px,10px 10px;
+    background-position:0 0,0 0,0 0,5px 5px,0 0,5px 5px;
+    padding:14px 16px 16px; border-radius:5px; position:relative;
+    box-shadow: inset 0 1px 0 rgba(255,255,255,.06), 0 10px 26px rgba(0,0,0,.45);
+  }
+  .y-fastener { position:absolute; width:6px; height:6px; border-radius:50%;
+    background:radial-gradient(circle at 35% 30%, #6a737d, #23282e 70%); }
+  .y-fastener.tl{top:5px;left:5px}.y-fastener.tr{top:5px;right:5px}
+  .y-fastener.bl{bottom:5px;left:5px}.y-fastener.br{bottom:5px;right:5px}
+
+  .y-placard { font-size:9.5px; letter-spacing:.18em; text-transform:uppercase;
+    color:#8b949e; margin:0 2px 9px; display:flex; justify-content:space-between; }
+  .y-placard b { color:#c6ced6; font-weight:600; letter-spacing:.18em; }
+
+  /* the glass display */
+  .y-display { background:var(--display); border:1px solid var(--divider); border-radius:3px;
+    overflow:hidden; }
+
+  /* video */
+  .y-vid { position:relative; background-color:#7c8452;
+    background-image:
+      radial-gradient(120% 90% at 50% 125%, transparent 38%, rgba(0,0,0,.5)),
+      linear-gradient(to bottom, rgba(163,193,216,0) 0 20%, rgba(198,208,196,.55) 20% 23.5%, transparent 23.5%),
+      repeating-linear-gradient(107deg, rgba(118,130,79,.6) 0 34px, rgba(163,152,102,.5) 34px 63px, rgba(88,104,64,.6) 63px 91px),
+      repeating-linear-gradient(25deg, rgba(70,60,35,.16) 0 44px, transparent 44px 118px),
+      linear-gradient(to bottom, #a3c1d8 0 20%, #78854f 20%);
+  }
+  .y-osd { position:absolute; font-size:9px; letter-spacing:.06em; color:#fff;
+    background:rgba(4,6,10,.62); border:1px solid rgba(255,255,255,.14);
+    border-radius:2px; padding:4px 6px; line-height:1.5; font-variant-numeric:tabular-nums; }
+  .y-osd .k{color:#b9c3cc; margin-right:8px}
+  .y-rec { position:absolute; top:8px; left:8px; font-size:9px; letter-spacing:.1em;
+    color:#fff; background:rgba(4,6,10,.62); border:1px solid rgba(255,64,52,.6);
+    border-radius:2px; padding:3px 6px; }
+  .y-rec i { display:inline-block; width:6px;height:6px;border-radius:50%;
+    background:#ff4034; margin-right:5px; vertical-align:middle; }
+
+  /* instrument primitives */
+  .y-grp { border-top:1px solid var(--divider); padding:9px 10px; }
+  .y-grp:first-child{border-top:0}
+  .y-grp-h { font-size:8.5px; letter-spacing:.16em; text-transform:uppercase;
+    color:var(--label); margin-bottom:7px; }
+  .y-row { display:flex; align-items:center; justify-content:space-between;
+    padding:3px 0; font-size:11px; }
+  .y-row .l { color:var(--label); font-size:9px; letter-spacing:.1em; text-transform:uppercase; }
+  .y-row .v { color:var(--value); font-variant-numeric:tabular-nums; font-weight:600; }
+  .y-bar { height:7px; background:var(--track); border-radius:1px; position:relative;
+    margin:5px 0 2px; overflow:hidden; }
+  .y-bar span { position:absolute; inset:0 auto 0 0; background:var(--select); }
+  .y-bar u { position:absolute; top:-2px; bottom:-2px; width:2px; background:var(--waiting); }
+  .y-seg { display:flex; gap:3px; }
+  .y-seg b { flex:1; text-align:center; font-size:9px; font-weight:500; padding:5px 0;
+    border:1px solid var(--divider); color:var(--label); border-radius:2px; }
+  .y-seg b.on { border-color:var(--select); color:var(--select); background:rgba(42,212,240,.09); }
+  .y-ann { display:inline-flex; align-items:center; gap:5px; font-size:9px;
+    letter-spacing:.1em; text-transform:uppercase; padding:3px 7px; border-radius:2px;
+    border:1px solid var(--good); color:var(--good); background:rgba(53,208,106,.1); }
+  .y-ann i{width:5px;height:5px;border-radius:50%;background:var(--good);display:block}
+
+  /* soft key rail */
+  .y-keys { display:flex; gap:6px; border-top:1px solid var(--divider);
+    padding:8px 10px; background:rgba(255,255,255,.015); }
+  .y-keys b { font-size:9px; font-weight:600; letter-spacing:.09em; text-transform:uppercase;
+    padding:7px 12px; border:1px solid var(--select); color:var(--select); border-radius:2px;
+    background:rgba(42,212,240,.07); }
+  .y-keys b.irrev { border-color:var(--irrev); color:var(--irrev); background:rgba(240,63,206,.07); }
+  .y-keys b.off { border-color:var(--divider); color:var(--neutral); background:none; }
+  .y-keys .sp { flex:1 }
+
+  .y-note { font-size:12px; color:var(--yonder-muted, #8b949e); margin:10px 2px 0; line-height:1.55 }
+  .y-opt { margin:0 0 30px; }
+  .y-opt.sel .y-panel { outline:2px solid #2ad4f0; outline-offset:3px }
+  .y-head { display:flex; align-items:baseline; gap:10px; margin:0 0 9px }
+  .y-head h3 { margin:0; font-size:16px }
+  .y-head .tag { font-size:10px; letter-spacing:.12em; text-transform:uppercase;
+    color:#0b0f14; background:#2ad4f0; padding:2px 7px; border-radius:2px; font-weight:700 }
+  .y-cols { display:flex }
+  .y-cols > div { flex:1; border-left:1px solid var(--divider) }
+  .y-cols > div:first-child { border-left:0 }
+</style>
+
+<h2>Where does the picture sit against the controls?</h2>
+<p class="subtitle">One camera page, glass display in a carbon panel (ADR&#8209;0009). Night palette shown — day is the same layout in chart material, nothing moves. Actions are on the soft&#8209;key rail at the foot in all three, because that part is already settled.</p>
+
+<div class="options" style="display:block">
+
+<!-- ============ A ============ -->
+<div class="y-opt option" data-choice="a" onclick="toggleSelect(this)">
+  <div class="y-head"><h3>A — Picture left, control rail right</h3></div>
+  <div class="y-wrap"><div class="y-panel">
+    <i class="y-fastener tl"></i><i class="y-fastener tr"></i><i class="y-fastener bl"></i><i class="y-fastener br"></i>
+    <div class="y-placard"><span><b>CAMERA</b> &nbsp;·&nbsp; NOSE</span><span>USB &nbsp;·&nbsp; H.264 &nbsp;·&nbsp; 1920×1080p30</span></div>
+    <div class="y-display">
+      <div style="display:flex">
+        <div class="y-vid" style="flex:0 0 62%; height:300px">
+          <div class="y-rec"><i></i>REC 00:13:47</div>
+          <div class="y-osd" style="top:8px;right:8px"><span class="k">LINK</span>1.9 Mb/s<br><span class="k">DROP</span>0.0 %</div>
+          <div class="y-osd" style="left:8px;bottom:8px"><span class="k">ZOOM</span>1.0×<span class="k" style="margin-left:12px">TILT</span>−18°<span class="k" style="margin-left:12px">EV</span>−0.3</div>
+        </div>
+        <div style="flex:1; border-left:1px solid var(--divider)">
+          <div class="y-grp">
+            <div class="y-grp-h">Stream</div>
+            <div class="y-row"><span class="l">Resolution</span><span class="v">1920×1080 30</span></div>
+            <div class="y-row"><span class="l">Bitrate</span><span class="v">2.0 <span style="color:var(--label);font-weight:400">Mb/s</span></span></div>
+            <div class="y-bar"><span style="width:33%"></span><u style="left:41%"></u></div>
+            <div class="y-row" style="padding-top:1px"><span class="l" style="font-size:8px">actual 1.9 · commanded 2.4</span></div>
+          </div>
+          <div class="y-grp">
+            <div class="y-grp-h">Aim</div>
+            <div class="y-row"><span class="l">Zoom</span><span class="v">1.0×</span></div>
+            <div class="y-bar"><span style="width:8%"></span></div>
+            <div class="y-row"><span class="l">Tilt</span><span class="v">−18.0°</span></div>
+            <div class="y-bar"><span style="width:46%"></span><u style="left:52%"></u></div>
+          </div>
+          <div class="y-grp">
+            <div class="y-grp-h">Image</div>
+            <div class="y-seg"><b class="on">Normal</b><b>Mono</b><b>Sat</b></div>
+            <div class="y-row" style="margin-top:7px"><span class="l">Exposure</span><span class="v">auto</span></div>
+            <div class="y-row"><span class="l">White bal.</span><span class="v">sunny</span></div>
+          </div>
+        </div>
+      </div>
+      <div class="y-keys">
+        <b>Stop</b><b class="off">Snapshot</b><b class="off">Record</b><b class="off">Recentre</b>
+        <span class="sp"></span><b class="irrev">Apply</b>
+      </div>
+    </div>
+  </div></div>
+  <p class="y-note"><b>Adjust and see, without moving your eye far.</b> Every control sits at the same height as the picture it changes. On a phone, or a tablet held upright, the rail has nowhere to go and has to drop below the picture — so this layout becomes layout B at narrow widths, and we would be maintaining two.</p>
+</div>
+
+<!-- ============ B ============ -->
+<div class="y-opt option" data-choice="b" onclick="toggleSelect(this)">
+  <div class="y-head"><h3>B — Picture on top, control deck below</h3><span class="tag">Recommended</span></div>
+  <div class="y-wrap"><div class="y-panel">
+    <i class="y-fastener tl"></i><i class="y-fastener tr"></i><i class="y-fastener bl"></i><i class="y-fastener br"></i>
+    <div class="y-placard"><span><b>CAMERA</b> &nbsp;·&nbsp; NOSE</span><span>USB &nbsp;·&nbsp; H.264 &nbsp;·&nbsp; 1920×1080p30</span></div>
+    <div class="y-display">
+      <div class="y-vid" style="height:286px">
+        <div class="y-rec"><i></i>REC 00:13:47</div>
+        <div class="y-osd" style="top:8px;right:8px"><span class="k">LINK</span>1.9 Mb/s<br><span class="k">DROP</span>0.0 %</div>
+        <div class="y-osd" style="left:8px;bottom:8px"><span class="k">ZOOM</span>1.0×<span class="k" style="margin-left:12px">TILT</span>−18°<span class="k" style="margin-left:12px">EV</span>−0.3</div>
+      </div>
+      <div style="border-top:1px solid var(--divider); padding:7px 10px; display:flex; gap:16px; align-items:center">
+        <span class="y-ann"><i></i>Streaming</span>
+        <span style="font-size:9px;letter-spacing:.1em;color:var(--label);text-transform:uppercase">Browser <b style="color:var(--value)">1</b></span>
+        <span style="font-size:9px;letter-spacing:.1em;color:var(--label);text-transform:uppercase">Ground station <b style="color:var(--value)">192.168.2.10:5604</b></span>
+        <span style="font-size:9px;letter-spacing:.1em;color:var(--label);text-transform:uppercase">RTSP <b style="color:var(--value)">:8554/nose</b></span>
+      </div>
+      <div class="y-cols">
+        <div>
+          <div class="y-grp">
+            <div class="y-grp-h">Stream</div>
+            <div class="y-row"><span class="l">Resolution</span><span class="v">1920×1080 30</span></div>
+            <div class="y-row"><span class="l">Codec</span><span class="v">H.264</span></div>
+            <div class="y-row"><span class="l">Bitrate</span><span class="v">2.0 <span style="color:var(--label);font-weight:400">Mb/s</span></span></div>
+            <div class="y-bar"><span style="width:33%"></span><u style="left:41%"></u></div>
+            <div class="y-row" style="padding-top:1px"><span class="l" style="font-size:8px">actual 1.9 · commanded 2.4</span></div>
+          </div>
+        </div>
+        <div>
+          <div class="y-grp">
+            <div class="y-grp-h">Aim</div>
+            <div class="y-row"><span class="l">Zoom</span><span class="v">1.0×</span></div>
+            <div class="y-bar"><span style="width:8%"></span></div>
+            <div class="y-row"><span class="l">Tilt</span><span class="v">−18.0°</span></div>
+            <div class="y-bar"><span style="width:46%"></span><u style="left:52%"></u></div>
+            <div class="y-row"><span class="l">Pan</span><span class="v">+04.5°</span></div>
+            <div class="y-bar"><span style="width:52%"></span></div>
+          </div>
+        </div>
+        <div>
+          <div class="y-grp">
+            <div class="y-grp-h">Image</div>
+            <div class="y-seg"><b class="on">Normal</b><b>Mono</b><b>Sat</b></div>
+            <div class="y-row" style="margin-top:7px"><span class="l">Exposure</span><span class="v">auto</span></div>
+            <div class="y-row"><span class="l">White bal.</span><span class="v">sunny</span></div>
+            <div class="y-row"><span class="l">Flip</span><span class="v">180° / 0°</span></div>
+            <div class="y-row"><span class="l">HDR</span><span class="v" style="color:var(--neutral)">not supported</span></div>
+          </div>
+        </div>
+      </div>
+      <div class="y-keys">
+        <b>Stop</b><b class="off">Snapshot</b><b class="off">Record</b><b class="off">Recentre</b><b class="off">Receive line</b>
+        <span class="sp"></span><b class="irrev">Apply</b>
+      </div>
+    </div>
+  </div></div>
+  <p class="y-note"><b>One layout at every width.</b> Three columns on a desk, two on a tablet, one on a phone — nothing is rearranged, only rewrapped, so there is one page to design and one page to capture. The deck also has room for the readout strip under the picture, which is where "what is this camera actually doing right now" belongs. The picture is smaller than in A; on a 1024&#8239;px tablet it is still about 750×420, which is more than enough to judge framing, focus and exposure.</p>
+</div>
+
+<!-- ============ C ============ -->
+<div class="y-opt option" data-choice="c" onclick="toggleSelect(this)">
+  <div class="y-head"><h3>C — Picture fills the display, controls slide over it</h3></div>
+  <div class="y-wrap"><div class="y-panel">
+    <i class="y-fastener tl"></i><i class="y-fastener tr"></i><i class="y-fastener bl"></i><i class="y-fastener br"></i>
+    <div class="y-placard"><span><b>CAMERA</b> &nbsp;·&nbsp; NOSE</span><span>USB &nbsp;·&nbsp; H.264 &nbsp;·&nbsp; 1920×1080p30</span></div>
+    <div class="y-display">
+      <div class="y-vid" style="height:352px; position:relative">
+        <div class="y-rec"><i></i>REC 00:13:47</div>
+        <div class="y-osd" style="top:8px;left:120px"><span class="k">LINK</span>1.9 Mb/s</div>
+        <div class="y-osd" style="left:8px;bottom:8px"><span class="k">ZOOM</span>1.0×<span class="k" style="margin-left:12px">TILT</span>−18°<span class="k" style="margin-left:12px">EV</span>−0.3</div>
+        <div style="position:absolute; top:0; right:0; bottom:0; width:44%;
+                    background:rgba(4,6,10,.9); border-left:1px solid var(--divider);
+                    backdrop-filter:blur(3px)">
+          <div class="y-grp">
+            <div class="y-grp-h">Stream</div>
+            <div class="y-row"><span class="l">Resolution</span><span class="v">1920×1080 30</span></div>
+            <div class="y-row"><span class="l">Bitrate</span><span class="v">2.0 <span style="color:var(--label);font-weight:400">Mb/s</span></span></div>
+            <div class="y-bar"><span style="width:33%"></span><u style="left:41%"></u></div>
+          </div>
+          <div class="y-grp">
+            <div class="y-grp-h">Aim</div>
+            <div class="y-row"><span class="l">Zoom</span><span class="v">1.0×</span></div>
+            <div class="y-bar"><span style="width:8%"></span></div>
+            <div class="y-row"><span class="l">Tilt</span><span class="v">−18.0°</span></div>
+            <div class="y-bar"><span style="width:46%"></span><u style="left:52%"></u></div>
+          </div>
+          <div class="y-grp">
+            <div class="y-grp-h">Image</div>
+            <div class="y-seg"><b class="on">Normal</b><b>Mono</b><b>Sat</b></div>
+          </div>
+        </div>
+      </div>
+      <div class="y-keys">
+        <b>Stop</b><b class="off">Snapshot</b><b class="off">Record</b><b>Stream ▸</b><b class="off">Aim ▸</b><b class="off">Image ▸</b>
+        <span class="sp"></span><b class="irrev">Apply</b>
+      </div>
+    </div>
+  </div></div>
+  <p class="y-note"><b>The biggest possible picture, and the closest to a real display head.</b> The cost is that a control panel covers the right of the frame while you use it — so on a camera you are aiming, the panel hides the part of the shot you are aiming <em>at</em>. It also needs a mode per panel, which multiplies what the build-time capture gate has to photograph (R&#8209;UI&#8209;12 already requires a page that hides part of itself to be captured in each of those parts).</p>
+</div>
+
+</div>
+
+<p class="subtitle" style="margin-top:26px">Everything here is placeholder content in the real palette — the readouts, the commanded-vs-actual marks and the soft keys are drawn to scale so you can judge weight and density, not to fix any particular control. Click an option to select it, and tell me in the terminal what you actually think.</p>

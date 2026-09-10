@@ -1,5 +1,6 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 import type { Config } from "../schema/config.js";
+import { brandDataUri } from "./brand.js";
 
 /**
  * Day and night, as two designed palettes rather than a theme and its
@@ -362,8 +363,15 @@ ${chromeCss(theme)}
   --yonder-space-5: 1.5rem;
   --yonder-radius: 4px;
 
-  /* Anything an operator has to hit. A gloved finger on a tablet strapped to
-     a leg is the input device this number is for (R-UI-04). */
+  /* Anything an operator has to hit.
+
+     44px is WCAG 2.5.5's enhanced target size: a floor that holds for a mouse,
+     a trackpad and a finger alike, which is why it can be stated without
+     knowing who is pointing. An earlier version of this comment justified the
+     number with a user nobody had — a gloved finger on a tablet strapped to a
+     leg — and cited R-UI-04 for it. R-UI-04 says "remain usable on a tablet in
+     the field" and nothing else. Recorded here because a fiction with a
+     requirement id beside it is the kind that gets rebuilt. */
   --yonder-touch: 44px;
 
   /* ---- the dashboard's own variables, pointed at ours ---------------- */
@@ -391,9 +399,8 @@ html, body {
 ${panelCss(theme)}
 
 /* ---- the bar across the top -----------------------------------------
-   Machined chrome, not a white slab. It carries the wordmark as a placard:
-   letterspaced caps with a dark shadow, the way a legend is engraved into a
-   panel rather than printed on a card. */
+   The airframe identity is drawn from the same SVG source as the login.
+   The SVG is embedded in this stylesheet so even the logo needs no request. */
 .v-app-bar,
 .v-app-bar.v-toolbar {
   background: transparent !important;
@@ -411,18 +418,33 @@ ${panelCss(theme)}
   text-shadow: 0 1px 1px var(--yonder-engraved);
 }
 
+.v-app-bar-title {
+  display: flex;
+  align-items: center;
+}
+
 .v-app-bar-title::before {
-  content: "YONDER";
+  content: url("${brandDataUri(theme)}") / "Yonder";
   display: inline-block;
+  width: 150px;
+  height: 31.7px;
+  box-sizing: content-box;
+  flex-shrink: 0;
   margin-right: var(--yonder-space-3);
   padding-right: var(--yonder-space-3);
   border-right: 1px solid var(--yonder-bezel);
   box-shadow: 1px 0 0 var(--yonder-lip);
-  font-size: 0.75rem;
-  font-weight: 800;
-  letter-spacing: 0.22em;
-  color: var(--yonder-select);
-  vertical-align: baseline;
+  vertical-align: middle;
+  line-height: 0;
+}
+
+@media (max-width: 400px) {
+  .v-app-bar-title::before {
+    /* A replaced pseudo-element retains the image's intrinsic dimensions. */
+    content: url("${brandDataUri(theme, 120)}") / "Yonder";
+    width: 120px;
+    height: 25.36px;
+  }
 }
 
 /* The navigation drawer is panel, not page. */
@@ -722,6 +744,74 @@ ${panelCss(theme)}
   opacity: 1;
 }
 
+/* The number input's label keeps the !important the measurement above
+   removed from the ui-form half. The two were measured separately: the
+   ui-form label reads 5.54:1 either way, and this one has only ever been
+   measured with it. Dropping it here would be an untested change to the
+   control whose night capture is what found the fault in the first place. */
+.nrdb-ui-number-input label,
+.nrdb-ui-number-input .v-label {
+  color: var(--yonder-label) !important;
+  opacity: 1 !important;
+}
+
+/* ---- sliders and number fields ----------------------------------------
+   Neither existed on this console until the camera page, so neither had ever
+   been given the palette. The night capture is what showed it: a slider's
+   label came through in Vuetify's own near-black, on the near-black panel,
+   with the track drawn straight across it — a control an operator could feel
+   for and not read. Nothing was wrong with the widget; nothing had looked.
+
+   The label goes above the track rather than beside it, because a label and a
+   track sharing a line is what put the two on top of each other. */
+.nrdb-ui-slider .v-input--horizontal {
+  display: block;
+}
+
+/* **The label is a bare span in .v-input__prepend, not a .v-label.**
+   Looked at, not assumed: the first rule written here targeted .v-label, it
+   matched nothing at all, and the capture came back with the label exactly as
+   dim as before. Vuetify's prepend slot carries the medium-emphasis opacity,
+   which is what dims it.
+
+   (No backticks anywhere in this file: the whole stylesheet is one template
+   literal, so a backtick in a comment ends it.) */
+.nrdb-ui-slider .v-input__prepend {
+  color: var(--yonder-label) !important;
+  opacity: 1 !important;
+  font-family: var(--yonder-font);
+  font-size: var(--yonder-size-label);
+  margin: 0 0 var(--yonder-space-1) 0;
+}
+
+/* The rail the thumb runs in: a recess, like every other input on this
+   console, rather than a pale line laid on the panel. */
+.nrdb-ui-slider .v-slider-track__background {
+  background: var(--yonder-pane) !important;
+  box-shadow: inset 0 1px 2px var(--yonder-seat);
+}
+
+.nrdb-ui-slider .v-slider-track__fill,
+.nrdb-ui-slider .v-slider-thumb__surface {
+  background: var(--yonder-accent) !important;
+}
+
+.nrdb-ui-number-input .v-field {
+  background: var(--yonder-pane) !important;
+  border-radius: 2px;
+  box-shadow: inset 0 1px 3px var(--yonder-seat);
+}
+
+.nrdb-ui-number-input .v-field__outline {
+  --v-field-border-opacity: 1;
+  color: var(--yonder-divider);
+}
+
+.nrdb-ui-number-input input {
+  font-family: var(--yonder-font-mono);
+  color: var(--yonder-value);
+}
+
 /* Visible, and visible in both palettes. A field device gets driven by
    keyboard more often than a desktop one, because a tablet keyboard is what
    is to hand. */
@@ -900,6 +990,21 @@ ${panelCss(theme)}
   overflow: visible !important;
 }
 
+/* R-UI-29: variable camera controls and refusal text own their height.
+   The Picture widget is deliberately absent: it retains a bounded slot. */
+.nrdb-ui-widget.yonder-content-height {
+  grid-row-end: auto !important;
+  grid-template-rows: none !important;
+  height: auto !important;
+  min-height: 0;
+  overflow: visible !important;
+}
+.nrdb-ui-widget.yonder-content-height > :first-child {
+  grid-row-end: auto !important;
+  min-height: 0;
+  height: auto;
+}
+
 /* ---- the command-state language, in CSS ------------------------------
    The tone names come from console/command.ts, so a control cannot mean one
    thing on one page and something else on another (ADR-0005, R-UI-05). */
@@ -908,7 +1013,21 @@ ${panelCss(theme)}
 .yonder-tone-good    { color: var(--yonder-good); font-weight: 600; }
 .yonder-tone-bad     { color: var(--yonder-bad); font-weight: 600; }
 
-/* The soft-key rail's group: part of the bezel, not another instrument. */
+/* The soft-key rail's group: part of the bezel, not another instrument.
+
+   And it stays put (spec §5, blueprint L-97). The deck under a picture can run
+   to twice the height of a notebook window, and a rail that scrolls away with
+   it is a page whose actions are somewhere below — which is how the operator
+   came to say that starting a camera was "all the way at the bottom and not
+   obvious". Sticky to the foot of the viewport, the rail is reachable at every
+   scroll position, and the gate now asserts that at the *top* of the page,
+   where a rail that merely sits at the end would be off-screen. */
+.nrdb-ui-group.yonder-rail,
+.yonder-rail {
+  position: sticky;
+  bottom: 0;
+  z-index: 3;
+}
 .nrdb-ui-group.yonder-rail > .v-card,
 .yonder-rail > .v-card {
   background: color-mix(in srgb, var(--yonder-pane) 82%, transparent) !important;

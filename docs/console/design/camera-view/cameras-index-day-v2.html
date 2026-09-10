@@ -1,0 +1,277 @@
+<style>
+  .options.y-list { display:block }
+  .options.y-list > .option { display:block; background:none; border:0; padding:0; margin:0 0 40px; border-radius:0; cursor:pointer }
+  .options.y-list > .option:hover { border-color:transparent }
+  .options.y-list > .option.selected { background:none }
+  .options.y-list > .option.selected .y-panel { outline:2px solid #2ad4f0; outline-offset:5px }
+  .options.y-list > .option .content { flex:none }
+
+  .y-wrap { max-width:1000px; font-family: ui-sans-serif, system-ui, -apple-system, "Segoe UI", Roboto, sans-serif }
+
+  /* NIGHT tokens */
+  .y-night { --display:#04060a; --pane:#090d12; --divider:#2b333c; --label:#7f8a95;
+             --value:#e8ecf0; --track:#161b21; --select:#2ad4f0; --irrev:#f03fce;
+             --good:#35d06a; --waiting:#ffcf28; --neutral:#6b7580; --bad:#ff4034;
+             --placard:#8b949e; --placard-b:#ccd4dc; --keybg:rgba(255,255,255,.015);
+             --pickbg:rgba(255,255,255,.02); --onTone:#04060a }
+  /* DAY tokens — the chart */
+  .y-day   { --display:#f6f1e3; --pane:#ede6d3; --divider:#c3b99e; --label:#6d6555;
+             --value:#1b1811; --track:#e0d8c2; --select:#2c5f8f; --irrev:#b23a7a;
+             --good:#2f6b4f; --waiting:#9a6a1c; --neutral:#7a7263; --bad:#a8322c;
+             --placard:#6d6555; --placard-b:#3d382c; --keybg:rgba(90,72,40,.045);
+             --pickbg:rgba(255,255,255,.5); --onTone:#ffffff }
+
+  /* the airframe: carbon at night */
+  .y-night .y-panel {
+    background-color:#12151a;
+    background-image:
+      radial-gradient(120% 80% at 22% 0%, rgba(255,255,255,0.07), transparent 62%),
+      repeating-linear-gradient(45deg, rgba(255,255,255,0.03) 0 1px, transparent 1px 3px),
+      linear-gradient(45deg,#1e242b 25%,transparent 25%,transparent 75%,#1e242b 75%),
+      linear-gradient(45deg,#1e242b 25%,transparent 25%,transparent 75%,#1e242b 75%),
+      linear-gradient(135deg,#0d1014 25%,transparent 25%,transparent 75%,#0d1014 75%),
+      linear-gradient(135deg,#0d1014 25%,transparent 25%,transparent 75%,#0d1014 75%);
+    background-size:100% 100%,4px 4px,10px 10px,10px 10px,10px 10px,10px 10px;
+    background-position:0 0,0 0,0 0,5px 5px,0 0,5px 5px;
+    box-shadow: inset 0 1px 0 rgba(255,255,255,.06), 0 12px 30px rgba(0,0,0,.5) }
+  /* the ground: terrain seen from above, by day */
+  .y-day .y-panel {
+    background-color:#e6dfcc;
+    background-image:
+      repeating-linear-gradient(0deg, rgba(90,72,40,0.05) 0 1px, transparent 1px 48px),
+      repeating-linear-gradient(90deg, rgba(90,72,40,0.05) 0 1px, transparent 1px 48px),
+      repeating-radial-gradient(ellipse 52% 40% at 24% 30%, transparent 0 15px, rgba(122,98,58,0.075) 15px 16px),
+      repeating-radial-gradient(ellipse 46% 38% at 74% 66%, transparent 0 17px, rgba(122,98,58,0.065) 17px 18px),
+      radial-gradient(60% 45% at 18% 22%, rgba(150,168,120,0.30), transparent 70%),
+      radial-gradient(52% 40% at 72% 30%, rgba(198,176,124,0.34), transparent 72%),
+      radial-gradient(46% 38% at 46% 78%, rgba(176,142,92,0.26), transparent 70%);
+    box-shadow: inset 0 1px 0 rgba(255,255,255,.5), 0 10px 26px rgba(90,72,40,.28) }
+  .y-panel { padding:16px 18px 18px; border-radius:5px; position:relative }
+  .y-fastener { position:absolute; width:7px; height:7px; border-radius:50%;
+    background:radial-gradient(circle at 35% 30%, #6a737d, #23282e 70%) }
+  .y-day .y-fastener { background:radial-gradient(circle at 35% 30%, #b9ad8e, #7d7259 70%) }
+  .y-fastener.tl{top:5px;left:5px}.y-fastener.tr{top:5px;right:5px}
+  .y-fastener.bl{bottom:5px;left:5px}.y-fastener.br{bottom:5px;right:5px}
+  .y-placard { font-size:10px; letter-spacing:.2em; text-transform:uppercase;
+    color:var(--placard); margin:0 2px 10px; display:flex; justify-content:space-between }
+  .y-placard b { color:var(--placard-b); font-weight:600; letter-spacing:.2em }
+  .y-display { background:var(--display); border:1px solid var(--divider); border-radius:3px; overflow:hidden }
+
+  .y-vid { position:relative; overflow:hidden; background:#0a0d12 }
+  .y-sky { position:absolute; left:0; right:0; top:0; height:23%;
+    background:linear-gradient(to bottom,#78a3c8 0%,#9dbcd4 55%,#c8d4d8 100%) }
+  .y-gnd { position:absolute; left:0; right:0; top:23%; bottom:0;
+    background-color:#7a8550;
+    background-image:
+      linear-gradient(to bottom, rgba(206,214,204,.75) 0, rgba(206,214,204,0) 9%),
+      radial-gradient(135% 95% at 50% 132%, transparent 28%, rgba(0,0,0,.48)),
+      repeating-linear-gradient(104deg, rgba(122,134,80,.68) 0 46px, rgba(168,156,104,.56) 46px 86px, rgba(82,98,58,.62) 86px 124px),
+      repeating-linear-gradient(21deg, rgba(66,56,32,.2) 0 60px, transparent 60px 156px) }
+  .y-gnd.down { top:0; background-image:
+      radial-gradient(135% 95% at 50% 50%, transparent 40%, rgba(0,0,0,.4)),
+      repeating-linear-gradient(63deg, rgba(122,134,80,.7) 0 38px, rgba(158,148,100,.6) 38px 70px, rgba(90,104,62,.66) 70px 104px) }
+  .y-gnd.tele { background-image:
+      linear-gradient(to bottom, rgba(212,218,210,.55) 0, rgba(212,218,210,0) 26%),
+      radial-gradient(135% 95% at 50% 132%, transparent 34%, rgba(0,0,0,.4)),
+      repeating-linear-gradient(96deg, rgba(132,142,92,.6) 0 78px, rgba(172,160,112,.5) 78px 142px, rgba(96,110,70,.55) 142px 206px) }
+  .y-dim { position:absolute; inset:0; background:#000; opacity:.42 }
+  .y-osd { position:absolute; font-size:10px; letter-spacing:.06em; color:#fff;
+    background:rgba(4,6,10,.66); border:1px solid rgba(255,255,255,.15);
+    border-radius:2px; padding:5px 7px; line-height:1.6; font-variant-numeric:tabular-nums }
+  .y-osd .k{color:#b9c3cc; margin-right:9px}
+
+  .y-grp { border-top:1px solid var(--divider); padding:11px 13px }
+  .y-grp:first-child{border-top:0}
+  .y-grp-h { font-size:9px; letter-spacing:.18em; text-transform:uppercase;
+    color:var(--label); margin-bottom:9px; display:flex; justify-content:space-between; gap:8px }
+  .y-grp-h em { font-style:normal; letter-spacing:.11em }
+  .y-row { display:flex; align-items:baseline; justify-content:space-between; padding:4px 0; font-size:12px; gap:10px }
+  .y-row .l { color:var(--label); font-size:9.5px; letter-spacing:.1em; text-transform:uppercase }
+  .y-row .v { color:var(--value); font-variant-numeric:tabular-nums; font-weight:600 }
+  .y-row .v em { color:var(--label); font-weight:400; font-style:normal; font-size:10px; text-transform:none }
+  .y-fine { font-size:9.5px; letter-spacing:.02em; color:var(--label); line-height:1.55 }
+  .y-mono { font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; font-size:10.5px }
+
+  /* the found list */
+  .y-cam { display:flex; align-items:center; gap:13px; padding:10px 13px;
+    border-top:1px solid var(--divider) }
+  .y-cam:first-child { border-top:0 }
+  .y-cam .th { flex:0 0 92px; height:52px; border:1px solid var(--divider); border-radius:2px;
+    position:relative; overflow:hidden }
+  .y-cam .nm { flex:0 0 128px }
+  .y-cam .nm b { display:block; font-size:13px; color:var(--value); font-weight:600; letter-spacing:.02em }
+  .y-cam .nm span { display:block; font-size:9.5px; color:var(--label); letter-spacing:.1em;
+    text-transform:uppercase; margin-top:2px }
+  .y-cam .sp2 { flex:1; min-width:0 }
+  .y-cam .sp2 .a { font-size:11.5px; color:var(--value); font-variant-numeric:tabular-nums }
+  .y-cam .sp2 .b { font-size:9.5px; color:var(--label); margin-top:3px }
+  .y-cam .st { flex:0 0 150px; text-align:right }
+  .y-cam .st .rate { font-size:11.5px; color:var(--value); font-weight:600;
+    font-variant-numeric:tabular-nums; margin-top:6px }
+  .y-cam .go { flex:0 0 auto; font-size:15px; color:var(--select) }
+
+  .y-rej { padding:10px 13px; border-top:1px solid var(--divider); display:flex; gap:13px }
+  .y-rej .dev { flex:0 0 128px; color:var(--label) }
+  .y-rej .why { flex:1; color:var(--value); font-size:11.5px; line-height:1.55 }
+  .y-rej .why em { font-style:normal; color:var(--label); font-size:10.5px }
+
+  .y-eb { margin:7px 0 2px }
+  .y-eb .top { display:flex; justify-content:space-between; align-items:baseline; gap:8px }
+  .y-eb .top .l { color:var(--label); font-size:9.5px; letter-spacing:.1em; text-transform:uppercase }
+  .y-eb .top .v { color:var(--value); font-weight:600; font-size:12px; font-variant-numeric:tabular-nums }
+  .y-eb .top .v em { color:var(--label); font-weight:400; font-style:normal; font-size:10px }
+  .y-eb .trk { width:190px; height:9px; background:var(--track); position:relative; margin:5px 0 0 }
+  .y-eb .trk span { position:absolute; inset:0 auto 0 0; background:var(--select) }
+  .y-eb .trk i { position:absolute; top:-3px; bottom:-3px; width:2px; background:var(--value) }
+  .y-eb .zn { width:190px; height:3px; display:flex; margin-top:2px }
+  .y-eb .zn b { display:block; height:3px }
+  .y-night .zn .ok{background:#1f6b3d}.y-night .zn .cau{background:#8a6a12}.y-night .zn .lim{background:#8c231c}
+  .y-day .zn .ok{background:#7fa07a}.y-day .zn .cau{background:#c9a349}.y-day .zn .lim{background:#bf7a72}
+
+  .y-ann { display:inline-flex; align-items:center; gap:6px; font-size:9.5px;
+    letter-spacing:.12em; text-transform:uppercase; padding:5px 10px; border-radius:2px;
+    border:1px solid var(--good); color:var(--good); background:color-mix(in srgb, var(--good) 12%, transparent);
+    font-variant-numeric:tabular-nums }
+  .y-ann i{width:6px;height:6px;border-radius:50%;background:var(--good);display:block}
+  .y-ann b, .y-ann em { text-transform:none; font-style:normal; letter-spacing:0 }
+  .y-ann.off{border-color:var(--divider);color:var(--neutral);background:none}
+  .y-ann.off i{background:var(--neutral)}
+  .y-ann.bad{border-color:var(--bad);color:var(--bad);background:color-mix(in srgb, var(--bad) 12%, transparent)}
+  .y-ann.bad i{background:var(--bad)}
+
+  .y-keys { display:flex; gap:7px; border-top:1px solid var(--divider); padding:10px 13px; background:var(--keybg) }
+  .y-keys b { font-size:10px; font-weight:600; letter-spacing:.09em; text-transform:uppercase;
+    padding:9px 14px; border:1px solid var(--divider); color:var(--neutral); border-radius:2px }
+  .y-keys b.live { border-color:var(--select); color:var(--select);
+    background:color-mix(in srgb, var(--select) 9%, transparent) }
+  .y-keys b.prim { border-color:var(--select); background:var(--select); color:var(--onTone) }
+  .y-keys .sp { flex:1 }
+  .y-cols { display:flex }
+  .y-cols > div { flex:1; border-left:1px solid var(--divider); min-width:0 }
+  .y-cols > div:first-child { border-left:0 }
+  .y-note { font-size:13.5px; color:var(--text-secondary); margin:14px 2px 0; line-height:1.6; max-width:1000px }
+  .y-head { display:flex; align-items:center; gap:12px; margin:0 0 11px; flex-wrap:wrap }
+  .y-head h3 { margin:0; font-size:17px }
+  .y-head .tag2 { font-size:10px; letter-spacing:.13em; text-transform:uppercase;
+    color:#04060a; background:#2ad4f0; padding:3px 8px; border-radius:2px; font-weight:700 }
+  .y-pair { display:grid; grid-template-columns:1fr 1fr; gap:18px; max-width:1000px }
+</style>
+
+<h2>Where a camera comes from, and what was rejected</h2>
+<p class="subtitle">R&#8209;CAM&#8209;12 wants detection on demand that reports <b>what was found, what was rejected and why</b> — and a rejection has nowhere to live on a page that belongs to a camera that exists. This is the missing surface. <b>Shown in the day palette</b>, which is the default and the one you fly in, and which nothing in this conversation has been drawn in yet.</p>
+
+<div class="options y-list">
+
+<div class="option" data-choice="index-page" onclick="toggleSelect(this)">
+  <div class="y-head"><h3>A Cameras page above the per&#8209;camera pages</h3><span class="tag2">Recommended</span></div>
+  <div class="y-wrap y-day"><div class="y-panel">
+    <i class="y-fastener tl"></i><i class="y-fastener tr"></i><i class="y-fastener bl"></i><i class="y-fastener br"></i>
+    <div class="y-placard"><span><b>Cameras</b></span><span>3 found &nbsp;·&nbsp; 2 rejected &nbsp;·&nbsp; detected 14:22:06</span></div>
+    <div class="y-display">
+      <div class="y-grp" style="padding-bottom:0"><div class="y-grp-h">Flying</div></div>
+      <div class="y-cam">
+        <div class="th"><div class="y-sky"></div><div class="y-gnd"></div></div>
+        <div class="nm"><b>Nose</b><span>USB · UVC</span></div>
+        <div class="sp2">
+          <div class="a">1920×1080 · 30 fps · H.264 <span style="color:var(--label)">hardware</span></div>
+          <div class="b y-mono">usb‑1.2 · ELP‑USBFHD01M · aim: none · zoom: none</div>
+        </div>
+        <div class="st"><span class="y-ann"><i></i>Streaming</span><div class="rate">1.9 Mb/s</div></div>
+        <div class="go">›</div>
+      </div>
+      <div class="y-cam">
+        <div class="th"><div class="y-gnd down"></div></div>
+        <div class="nm"><b>Belly</b><span>CSI</span></div>
+        <div class="sp2">
+          <div class="a">1280×720 · 30 fps · H.264 <span style="color:var(--label)">hardware</span></div>
+          <div class="b y-mono">cam0 · imx519 · aim: none · zoom: none · HDR</div>
+        </div>
+        <div class="st"><span class="y-ann"><i></i>Streaming</span><div class="rate">1.4 Mb/s</div></div>
+        <div class="go">›</div>
+      </div>
+      <div class="y-cam">
+        <div class="th"><div class="y-sky"></div><div class="y-gnd tele"></div></div>
+        <div class="nm"><b>Gimbal</b><span>USB accessory</span></div>
+        <div class="sp2">
+          <div class="a">1280×720 · 30 fps · H.264 <span style="color:var(--label)">re‑encoded</span></div>
+          <div class="b y-mono">Pocket 2 · aim: pan+tilt rate · zoom: digital crop · records to its own card</div>
+        </div>
+        <div class="st"><span class="y-ann off"><i></i>Idle</span></div>
+        <div class="go">›</div>
+      </div>
+
+      <div class="y-grp" style="padding-bottom:0"><div class="y-grp-h"><span>Seen, and not usable</span><em>why</em></div></div>
+      <div class="y-rej">
+        <div class="dev y-mono">/dev/video2</div>
+        <div class="why">Offers raw frames only — the fastest it will do at 1920×1080 is 5 fps.
+          <em>A camera has to hand us compressed frames to be worth flying.</em></div>
+      </div>
+      <div class="y-rej">
+        <div class="dev y-mono">/dev/video10</div>
+        <div class="why">Not a camera. It is this board's JPEG decoder, which advertises MJPEG and cannot be started.
+          <em>Listed because it looks like a camera to everything that asks (K&#8209;40).</em></div>
+      </div>
+
+      <div class="y-cols" style="border-top:1px solid var(--divider)">
+        <div><div class="y-grp">
+          <div class="y-grp-h">This board</div>
+          <div class="y-row"><span class="l">Encoder</span><span class="v">v4l2h264enc <em>probed</em></span></div>
+          <div class="y-row"><span class="l">Decoder</span><span class="v">software <em>jpegdec</em></span></div>
+          <div class="y-eb">
+            <div class="top"><span class="l">Encoding used</span><span class="v">21 <em>% of the board</em></span></div>
+            <div class="trk"><span style="width:21%"></span><i style="left:21%"></i></div>
+            <div class="zn"><b class="ok" style="width:60%"></b><b class="cau" style="width:25%"></b><b class="lim" style="width:15%"></b></div>
+          </div>
+          <div class="y-fine" style="margin-top:7px">room for one more 1080p30 stream</div>
+        </div></div>
+        <div><div class="y-grp">
+          <div class="y-grp-h"><span>Uplink</span><em style="color:var(--waiting)">near capacity</em></div>
+          <div class="y-eb">
+            <div class="top"><span class="l">All cameras</span><span class="v">3.3 <em>of 3.2 Mb/s</em></span></div>
+            <div class="trk"><span style="width:100%"></span><i style="left:97%"></i></div>
+            <div class="zn"><b class="ok" style="width:64%"></b><b class="cau" style="width:22%"></b><b class="lim" style="width:14%"></b></div>
+          </div>
+          <div class="y-fine" style="margin-top:7px">Nose 1.9 &nbsp;·&nbsp; Belly 1.4 &nbsp;·&nbsp; previews 0.4<br>
+            starting the gimbal would need 2.1 more</div>
+        </div></div>
+      </div>
+      <div class="y-keys">
+        <b class="live">Detect again</b><b>Add by address</b><span class="sp"></span><b class="prim">Apply</b>
+      </div>
+    </div>
+  </div></div>
+  <p class="y-note"><b>One page that answers "what does this aircraft have, and what did it refuse".</b> Each row goes to that camera's page; each row also says in one line what the capability probe actually got back, so <em>aim: none</em> on the nose camera explains why its page has no Aim group before you go looking. The two rejections are the ones you would really hit on your own bench today — a camera that only offers raw, and the board's broken JPEG decoder, which looks like a camera to everything that asks and will be tried once by every person who ever sees it.<br><br>The board and uplink totals belong here rather than on a camera's page, because both are shared: <em>starting the gimbal would need 2.1 more</em> is a sentence no single camera's page can say.</p>
+</div>
+
+</div>
+
+<h3 style="font-size:16px; margin-top:6px">And the same picture in both palettes</h3>
+<p class="subtitle" style="max-width:1000px; margin-bottom:14px">The layout does not change between them — that is ADR&#8209;0009's rule and it holds here. What does change is the video itself: a 400&#8209;nit rectangle in the middle of a night display undoes the dark adaptation the whole palette exists to protect, so <b>the picture carries its own dimming, on by default at night and off by day</b>, with the level on the pane rather than buried in settings. The instruments around it are the palette's job; the video is not, because it is a photograph and no stylesheet reaches inside it.</p>
+<div class="y-pair">
+  <div class="y-wrap y-day" style="max-width:none"><div class="y-panel" style="padding:12px 13px 13px">
+    <div class="y-placard" style="font-size:9px"><span><b>Camera</b> · Nose</span><span>Day</span></div>
+    <div class="y-display">
+      <div class="y-vid" style="height:180px">
+        <div class="y-sky"></div><div class="y-gnd"></div>
+        <div class="y-osd" style="left:8px;bottom:8px;font-size:9px"><span class="k">PAN</span>+04.5°<span class="k" style="margin-left:10px">TILT</span>−18.0°</div>
+      </div>
+      <div class="y-grp">
+        <div class="y-row"><span class="l">Picture</span><span class="v">full brightness</span></div>
+        <div class="y-eb"><div class="trk" style="width:100%"><span style="width:100%"></span><i style="left:99%"></i></div></div>
+      </div>
+    </div>
+  </div></div>
+  <div class="y-wrap y-night" style="max-width:none"><div class="y-panel" style="padding:12px 13px 13px">
+    <div class="y-placard" style="font-size:9px"><span><b>Camera</b> · Nose</span><span>Night</span></div>
+    <div class="y-display">
+      <div class="y-vid" style="height:180px">
+        <div class="y-sky"></div><div class="y-gnd"></div><div class="y-dim"></div>
+        <div class="y-osd" style="left:8px;bottom:8px;font-size:9px"><span class="k">PAN</span>+04.5°<span class="k" style="margin-left:10px">TILT</span>−18.0°</div>
+      </div>
+      <div class="y-grp">
+        <div class="y-row"><span class="l">Picture</span><span class="v">dimmed 58 %</span></div>
+        <div class="y-eb"><div class="trk" style="width:100%"><span style="width:42%"></span><i style="left:42%"></i></div></div>
+      </div>
+    </div>
+  </div></div>
+</div>

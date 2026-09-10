@@ -1,0 +1,36 @@
+{
+  "captured": "2026-09-10",
+  "purpose": "User documentation, not pixel baselines",
+  "files": {
+    "flight.png": {
+      "source": "production Flight widget in the real Dashboard header-preview harness",
+      "data": "synthetic aircraft telemetry; aircraft writes refused",
+      "bytes": 508461,
+      "sha256": "0f2fd06ddff2c6dd283ef94a7dac2f3586de61169b006340ce6dc8f7dcfa9700"
+    },
+    "network.png": {
+      "source": "verify-pages.sh / network-interfaces.day",
+      "data": "fixture kernel and NetworkManager observations",
+      "bytes": 248285,
+      "sha256": "dc421c720ab67a1a97c919836e84cc1537d8ebafaf5bbb13e7571b8704cf30d3"
+    },
+    "camera.png": {
+      "source": "verify-pages.sh / camera-notebook.day.fold",
+      "data": "stopped UVC fixture camera; no live image",
+      "bytes": 339780,
+      "sha256": "cb3740ef2ddca6b19f65ad0456a004a1df5daa7f2cf96fe80fa206bb75ee5462"
+    },
+    "diagnostics.png": {
+      "source": "verify-pages.sh / diagnostics.day",
+      "data": "idle fixture console; no public speed test executed",
+      "bytes": 222651,
+      "sha256": "c55dc2426519093225fb05df48e8f3fd75894e74a69197c327dc2808927af966"
+    },
+    "settings.png": {
+      "source": "verify-pages.sh / settings.day",
+      "data": "fixture console; password fields empty",
+      "bytes": 413137,
+      "sha256": "589fb93b37b66f96331b1828b22bd0f820e6f6bd45d7080d8023659e9e895814"
+    }
+  }
+}

@@ -1,0 +1,22 @@
+/* SPDX-License-Identifier: GPL-3.0-or-later */
+.y-maint { color: var(--yonder-value, #fff); background: var(--yonder-display, #04060a); font: 14px var(--yonder-font, system-ui, sans-serif); padding: 12px; min-width: 0; }
+.y-maint * { box-sizing: border-box; }
+.y-maint h3 { font-size: 16px; margin: 0; font-weight: 600; }
+.y-maint h4 { font-size: 14px; margin: 0 0 12px; }
+.y-maint p { line-height: 1.5; max-width: 88ch; }
+.y-maint__heading { display: flex; align-items: center; flex-wrap: wrap; gap: 12px; }
+.y-maint__heading > span { color: var(--yonder-label, #7f8a95); margin-left: auto; font-size: 12px; }
+.y-maint button, .y-maint input, .y-maint select { min-height: 44px; border-radius: 4px; border: 1px solid var(--yonder-divider, #2b333c); background: var(--yonder-pane, #090d12); color: var(--yonder-value, #fff); padding: 9px 12px; font: inherit; max-width: 100%; }
+.y-maint button { cursor: pointer; font-weight: 600; }
+.y-maint button:disabled { opacity: .45; cursor: default; }
+.y-maint button[aria-pressed=true], .y-maint .y-maint__primary { border-color: var(--yonder-select, #2ad4f0); color: var(--yonder-select, #2ad4f0); }
+.y-maint .y-maint__danger { color: var(--yonder-irreversible, #f03fce); border-color: currentColor; }
+.y-maint button:focus-visible, .y-maint input:focus-visible, .y-maint select:focus-visible, .y-maint pre:focus-visible { outline: 2px solid var(--yonder-select, #2ad4f0); outline-offset: 3px; }
+.y-maint label { display: flex; flex-direction: column; gap: 7px; font-size: 12px; color: var(--yonder-label, #7f8a95); min-width: 0; }
+.y-maint label input, .y-maint label select { width: 100%; font-size: 14px; }
+.y-maint code, .y-maint pre { font-family: var(--yonder-font-mono, monospace); text-transform: none; }
+.y-maint__muted { color: var(--yonder-label, #7f8a95); font-size: 12px; }
+.y-maint__error { color: var(--yonder-bad, #ff4034); }
+.y-maint__actions { display: flex; gap: 10px; flex-wrap: wrap; margin-top: 16px; }
+.y-maint__scroll { overflow-x: auto; }
+.y-maint__fields { display: grid; grid-template-columns: repeat(auto-fit, minmax(150px, 1fr)); gap: 12px; margin: 16px 0; }

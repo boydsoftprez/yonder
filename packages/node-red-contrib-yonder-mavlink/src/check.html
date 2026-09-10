@@ -1,0 +1,40 @@
+<!-- SPDX-License-Identifier: GPL-3.0-or-later -->
+<!--
+  The editor half of the path check.
+
+  Node-RED finds this by basename beside the node's .js, and without it the
+  flow editor shows the node as "unknown" even though the runtime registered
+  it. It is a form and a registration, and deliberately nothing else: no
+  behaviour lives here (CLAUDE.md rule 2 in spirit — a diff has to be
+  readable), and no asset is fetched from anywhere (R-UI-01).
+-->
+<script type="text/html" data-template-name="yonder-mav-check">
+  <div class="form-row">
+    <label for="node-input-name"><i class="fa fa-tag"></i> Name</label>
+    <input type="text" id="node-input-name" placeholder="Name" />
+  </div>
+</script>
+
+<script type="text/html" data-help-name="yonder-mav-check">
+<p>Reads <code>GET /mav/check</code> when a message arrives and draws the
+three-link chain R-DIA-04 asks for: the flight controller to Yonder, Yonder
+to the ground stations, and a ground station back to Yonder.</p>
+<p><code>pathCheck</code> in <code>yonder-core</code> has already decided the
+mark and written the sentence for each link; this node only joins the two
+as <code>${mark} · ${detail}</code>. A link nobody attempted draws
+<code>—</code>, never <code>✕</code> — an operator who deliberately stopped
+telemetry, or a device powered on two seconds ago, has not failed a check
+that was never run.</p>
+</script>
+
+<script type="text/javascript">
+  RED.nodes.registerType("yonder-mav-check", {
+    category: "yonder",
+    color: "#c7d4e0",
+    defaults: { name: { value: "" } },
+    inputs: 1,
+    outputs: 1,
+    icon: "font-awesome/fa-check-circle",
+    label: function () { return this.name || "mav path check"; },
+  });
+</script>

@@ -117,6 +117,29 @@ describe("ConsoleRenderer", () => {
     expect(readFileSync(join(publicDir, "theme.css"), "utf8")).toContain("--yonder-background");
   });
 
+  /**
+   * **The first paint carries its own theme (R-UI-22).**
+   *
+   * The stylesheet used to reach the page through a `ui-template`'s
+   * `@import`, injected over Dashboard's own socket connection — which does
+   * not exist until after the SPA has already booted, so the browser always
+   * painted an unstyled page first and the console flashed white on every
+   * load. Fixed by linking it from the served document's own head instead,
+   * through `dashboard.middleware` (`wiring.ts`'s `headInjection`), which is
+   * fetched with the document and paints once, correctly.
+   */
+  it("puts the generated stylesheet in the served document's head", async () => {
+    await renderer(ok, { provisioned: true }).render(config());
+    const settings = readFileSync(settingsPath, "utf8");
+    expect(settings).toMatch(/<link[^>]+rel="stylesheet"[^>]+\/yonder\/theme\.css/);
+  });
+
+  it("does not load the theme with an @import", async () => {
+    await renderer(ok, { provisioned: true }).render(config());
+    const settings = readFileSync(settingsPath, "utf8");
+    expect(settings).not.toContain("@import");
+  });
+
   it("writes the palette the configuration asks for", async () => {
     const night = config();
     night.ui.theme = "night";

@@ -1,0 +1,72 @@
+<!-- SPDX-License-Identifier: GPL-3.0-or-later -->
+<!--
+  The editor half of the picture. Node-RED finds this by basename beside the
+  node's .js; without it the widget registers and shows as "unknown node".
+  A form and a registration, nothing else (CLAUDE.md rule 2, R-UI-01).
+-->
+<script type="text/html" data-template-name="ui-yonder-picture">
+  <div class="form-row"><label for="node-input-group"><i class="fa fa-table"></i> Group</label>
+    <input type="text" id="node-input-group" /></div>
+  <div class="form-row"><label for="node-input-name"><i class="fa fa-tag"></i> Name</label>
+    <input type="text" id="node-input-name" placeholder="Name" /></div>
+  <div class="form-row"><label for="node-input-path"><i class="fa fa-video-camera"></i> Camera</label>
+    <input type="text" id="node-input-path" placeholder="cam0" /></div>
+  <div class="form-row"><label for="node-input-label"><i class="fa fa-font"></i> Label</label>
+    <input type="text" id="node-input-label" placeholder="Nose" /></div>
+  <div class="form-row"><label for="node-input-stillsAfterMs"><i class="fa fa-clock-o"></i> Stills after</label>
+    <input type="text" id="node-input-stillsAfterMs" placeholder="12000" /> ms</div>
+  <div class="form-row"><label for="node-input-stillsUrl"><i class="fa fa-picture-o"></i> Stills from</label>
+    <input type="text" id="node-input-stillsUrl" placeholder="(none)" /></div>
+  <div class="form-row"><label for="node-input-cost"><i class="fa fa-tachometer"></i> Cost</label>
+    <input type="text" id="node-input-cost" placeholder="374 kb/s" /></div>
+  <div class="form-tips">
+    <b>The camera id, not a path.</b> This widget always watches the cheap
+    preview copy (R-VID-13) and appends <code>-preview</code> itself, so a
+    page cannot spend a field uplink on the full-rate stream by being opened.
+    The full rate is a held key, never a default.
+    <br /><b>Stills after</b> is how long to wait for live video before falling
+    back to stills without being asked (R-VID-14). Twelve seconds is long
+    enough for a slow negotiation to finish and short enough that nobody is
+    left staring at nothing.
+  </div>
+</script>
+<script type="text/html" data-help-name="ui-yonder-picture">
+<p>The live picture over WebRTC (R-VID-03), fetched through the console's own
+route so it is behind the interface's credential, and always on the cheap
+preview copy (R-VID-13).</p>
+<p><b>When contact goes the picture is held, not blanked</b>, and four things
+happen at once: it desaturates, it darkens, it takes a hatch, and it carries a
+count of how long ago the last frame arrived. A badge alone is what an operator
+stops seeing after ten minutes. Going black would be unmistakable and would
+delete the one thing still held &mdash; where the camera was pointing and what
+was in shot when contact went.</p>
+<p><b>It reconnects on its own</b>, with backoff and a visible attempt count,
+and there is no button: the operator asked for a live picture and never
+withdrew the request.</p>
+<p><b>It falls back to stills without being asked</b> when live video cannot be
+established, and reports <i>why</i> &mdash; a browser blocked by a network, a
+carrier discarding UDP and a camera that has stopped producing frames all
+present as no picture, and only one of them is worth walking outside for.</p>
+<p>Sends <code>mode:live</code>, <code>mode:stills</code> or
+<code>mode:off</code> on <code>msg.payload</code> when the mode changes.
+Nothing here claims to know anything about the aircraft's other outputs: a
+console losing its own link says nothing whatever about the ground station's
+feed.</p>
+</script>
+<script type="text/javascript">
+  RED.nodes.registerType("ui-yonder-picture", {
+    category: "dashboard 2", color: "#c7e0d4",
+    defaults: {
+      name: { value: "" },
+      group: { type: "ui-group", required: true },
+      order: { value: 0 }, width: { value: 0 }, height: { value: 0 },
+      path: { value: "" }, label: { value: "" },
+      stillsAfterMs: { value: 12000 }, stillsUrl: { value: "" },
+      cost: { value: "" }
+    },
+    inputs: 1, outputs: 1,
+    icon: "font-awesome/fa-video-camera",
+    paletteLabel: "yonder picture",
+    label: function () { return this.name || this.label || this.path || "yonder picture"; }
+  });
+</script>

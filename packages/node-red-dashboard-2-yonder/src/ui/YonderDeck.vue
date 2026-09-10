@@ -1,0 +1,1744 @@
+<!-- SPDX-License-Identifier: GPL-3.0-or-later -->
+<script>
+import { h } from 'vue'
+import YonderIdentity from './YonderIdentity.vue'
+import { expireCameraSession } from './camera-session.ts'
+import YonderPlacard from './YonderPlacard.vue'
+import YonderColumn from './YonderColumn.vue'
+import YonderPicker from './YonderPicker.vue'
+import YonderSegmented from './YonderSegmented.vue'
+import YonderSetBar from './YonderSetBar.vue'
+import YonderTextField from './YonderTextField.vue'
+import YonderShutter from './YonderShutter.vue'
+import { createDraftStore, readCameraDrafts, saveCameraDrafts } from './draft.ts'
+import { cameraSessionMixin } from './camera-session.ts'
+import { videoAction } from './camera-workflow.ts'
+import { LABELS, captureDestination, captureRefusal, captureSizes, deckDraft, draftPathFor, endedWords, interruption } from 'yonder-core/presentation'
+
+/** One camera workspace: immediate camera controls, staged picture/output
+ * settings and a persistent transaction area. Source reports, pending status
+ * and operation results arrive as one hydration snapshot from the workspace
+ * adapter. The existing draft store remains the only local edit state. */
+export const CAPABILITY_LAYOUT = {
+  /* **`formats` is drawn by the Stream column's two pickers** (R-CAM-14,
+   * R-VID-07, blueprint L-51/L-56). It was a `CAPTURE FORMATS 10` readout
+   * here, which states a number where the requirement asks for the formats
+   * themselves: ten is not a fact an operator can act on, and it sat beside
+   * no control that offered any of them. The formats are now the Resolution
+   * and Frame rate menus, so this key's home is `buildStream()` — its own
+   * branch, like `turn`'s, because a size and its rates are two menus rather
+   * than one `pick`. */
+  formats: { group: 'stream', kind: 'capture' },
+  zoom: { group: 'optics', kind: 'bar' },
+  focus: { group: 'optics', kind: 'bar' },
+  exposure: { group: 'exposure', kind: 'bar' },
+  whiteBalance: { group: 'exposure', kind: 'bar' },
+  brightness: { group: 'colour', kind: 'bar' },
+  contrast: { group: 'colour', kind: 'bar' },
+  rotation: { group: 'orientation', kind: 'turn' },
+  aim: { group: 'aim', kind: 'aim' },
+  /* **One key, not two** (blueprint L-43/L-44). Both capabilities land on the
+   * same `shutter` kind and `buildCapture()` draws *one* control from
+   * whichever of them the MODE control has selected — the camera cannot
+   * record and photograph at once, so two keys drawn side by side is a lie
+   * about that, and it is the lie this deck shipped. `drawCapability()` is
+   * never called for either: the capture group owns the pair, the way
+   * `buildOrientation()` owns its three and `buildCaptureShape()` owns
+   * `formats`, because what is drawn depends on a fact outside any one key. */
+  recording: { group: 'capture', kind: 'shutter' },
+  stills: { group: 'capture', kind: 'shutter' },
+  saturation: { group: 'colour', kind: 'bar' },
+  hue: { group: 'colour', kind: 'bar' },
+  autoWhiteBalance: { group: 'exposure', kind: 'seg' },
+  gamma: { group: 'rendering', kind: 'bar' },
+  gain: { group: 'housekeeping', kind: 'bar' },
+  powerLineFrequency: { group: 'housekeeping', kind: 'pick' },
+  sharpness: { group: 'housekeeping', kind: 'bar' },
+  backlightCompensation: { group: 'housekeeping', kind: 'bar' },
+  autoExposure: { group: 'exposure', kind: 'pick' },
+  autoFocus: { group: 'optics', kind: 'seg' },
+  /* R-CTL-05's two switches, beside `rotation` in the same group — a flip is
+   * not a rotation, so each is its own on/off rather than more degrees on
+   * that bar.
+   *
+   * **`turn` is the fourth kind that draws through its own branch**, beside
+   * `formats` and the two shutters, and it is the only one whose reason is
+   * not the shape of the control. All three of these draw from
+   * `report.orientation` and never from `capabilities[key].state`, because
+   * that state answers a question about the *device* and this group is about
+   * *Yonder*: where the sensor will not turn the picture the board does,
+   * after decoding, so `not-offered` — the bench camera's answer to all
+   * three — must never reach `drawCapability()` here and become "this camera
+   * has none" over a control that works. `buildOrientation()` below is the
+   * branch, and `video/present.ts`'s own `deckOrientation()` is where that
+   * reasoning is written down. */
+  horizontalFlip: { group: 'orientation', kind: 'turn' },
+  verticalFlip: { group: 'orientation', kind: 'turn' },
+}
+
+/** Every key `CAPABILITY_LAYOUT` assigns to a group, in the order it draws —
+ * gate before the control it gates, matching the blueprint's own order. */
+const GROUP_KEYS = {
+  exposure: ['autoExposure', 'exposure', 'autoWhiteBalance', 'whiteBalance'],
+  colour: ['brightness', 'contrast', 'saturation', 'hue'],
+  optics: ['autoFocus', 'focus', 'zoom'],
+  rendering: ['gamma'],
+  // No `orientation` entry, deliberately: that group is built by
+  // `buildOrientation()` from `report.orientation.turns`, in the order
+  // `video/orientation.ts`'s own `FLIP_KEYS` gives, not from a second list of
+  // the same three keys here that could quietly disagree with it about order
+  // or membership. `buildGroup()` is never called for it.
+  housekeeping: ['gain', 'backlightCompensation', 'sharpness', 'powerLineFrequency'],
+}
+
+const GROUP_LEGEND = {
+  capture: 'Capture',
+  stream: 'Stream',
+  preview: 'Preview',
+  exposure: 'Exposure',
+  colour: 'Color',
+  optics: 'Optics',
+  rendering: 'Rendering',
+  orientation: 'Orientation',
+  housekeeping: 'Housekeeping',
+  outputs: 'Outputs',
+}
+
+/**
+ * Fixed column assignment (the operator's own correction, carried from the
+ * blueprint's `deck.js` round 2): each group always lands in the same visual
+ * slot, so a group's own fields changing — Stream's Floor/Ceiling with its
+ * link mode, Preview's ladder with Auto — changes that group's height only
+ * and never moves another group between columns. Preview sits alone because
+ * it is the tallest and most variable group.
+ */
+const IMAGE_SLOTS = [['capture'], ['exposure'], ['optics', 'colour'], ['rendering', 'housekeeping']]
+const CONFIG_SLOTS = [['stream'], ['preview'], ['streamColor', 'orientation']]
+const OUTPUT_PATH = { rtp: 'outputRtp', rtsp: 'outputRtsp', srt: 'outputSrt' }
+const DRAFT_LABELS = {
+  name:'Camera name', width:'Output width', height:'Output height', framerate:'Output frame rate', codec:'Output codec',
+  streamMode:'Stream bitrate mode', streamBitrate:'Stream bitrate', streamFloor:'Stream minimum bitrate', streamCeiling:'Stream maximum bitrate',
+  previewMode:'Preview bitrate mode', previewCodec:'Preview codec', previewSize:'Preview size', previewLadderBottom:'Smallest preview size', previewLadderTop:'Largest preview size',
+  previewFloor:'Preview minimum bitrate', previewCeiling:'Preview maximum bitrate', previewBitrate:'Preview bitrate', previewRate:'Preview frame rate',
+  rotation:'Rotation', horizontalFlip:'Mirror', verticalFlip:'Flip', outputRtp:'RTP output', outputRtsp:'RTSP output', outputSrt:'SRT output',
+  imageBrightness:'Stream brightness', imageContrast:'Stream contrast', imageSaturation:'Stream saturation', imageHue:'Stream hue',
+}
+
+
+const PREVIEW_SIZE_OPTIONS = [
+  { value: 'auto', label: 'Auto — steps with the link' },
+  { value: '1920x1080', label: '1920×1080 — hold' },
+  { value: '1280x720', label: '1280×720 — hold' },
+  { value: '854x480', label: '854×480 — hold' },
+  { value: '640x360', label: '640×360 — hold' },
+]
+const PREVIEW_RUNG_OPTIONS = [
+  { value: '640x360', label: '640×360' },
+  { value: '854x480', label: '854×480' },
+  { value: '1280x720', label: '1280×720' },
+  { value: '1920x1080', label: '1920×1080' },
+]
+
+/**
+ * The four quarter-turns, and only those (R-CTL-05).
+ *
+ * The eight orientations a mount can need are these four and the two flips
+ * that reach the other four — which is why this list is not eight entries
+ * long and why a mirror is a switch of its own rather than more degrees
+ * here. Degrees are written with the sign an operator reads, not `rotate`'s
+ * bare integer: `video/descriptors.ts` gives `rotation` no unit because a
+ * picker's own options carry it.
+ */
+const ROTATION_OPTIONS = [
+  { value: '0', label: '0°' },
+  { value: '90', label: '90°' },
+  { value: '180', label: '180°' },
+  { value: '270', label: '270°' },
+]
+
+const PREVIEW_RATE_OPTIONS = [
+  { value: '30', label: '30 fps' },
+  { value: '15', label: '15 fps' },
+  { value: '10', label: '10 fps' },
+]
+
+/** `schema/config.ts`'s own `"fixed" | "adaptive"` <-> the blueprint's own
+ * `"Fixed" | "Adaptive"` — the one conversion `appliedForDraft()` and the
+ * two render methods that read a mode share, so it is written once. */
+function toUiMode (schemaMode) {
+  return schemaMode === 'adaptive' ? 'Adaptive' : 'Fixed'
+}
+
+/**
+ * A bar's displayed precision, from its own step — never a value this file
+ * invents. `15600`'s own step is `100` (an integer), so `stepPrecision`
+ * reads `0` and the bar shows `15600`, not `15600.00`.
+ */
+function stepPrecision (step) {
+  if (!Number.isFinite(step) || step <= 0 || Number.isInteger(step)) return 0
+  const s = String(step)
+  const i = s.indexOf('.')
+  return i === -1 ? 0 : s.length - i - 1
+}
+
+/**
+ * The seam between the draft's UI-facing paths and the two shapes this
+ * report actually carries (Coordinator note, arrived mid-task): `values`,
+ * flat and already keyed by capability name, and `applied.stream`/
+ * `applied.preview`, nested and schema-cased. `draft.pending(camera,
+ * applied)` wants one flat object; this builds it fresh from `payload`,
+ * every time it is called — the caller (`pendingEdits` below) does the same,
+ * asking at the moment it is rendering from the payload rather than caching
+ * an answer from whenever the edit was staged, which is the whole point of
+ * `pending`'s own read-time filtering (Task 21).
+ *
+ * **A `null` in `values` is dropped, not carried through as `null`.** A
+ * control the camera did not report has nothing for a staged edit to be
+ * equal to — keeping the key would only ever produce a `pending` comparison
+ * against a value that means "unknown," never a real withdrawal the way a
+ * matching number does. Dropping it is silent in the one case that matters:
+ * a control the operator cannot see a reading for is not, today, one this
+ * deck lets them draft either (every draftable path here is `stream*` /
+ * `preview*` / `name`, never a capability key), so this never actually
+ * discards a live edit — it is a property of the whole payload, and its own
+ * test is here for when a caller is added that makes it matter.
+ */
+export function appliedForDraft (payload) {
+  const flat = {}
+  flat.outputRtsp = false
+  const image = payload?.policy?.image || { brightness: 0, contrast: 100, saturation: 100, hue: 0 }
+  for (const [key, path] of Object.entries({ brightness:'imageBrightness', contrast:'imageContrast', saturation:'imageSaturation', hue:'imageHue' })) flat[path] = image[key]
+  const values = (payload && payload.values) || {}
+  for (const key of Object.keys(values)) {
+    const v = values[key]
+    if (v === null || v === undefined) continue
+    flat[key] = v
+  }
+  /**
+   * **The capture, under the three names the draft already uses for it.**
+   * `DRAFT_PATHS` has carried `width`, `height` and `framerate` since it was
+   * written and both conventions spell them the same, so no translation is
+   * needed here — only the values, which this payload did not carry at all
+   * until the Resolution and Frame rate pickers needed them. Without them
+   * every staged size stayed pending for ever (nothing to compare against)
+   * and `interruption()` warned "restarts the picture" even for the size
+   * already running. `codec` travels for the same reason though nothing
+   * stages it today: the schema allows one value, and a comparison that
+   * silently lacked its side would be the same defect waiting for the second.
+   */
+  const capture = payload && payload.applied && payload.applied.capture
+  if (capture) {
+    flat.width = capture.width
+    flat.height = capture.height
+    flat.framerate = capture.framerate
+    flat.codec = capture.codec
+  }
+  const stream = payload && payload.applied && payload.applied.stream
+  if (stream) {
+    flat.streamMode = toUiMode(stream.mode)
+    flat.streamFloor = stream.floor_kbps
+    flat.streamCeiling = stream.ceiling_kbps
+    flat.streamBitrate = stream.bitrate_kbps
+  }
+  const preview = payload && payload.applied && payload.applied.preview
+  if (preview) {
+    flat.previewMode = toUiMode(preview.mode)
+    flat.previewSize = preview.size
+    flat.previewLadderBottom = preview.ladder_bottom
+    flat.previewLadderTop = preview.ladder_top
+    flat.previewFloor = preview.floor_kbps
+    flat.previewCeiling = preview.ceiling_kbps
+    flat.previewBitrate = preview.bitrate_kbps
+    flat.previewRate = preview.framerate
+    flat.previewCodec = preview.codec || 'h264'
+  }
+  if (payload && payload.camera && typeof payload.camera.name === 'string') {
+    flat.name = payload.camera.name
+  }
+  for (const output of payload?.outputs || []) if (OUTPUT_PATH[output.kind]) flat[OUTPUT_PATH[output.kind]] = output.enabled
+  return flat
+}
+
+export default {
+  name: 'YonderDeck',
+  mixins: [cameraSessionMixin],
+  inject: ['$socket', '$dataTracker'],
+  props: {
+    id: { type: String, required: true },
+    props: { type: Object, default: () => ({}) },
+    state: { type: Object, default: () => ({}) },
+  },
+  data () {
+    return {
+      draftStore: createDraftStore(),
+      /** Bumped on every staged edit, applied or discarded — the reactive
+       * dependency that tells Vue the plain `Map`s inside `draftStore` (never
+       * reactive on their own) have changed. See `stage()`. */
+      draftVersion: 0,
+      awaitingOperation: null,
+      submittedDraft: null,
+      dismissedResult: null,
+      transactionReceivedAt: null,
+      connectionOpen: false, connectionLoading: false, connectionRows: [], connectionError: null, connectionRequest: 0,
+      /**
+       * **Video or Photo — the browser's, not the device's** (blueprint
+       * L-43).
+       *
+       * Which of the two the one shutter key is currently for. It is a state
+       * of this page, exactly like which deck is showing: it changes nothing
+       * on the aircraft, it is not configuration, it must not go through an
+       * apply, and it does not survive a reload. A remount — a camera switch,
+       * a Live/Setup flip — puts it back to Video, which is the mode an
+       * operator watching a picture is in.
+       *
+       * The operator settled this. It is written here because the obvious
+       * alternative — staging it on the draft beside the stream policy —
+       * would have put a browser preference behind a confirmation window.
+       */
+      workMode: 'video',
+      /**
+       * A shutter press is in flight, awaiting the device's own answer
+       * (`YonderShutter`'s own `pending`, §8.3).
+       *
+       * **This deck no longer guesses whether it is recording.** It held an
+       * optimistic `recordingSince` — a local timestamp set by the press —
+       * which lit the key whether or not anything started, and counted from
+       * when the browser pressed rather than from when the board began.
+       * R-UI-05 is that a control shows when it has *taken effect*: the key
+       * now lights from `report.recorder.since`, the recorder's own answer,
+       * and this flag covers only the round trip in between so a second press
+       * cannot start a competing capture.
+       */
+      shutterPending: false,
+      now: Date.now(),
+      clockTimer: null,
+    }
+  },
+  created () {
+    this.$dataTracker(this.id)
+    // Restore before the session mixin can persist an expired session's edits.
+    const saved = this.$store && this.$store.state && this.$store.state.yonder
+      ? this.$store.state.yonder.draft
+      : null
+    if (saved || readCameraDrafts()) { this.draftStore.restore(saved || readCameraDrafts()); this.draftVersion++ }
+  },
+  mounted () { this.clockTimer = setInterval(() => { this.now = Date.now() }, 1000) },
+  beforeUnmount () { clearInterval(this.clockTimer); this.closeConnection() },
+  computed: {
+    message () { return this.$store?.state?.data?.messages?.[this.id]?.payload || this.props.report || null },
+    workspace () { return this.message?.workspace || {} },
+    transaction () { return this.workspace.pending || null },
+    resultKey () { return JSON.stringify(this.workspace.result || null) },
+    engineBusy () { return ['applying', 'reverting'].includes(this.transaction?.state) || !!(this.awaitingOperation && this.now - this.awaitingOperation.at < 65000) },
+    operationProgress () {
+      const kind = this.awaitingOperation?.kind || (this.transaction?.state === 'reverting' ? 'revert' : 'apply')
+      return { apply: 'Applying changes. Waiting for the device…', confirm: 'Keeping these settings…', revert: 'Restoring the previous settings…', probe: 'Refreshing camera information…', start: 'Starting video…', stop: 'Stopping video…' }[kind] || 'Waiting for the device…'
+    },
+    videoControl () { return videoAction(this.report?.run?.state, null, this.report?.startBlocked) },
+    operationResult () {
+      const result = this.workspace.result
+      if (!result || result.state === 'idle' || this.dismissedResult === this.resultKey || this.transaction?.pending) return null
+      if (result.state === 'confirmed' && Number.isFinite(result.at) && this.now - result.at > 8000) return null
+      return result
+    },
+    canApply () { return !this.signInRequired && !this.engineBusy && this.pendingEdits.length > 0 && !this.transaction?.pending && this.transaction?.state !== 'rejected' },
+    /**
+     * The whole report, live in preference to configured — the same rule
+     * every other widget in this package states for its own narrower slice
+     * (`YonderFacts`'s own comment on `facts` says it first). There is no
+     * sensible static fallback for a camera's whole capability report, so
+     * `props.report` is a convenience for the gallery and a test, not a
+     * promise that a real page shows anything before the first message.
+     */
+    report () { return this.message?.camera?.id ? this.message : null },
+    camera () {
+      return (this.report && this.report.camera && this.report.camera.id) || ''
+    },
+    /**
+     * What the recorder answered, or null (R-CAM-17, R-STO-06).
+     *
+     * `null` is a daemon with no video layer and is drawn as *nothing here
+     * knows* rather than as *not recording*: the two are different facts and
+     * an operator acts differently on each.
+     */
+    recorder () {
+      const r = this.report && this.report.recorder
+      return r && typeof r === 'object' ? r : null
+    },
+    /**
+     * Which of the two the shutter is for, once the camera has been consulted
+     * (blueprint L-43/L-44).
+     *
+     * `workMode` is what the operator chose; this is what the camera can
+     * actually do about it. A camera that offers stills and no recorder is in
+     * Photo whatever the control says — drawing a Record key over a
+     * capability the report calls `not-offered` is the class of lie R-UI-20
+     * exists to stop.
+     */
+    shutterMode () {
+      if (this.report?.accessory) return this.report.accessory.state?.status?.mode ?? null
+      const caps = this.report ? (this.report.capabilities || {}) : {}
+      const has = (key) => Boolean(caps[key]) && caps[key].state !== 'not-offered'
+      if (!has('recording')) return has('stills') ? 'photo' : null
+      if (!has('stills')) return 'video'
+      return this.workMode === 'photo' ? 'photo' : 'video'
+    },
+    /** The raw draft, unfiltered — `void this.draftVersion` is the line that
+     * makes this recompute after `stage()`/`apply()`/`discard()`, since
+     * `draftStore` itself holds plain `Map`s Vue cannot see into. */
+    draft () {
+      void this.draftVersion
+      return this.report ? this.draftStore.get(this.camera) : {}
+    },
+    /** Built fresh from `report`, every time — never cached from when an
+     * edit was staged. See `appliedForDraft()`'s own doc comment. */
+    appliedFlat () {
+      return this.report ? appliedForDraft(this.report) : {}
+    },
+    pendingEdits () {
+      void this.draftVersion
+      return this.report ? this.draftStore.pending(this.camera, this.appliedFlat) : []
+    },
+  },
+  watch: {
+    resultKey () { this.settleOperation() },
+    transaction (value, before) {
+      if (value?.observedAt !== before?.observedAt || value?.id !== before?.id || this.transactionReceivedAt === null) this.transactionReceivedAt = this.now
+      if (value?.pending && this.submittedDraft && !this.submittedDraft.id) this.submittedDraft.id = value.id
+      if (value?.pending && this.awaitingOperation?.kind === 'apply') this.awaitingOperation = null
+    },
+    /**
+     * A fresh report is the device's own answer, whatever it says.
+     *
+     * `shutterPending` is "a press is in flight" and nothing else, so the
+     * next read of this camera ends it — a refused press and a successful one
+     * both arrive as a report, and a flag cleared only on success would leave
+     * the key dead for ever after a refusal.
+     */
+    report (now, before) {
+      this.shutterPending = false
+      if (now?.camera?.id !== before?.camera?.id) { this.awaitingOperation = null; this.closeConnection() }
+      else if (JSON.stringify(now?.outputs) !== JSON.stringify(before?.outputs)) this.closeConnection()
+      this.settleOperation()
+    },
+  },
+  methods: {
+    onCameraSessionExpired () { this.persistDraft(); this.awaitingOperation = null; this.closeConnection() },
+    closeConnection () { this.connectionRequest++; this.connectionOpen = false; this.connectionLoading = false; this.connectionRows = []; this.connectionError = null },
+    async loadConnection () {
+      if (this.signInRequired || !this.camera || this.connectionLoading) return
+      this.connectionOpen = true; this.connectionLoading = true; this.connectionRows = []; this.connectionError = null
+      const request = ++this.connectionRequest
+      const abort = new AbortController(); const timer = setTimeout(() => abort.abort(), 5000)
+      try {
+        const response = await fetch(`/video/${encodeURIComponent(this.camera)}/connection`, { credentials: 'same-origin', cache: 'no-store', signal: abort.signal })
+        if (request !== this.connectionRequest) return
+        if (response.status === 401) { expireCameraSession(); return }
+        if (!response.ok) throw new Error('Connection details are unavailable. Try Refresh details.')
+        const body = await response.json()
+        if (request === this.connectionRequest) this.connectionRows = Array.isArray(body.renderings) ? body.renderings : []
+      } catch { if (request === this.connectionRequest) this.connectionError = 'Connection details are unavailable. Try Refresh details.' }
+      finally { clearTimeout(timer); if (request === this.connectionRequest) this.connectionLoading = false }
+    },
+    buildConnection () {
+      if (!this.connectionOpen) return null
+      return h('section', { class: 'y-deck__connection', 'aria-label': 'Connection details', 'aria-live': 'polite' }, [
+        h('h2', { class: 'y-deck__transaction-head' }, 'Connection details'),
+        this.report?.camera?.identity ? h('p', this.report.camera.identity) : null,
+        this.connectionLoading ? h('p', 'Loading connection details…') : null,
+        this.connectionError ? h('p', this.connectionError) : null,
+        ...this.connectionRows.map(row => h('div', { key: row.kind }, [
+          h(YonderIdentity, { id: `${this.id}-connection-${row.kind}`, props: { label: row.title }, text: row.kind === 'url' && !String(row.body).startsWith('rtsp://') ? '' : row.body }),
+          h('p', { class: 'y-deck__connection-note' }, row.note),
+        ])),
+        h('button', { class: 'y-deck__key', disabled: this.connectionLoading || this.signInRequired, onClick: () => this.loadConnection() }, 'Refresh details'),
+      ])
+    },
+    requestOperation (kind, payload) {
+      if (this.signInRequired || this.engineBusy) return
+      this.awaitingOperation = { kind, camera: this.camera, at: this.now, baseline: this.resultKey }
+      this.dismissedResult = this.resultKey
+      this.post(payload)
+    },
+    settleOperation () {
+      const result = this.workspace.result
+      const waiting = this.awaitingOperation
+      if (waiting && waiting.camera === this.camera && this.resultKey !== waiting.baseline && result
+          && (!result.operation || result.operation === waiting.kind || waiting.kind === 'probe' && result.operation === 'read')) {
+        if (this.submittedDraft && result.id) this.submittedDraft.id ||= result.id
+        if (result.state === 'confirmed' && ['apply', 'confirm'].includes(waiting.kind) && this.submittedDraft
+            && (!result.id || this.submittedDraft.id === result.id)) this.submittedDraft.confirmed = true
+        this.awaitingOperation = null
+      }
+      const submitted = this.submittedDraft
+      if (submitted?.confirmed && submitted.camera === this.camera && !this.transaction?.pending
+          && Object.entries(submitted.values).every(([key, value]) => String(this.appliedFlat[key]) === String(value))) {
+        this.draftStore.acknowledge(this.camera, submitted.values)
+        this.submittedDraft = null
+        this.persistDraft()
+      }
+    },
+    field (component, props) {
+      const paths = props.key === 'captureSize' ? ['width', 'height'] : props.key === 'captureRate' ? ['framerate'] : [props.key]
+      const dirty = paths.some(path => this.pendingEdits.some(edit => edit.path === path))
+      const confirming = !dirty && this.transaction?.pending && this.submittedDraft?.camera === this.camera && paths.some(path => path in this.submittedDraft.values)
+      const pending = dirty || confirming
+      const notice = dirty ? 'Unsaved change' : 'Applied · awaiting Keep'
+      return h(component, { ...props, ...(confirming && component === YonderSetBar ? { fine: notice } : {}), class: [props.class, { 'y-field--pending': pending }], 'data-pending': pending ? 'true' : undefined,
+        ...(pending && component !== YonderSetBar && component !== YonderTextField ? { reason: notice } : {}),
+        ...(pending && component === YonderTextField ? { hint: notice } : {}) })
+    },
+    nativeControl (command) { this.post({ nativeControl: command }) },
+    hasDraft (path) {
+      return Object.prototype.hasOwnProperty.call(this.draft, path)
+    },
+    /**
+     * **The sentence that says a control is holding an edit.**
+     *
+     * `pendingEdits` and not `hasDraft`: the draft keeps a recorded value
+     * whether or not it still differs from the applied one, and a control
+     * whose staged value has since been applied is not pending — that is the
+     * whole reason `pending` filters at read time.
+     *
+     * The blueprint carries this on every staged control
+     * (`gallery/deck.js`: `reason: pending ? "Pending · apply on Setup" :
+     * st.reason`). Without it the deck shows the staged value and nothing
+     * says it is staged, so the only way to learn which controls are holding
+     * an edit is to leave Live and read the list on Setup — which is exactly
+     * the complaint that sent this back.
+     */
+    /**
+     * The staged value, but only while it is still an edit.
+     *
+     * `hasDraft` is the raw draft and answers "was this recorded", which stays
+     * true after the value has been applied — the store deliberately keeps the
+     * entry and filters at read time. Driving a set bar's second mark from it
+     * left the mark, and `YonderSetBar`'s own "Pending · apply on Setup" note
+     * under it, on screen for ever after an apply: the operator applied a
+     * change and the console went on saying it was waiting.
+     */
+    stagedValue (path) {
+      return this.pendingEdits.some((e) => e.path === path)
+        ? Number(this.draft[path])
+        : null
+    },
+    stagedReason (path, fallback) {
+      return this.pendingEdits.some((e) => e.path === path)
+        ? 'Unsaved change'
+        : (fallback || '')
+    },
+    draftValue (path, fallback) {
+      return this.hasDraft(path) ? this.draft[path] : fallback
+    },
+    /**
+     * A stream or preview policy edit — the confirmation-window half of the
+     * defect fix. Recorded in `draftStore` only; nothing below this line
+     * reaches `$socket`, by construction, the same guarantee `draft.ts`'s
+     * own module comment states for `set()` itself.
+     */
+    stage (path, value) {
+      this.draftStore.set(this.camera, path, value)
+      this.persistDraft()
+    },
+    persistDraft () {
+      this.draftVersion += 1
+      saveCameraDrafts(this.draftStore.snapshot())
+      if (!this.$store || !this.$store.state) return
+      if (!this.$store.state.yonder) this.$store.state.yonder = {}
+      this.$store.state.yonder.draft = this.draftStore.snapshot()
+    },
+    /** Every message this deck actually posts leaves through here — one
+     * seam, so `deck.component.test.ts` can spy on exactly one thing. */
+    post (payload) {
+      if (this.signInRequired) return
+      if (payload.transaction) this.$socket.emit('widget-action', this.id, { payload })
+      else if (this.camera) this.$socket.emit('widget-action', this.id, { camera: this.camera, payload })
+    },
+    /**
+     * An image control — the live-command half of the defect fix. Posts
+     * immediately, through the socket, never the draft: this changes the
+     * picture, not what leaves the aircraft.
+     */
+    setControl (key, value) {
+      this.post({ control: key, value })
+    },
+    /**
+     * **A turn goes where the turning happens** (R-CTL-05, R-CTL-15).
+     *
+     * The sensor's own flip is a live control: it goes to the device and
+     * changes the picture, exactly like brightness. The board's is not — it
+     * is a `videoflip` in the launch line, so it is a configuration change,
+     * it restarts the picture, and it belongs on the staged draft behind an
+     * Apply that can say so first.
+     *
+     * Shipped once with both going to `/controls`, and the operator found it
+     * in minutes: on a camera whose sensor cannot turn its own picture — the
+     * bench ELP answers no flip control at all — every press came back
+     * *"this camera does not offer horizontalFlip"*. A refusal for something
+     * Yonder can do, which is the worst answer of the three available.
+     */
+    turn (t, value) {
+      if (t && t.by === 'sensor') { this.setControl(t.key, value); return }
+      this.stage(t.key, value)
+    },
+    /**
+     * **The draft is not cleared here, and that is the fix.**
+     *
+     * It used to be — posted, then cleared, before the daemon had answered.
+     * A refused apply (`POST /cameras/:id/apply` answers 400 with a
+     * `problems` list, by design, so the page can mark the field) therefore
+     * arrived at a browser that had already thrown away every staged edit:
+     * nothing left to mark, and the operator retypes the lot.
+     *
+     * Nothing has to clear it. `draftStore.pending(camera, applied)` filters
+     * at read time — an edit whose staged value now equals the applied one is
+     * not pending — so a *successful* apply empties the pending block on its
+     * own the moment the re-read lands, and a refused one leaves every edit
+     * exactly where the operator left it. `discard()` is the only thing that
+     * throws a draft away, which is the only thing that should.
+     */
+    apply () {
+      if (!this.canApply) return
+      const values = Object.fromEntries(this.pendingEdits.map(edit => [edit.path, edit.requested]))
+      this.submittedDraft = { camera: this.camera, values, id: null, confirmed: false }
+      this.requestOperation('apply', { apply: values })
+    },
+    discard () {
+      if (this.engineBusy) return
+      this.draftStore.clear(this.camera)
+      this.submittedDraft = null
+      this.persistDraft()
+    },
+    toggleOutput (kind, enabled) {
+      if (OUTPUT_PATH[kind]) this.stage(OUTPUT_PATH[kind], enabled)
+    },
+    /**
+     * **The one key, pressed** (blueprint L-44).
+     *
+     * Three messages from one control, and which one it is comes from the
+     * mode and from what the recorder says it is doing — never from a guess
+     * this component is keeping. A press while recording is a stop; a press
+     * in Photo is a still; anything else starts one.
+     *
+     * `shutterPending` is set here and cleared by the next report, so a
+     * second press during the round trip sends nothing: §8.3 is explicit
+     * that repeated presses must not launch competing captures, and the
+     * device's own one-at-a-time guard answering `busy` is a refusal the
+     * operator should never have had to see.
+     */
+    pressShutter () {
+      if (this.shutterPending) return
+      const mode = this.shutterMode
+      if (mode === null) return
+      this.shutterPending = true
+      if (mode === 'photo') { this.post({ shutter: 'photo' }); return }
+      this.post({ shutter: this.isRecording() ? 'stop' : 'record' })
+    },
+    /** What the *device* says, never what this page did last (R-UI-05). */
+    isRecording () {
+      return Boolean(this.recorder && this.recorder.recording
+        && Number.isFinite(this.recorder.since))
+    },
+    /** The captures link beside the key (blueprint L-47) — a request for the
+     * listing, which is what the panel draws. It reads nothing and changes
+     * nothing on the aircraft; it asks the daemon what it is holding. */
+    openCaptures () {
+      this.post({ captures: 'read' })
+    },
+    setWorkMode (v) {
+      if (this.report?.accessory) { this.nativeControl({ kind: 'mode', value: v === 'Photo' ? 0 : 1 }); return }
+      this.workMode = v === 'Photo' ? 'photo' : 'video'
+    },
+    /** `advertised`/`gated`, in the one sentence every disabled control on
+     * this page carries — `gated`'s own wording matches `capability.ts`'s
+     * `summarise()` exactly (`"${by.label} has it"`), never a V4L2 name. */
+    stateAndReason (cap) {
+      if (cap.state === 'advertised') return { state: 'advertised', reason: cap.reason || '' }
+      if (cap.state === 'gated') return { state: 'gated', reason: `${cap.by.label} has it` }
+      return { state: cap.state, reason: '' }
+    },
+    /**
+     * A key's heading. `descriptors[key].label` wins when there is one — it
+     * is what `video/descriptors.ts` calls the control (`"Shutter"` for
+     * `exposure`, `"Temperature"` for `whiteBalance`, two of the 21 that
+     * differ from `LABELS`' own generic word) — and `LABELS` (also
+     * `yonder-core`'s own, never a second copy) covers the rest: a
+     * not-offered key, and the four capabilities that carry no
+     * `ControlRange` and so never get a descriptor at all.
+     */
+    label (key) {
+      const d = this.report.descriptors && this.report.descriptors[key]
+      if (d && d.label) return d.label
+      return LABELS[key] || key
+    },
+    /** R-UI-20: a capability the camera does not have (or does not draw a
+     * control for on this page) is a fact where the control would have
+     * been — never a control that cannot be used, never simply absent. */
+    fact (key, label, reason) {
+      return h('div', { class: 'y-deck__fact', key }, [
+        h('span', { class: 'y-deck__fact-l' }, label),
+        h('span', { class: 'y-deck__fact-v' }, reason || 'this camera has none'),
+      ])
+    },
+    /**
+     * One capability, drawn from `capabilities[key]` and nothing this file
+     * assumes about the camera (R-CAM-14). `not-offered` is a fact and
+     * nothing else; the two shutter kinds draw through their own branch
+     * below rather than a `bar`/`pick`/`seg`, because neither is a bounded
+     * value, a menu or a plain on/off. `capture` and `turn` never reach
+     * here at all — `buildCaptureShape()` and `buildOrientation()` own
+     * them, for reasons each states.
+     */
+    drawCapability (key) {
+      const layout = CAPABILITY_LAYOUT[key]
+      const r = this.report
+      const cap = r.capabilities ? r.capabilities[key] : undefined
+      const label = this.label(key)
+      if (!cap || cap.state === 'not-offered') return this.fact(key, label, 'this camera has none')
+
+      // `shutter` never reaches here: `buildCapture()` draws one key from
+      // whichever of `recording`/`stills` the mode selects, because what is
+      // drawn depends on a fact outside either key. The same reason `turn`
+      // and `capture` have branches of their own.
+      const { state, reason } = this.stateAndReason(cap)
+      const descriptor = r.descriptors ? r.descriptors[key] : undefined
+      const values = r.values || {}
+      const commanded = r.commanded || {}
+      const rawValue = values[key]
+
+      if (layout.kind === 'bar') {
+        const unit = (descriptor && descriptor.unit) || ''
+        const min = descriptor ? descriptor.min : 0
+        const max = descriptor ? descriptor.max : 100
+        const step = descriptor ? descriptor.step : 1
+        const actual = typeof rawValue === 'number' ? rawValue : (descriptor ? descriptor.current : 0)
+        const cmd = commanded[key]
+        return this.field(YonderSetBar, {
+          key,
+          label,
+          unit,
+          min,
+          max,
+          step,
+          precision: stepPrecision(step),
+          actual,
+          commanded: typeof cmd === 'number' ? cmd : null,
+          state,
+          reason,
+          onSet: (v) => this.setControl(key, v),
+        })
+      }
+      if (layout.kind === 'pick') {
+        // R-CAM-14: exactly the ids the probe listed, on `capabilities[key]`
+        // itself — `descriptors` carries no `menu`, only the converted
+        // numeric bounds, because a menu id is never a unit conversion.
+        const menu = (cap.value && cap.value.menu) || []
+        const options = menu.map((m) => ({ value: String(m.id), label: m.label }))
+        const current = typeof rawValue === 'number' ? rawValue : (cap.value ? cap.value.current : '')
+        return this.field(YonderPicker, {
+          key,
+          label,
+          value: String(current),
+          options,
+          state,
+          reason,
+          onChange: (v) => this.setControl(key, Number(v)),
+        })
+      }
+      if (layout.kind === 'seg') {
+        const on = rawValue === true || rawValue === 1
+        return this.field(YonderSegmented, {
+          key,
+          label,
+          value: on ? 'On' : 'Off',
+          options: ['Off', 'On'],
+          state,
+          reason,
+          onChange: (v) => this.setControl(key, v === 'On'),
+        })
+      }
+      return null
+    },
+    /**
+     * **One shutter key, following the mode** (blueprint L-44, R-CAM-17,
+     * R-CAM-18).
+     *
+     * It was two, always both drawn — a Record circle and a Photo circle
+     * stacked — because `drawCapability()` was called once per capability and
+     * each drew its own. The camera cannot do both at once, so two keys were
+     * a lie about that; `YonderShutter` has taken a `mode` prop since it was
+     * built and this is the caller finally composing it against the
+     * blueprint rather than against the capability list.
+     *
+     * **The line under it is `yonder-core`'s sentence, not one composed
+     * here** (L-45, L-46). `captureDestination()` states where a capture
+     * lands and what the medium has left, in minutes in Video and in
+     * photographs in Photo — the two differ in a unit and in nothing else,
+     * which is exactly why they are one function. It falls back to the
+     * capability's own medium where there is no recorder to ask, so a camera
+     * page still says where a capture would go before a daemon with a video
+     * layer has ever answered.
+     *
+     * `inhibited` is the reason the key will not act, or null — the key is
+     * drawn either way (spec §4, R-UI-21): a camera that lists a recorder and
+     * cannot use one keeps its key, marked, carrying the reason, because an
+     * operator who cannot find Record at all has to work out whether the page
+     * is broken or the camera cannot do it.
+     */
+    drawShutter (mode, cap) {
+      const { state, reason } = this.stateAndReason(cap)
+      const fallback = mode === 'video'
+        ? ((cap.value && cap.value.medium === 'board') ? 'to this board' : "to the camera's card")
+        : ((cap.value && cap.value.source === 'pipeline') ? 'to this board' : "to the camera's card")
+      const destination = this.recorder === null
+        ? fallback
+        : captureDestination(this.recorder, mode)
+      return h(YonderShutter, {
+        key: 'shutter',
+        mode,
+        // From the recorder's own answer, so the elapsed time counts from
+        // when the board began rather than from when this browser pressed —
+        // and so a page opened after the recording started shows it running.
+        recording: (mode === 'video' && this.isRecording())
+          ? { since: this.recorder.since }
+          : null,
+        destination,
+        pending: this.shutterPending,
+        inhibited: state === 'present' ? null : reason,
+        onRecord: () => this.pressShutter(),
+        onPhoto: () => this.pressShutter(),
+      })
+    },
+    /** Whether every key `CAPABILITY_LAYOUT` assigns to `groupId` reads
+     * `not-offered` (or is filtered out entirely by `setupOnly` on Live) —
+     * the "omit the whole group" half of R-UI-20, not merely drawing an
+     * empty one (an empty box and an absent one say different things,
+     * `YonderColumn`'s own reasoning). */
+    nativeControls (group) {
+      return (this.report.accessory?.controls || []).filter(d => d.group === group && d.key !== 'mode').map(d => {
+        if (d.state === 'not-offered') return this.fact(d.key, d.label, d.reason)
+        if (d.key === 'ev') {
+          const choices = d.options.map(option => ({ ...option, display: Number(option.label) }))
+          const current = choices.find(option => String(option.value) === String(d.value))
+          return this.field(YonderSetBar, { key: 'nativeBrightness', label: 'Brightness (EV)', unit: 'EV', min: -2, max: 2, step: 1 / 3, precision: 2,
+            actual: current?.display ?? null, state: this.signInRequired ? 'gated' : d.state, reason: d.reason || '', onSet: value => {
+              const selected = choices.reduce((a, b) => Math.abs(b.display - value) < Math.abs(a.display - value) ? b : a)
+              if (d.state === 'present') this.nativeControl(selected.command)
+            } })
+        }
+        return this.field(YonderPicker, { key: d.key, label: d.label, value: d.value, currentLabel: d.currentLabel, options: d.options,
+          state: this.signInRequired ? 'gated' : d.state, reason: d.reason || '', onChange: value => {
+            const selected = d.options.find(option => String(option.value) === String(value))
+            if (selected && d.state === 'present') this.nativeControl(selected.command)
+          } })
+      })
+    },
+    buildNativeGroup (group) {
+      const controls = this.nativeControls(group)
+      return controls.length ? h(YonderColumn, { legend: GROUP_LEGEND[group], key: group }, () => controls) : null
+    },
+    buildNativeShape () {
+      const native = this.report.accessory?.input?.native
+      if (!native) return [this.fact('native', 'Native input', 'Waiting for SPS dimensions and camera frame clock')]
+      const capture = this.report.policy.capture
+      const sizes = ['1280x720', '854x480', '640x360'].filter(size => { const [w,h] = size.split('x').map(Number); return w <= native.width && h <= native.height })
+      const rates = [30,25,24,20,15,10,5,1].filter(rate => rate <= Math.ceil(native.fps))
+      return [this.fact('native', 'Native input', `${native.width}×${native.height} · ${native.fps.toFixed(2)} fps · fixed USB feed`),
+        this.field(YonderPicker, { key: 'captureSize', label: 'Output resolution', value: `${this.draftValue('width', capture.width)}x${this.draftValue('height', capture.height)}`,
+          options: sizes.map(value => ({ value, label: value.replace('x', '×') })), onChange: value => { const [w,h] = value.split('x').map(Number); this.stage('width', w); this.stage('height', h) } }),
+        this.field(YonderPicker, { key: 'captureRate', label: 'Output frame rate', value: this.draftValue('framerate', capture.framerate), options: rates.map(value => ({ value: String(value), label: `${value} fps` })), onChange: value => this.stage('framerate', Number(value)) })]
+    },
+    buildGroup (groupId) {
+      if (groupId === 'streamColor') return this.buildStreamColor()
+      if (this.report?.accessory) return this.buildNativeGroup(groupId)
+      const r = this.report
+      const keys = GROUP_KEYS[groupId] || []
+      const anyPresent = keys.some((key) => {
+        const cap = r.capabilities && r.capabilities[key]
+        return cap && cap.state !== 'not-offered'
+      })
+      if (!anyPresent) return null
+      return h(YonderColumn, { legend: GROUP_LEGEND[groupId], key: groupId }, () => keys.map((key) => this.drawCapability(key)))
+    },
+    /**
+     * The Orientation group — **always drawn, on every camera** (R-CTL-05,
+     * R-CTL-15).
+     *
+     * This is the one group that does not ask `capabilities[key].state` what
+     * to draw, and the reason is the whole of `R-CTL-15`. The bench camera
+     * answers `not-offered` to all three of `horizontal_flip`,
+     * `vertical_flip` and `rotate`; that is true of the *device* and false of
+     * *Yonder*, because `video/pipeline.ts` composes a `videoflip` for
+     * exactly that camera. Read through `drawCapability()` the group would
+     * print three sentences saying the camera cannot, over three controls
+     * that work — so it is read through `report.orientation` instead, which
+     * `video/present.ts` composed from `video/orientation.ts`'s own answer.
+     *
+     * **One line, beneath all three** — `orientation.says`, which names which
+     * of the two would carry a turn asked for here and carries the
+     * quarter-turn cost when the board is actually making one. It shipped
+     * once as a sentence beside every control *and* a line under the group,
+     * which put the same words on the page four times over; the capture is
+     * what said so. `turn.says` is drawn only where the payload sets it,
+     * which is only where the three controls genuinely disagree about who
+     * carries them — the one case a single line cannot say.
+     *
+     * **The value is `turn.value`, whichever of the two holds it** — the
+     * payload already decided that (see `DeckTurn.value`), so this method
+     * never picks between `values` and `commanded` and cannot pick
+     * differently from the sentence beside it.
+     *
+     * A report with no `orientation` block draws no group at all rather than
+     * falling back to the capability states: falling back is what would put
+     * the three "this camera has none" rows on the page again, quietly, the
+     * day this field went missing.
+     */
+    buildOrientation () {
+      const o = this.report.orientation
+      if (!o || !Array.isArray(o.turns) || o.turns.length === 0) return null
+      const children = o.turns.map((turn) => {
+        const label = this.label(turn.key)
+        if (turn.key === 'rotation') {
+          return this.field(YonderPicker, {
+            key: turn.key,
+            label,
+            // `null` is the schema's own "leave the camera alone", which is a
+            // picture that is not rotated — the same reading `orientation()`
+            // gives it — so it draws as 0°, never as an unmarked picker.
+            value: String(turn.value === null || turn.value === undefined ? 0 : turn.value),
+            options: ROTATION_OPTIONS,
+            reason: turn.says || '',
+            onChange: (v) => this.turn(turn, Number(v)),
+          })
+        }
+        return this.field(YonderSegmented, {
+          key: turn.key,
+          label,
+          value: turn.value === 1 ? 'On' : 'Off',
+          options: ['Off', 'On'],
+          reason: turn.says || '',
+          onChange: (v) => this.turn(turn, v === 'On'),
+        })
+      })
+      children.push(h('div', { class: 'y-deck__turnnote', key: 'note' }, o.says || ''))
+      return h(YonderColumn, { legend: GROUP_LEGEND.orientation, key: 'orientation' }, () => children)
+    },
+    /**
+     * Record, Photo and the captures count — **and no formats row**
+     * (blueprint L-51).
+     *
+     * `CAPTURE FORMATS 10` drew here and the blueprint never drew it: a bare
+     * count states a number where R-CAM-14 asks for the formats offered, and
+     * leaving it beside a Stream column that now offers those same formats in
+     * two pickers would say the same fact twice, once uselessly. See
+     * `CAPABILITY_LAYOUT.formats`, which is where that key went.
+     */
+    buildCapture () {
+      const r = this.report
+      const recording = r.capabilities && r.capabilities.recording
+      const stills = r.capabilities && r.capabilities.stills
+      const has = (c) => Boolean(c) && c.state !== 'not-offered'
+      if (!has(recording) && !has(stills)) return null
+      const mode = this.shutterMode
+      const children = []
+
+      /**
+       * **MODE, at the head of the column** (blueprint L-43).
+       *
+       * `YonderSegmented`, which is already this deck's control for a
+       * two-way choice — not a second segmented control written for this one
+       * page. Drawn only where there is a choice to make: a camera that
+       * offers one of the two has no mode to be in, and a control whose
+       * options are one is a control that cannot be used (R-UI-20).
+       */
+      if (has(recording) && has(stills)) {
+        children.push(this.field(YonderSegmented, {
+          key: 'workMode',
+          // Tighter than the same control is elsewhere, and only here. Spec §5
+          // puts the shutter key above the fold at 1440x900, and adding Mode at
+          // the head of this column (L-43) put it seven pixels below one. The
+          // room is taken from this control rather than from the key, which is
+          // the thing that has to be reachable, and by a class rather than by
+          // changing `YonderSegmented` — the image controls on the Setup deck
+          // use the same component and are not short of room.
+          class: 'y-deck__mode',
+          label: 'Mode',
+          options: ['Video', 'Photo'],
+          state: r.accessory ? (r.accessory.controls?.find(d => d.key === 'mode')?.state || 'gated') : 'present',
+          reason: r.accessory?.controls?.find(d => d.key === 'mode')?.reason || '',
+          value: mode === 'photo' ? 'Photo' : 'Video',
+          onChange: (v) => this.setWorkMode(v),
+        }))
+      }
+
+      children.push(this.drawShutter(mode, mode === 'photo' ? stills : recording))
+
+      /**
+       * **Why a recording ended, when it ended by itself** (R-STO-06).
+       *
+       * Under the key rather than in a notification, because it is a fact
+       * about this camera's medium and the operator's next press is right
+       * here. Empty after a stop somebody pressed — see `endedWords()`.
+       */
+      const ended = endedWords(this.recorder)
+      if (ended !== '') {
+        children.push(h('div', { class: 'y-deck__ended', key: 'ended' }, ended))
+      }
+
+      /**
+       * **`Captures (3) ›` — a link beside the key** (blueprint L-47).
+       *
+       * It was a `Captures · 0` readout lower in the column, which stated a
+       * number and offered nothing to do about it. The count is the deck
+       * payload's, composed by the daemon from the one listing the panel
+       * itself draws, so the number beside the link and the number in the
+       * panel cannot disagree.
+       */
+      if (r.accessory) {
+        children.push(h('div', { class: 'y-deck__ended' }, this.recorder?.mediumReason || 'Camera card status unknown'))
+        const formats = this.nativeControls('capture')
+        if (formats.length) children.push(h('details', { class: 'y-deck__advanced' }, [h('summary', 'Device formats'), h('p', { class: 'y-deck__hint' }, 'Advanced format codes reported by the camera.'), ...formats]))
+      } else {
+      const count = (r.captures && typeof r.captures.count === 'number') ? r.captures.count : 0
+      children.push(h('button', {
+        type: 'button',
+        class: 'y-deck__captures',
+        key: 'captures',
+        onClick: () => this.openCaptures(),
+      }, `Captures (${count}) \u203a`))
+      }
+
+      return h(YonderColumn, { legend: GROUP_LEGEND.capture, key: 'capture' }, () => children)
+    },
+    /**
+     * Stream and preview policy edits go to the draft, never the socket —
+     * the other half of the defect fix. Every value drawn here comes from
+     * `policy` (the deck's own current-value source, see this file's module
+     * comment); every value staged goes through `stage()`, never
+     * `setControl()`.
+     */
+    buildStream () {
+      const r = this.report
+      const policy = (r.policy && r.policy.stream) || {}
+      const applied = r.applied && r.applied.stream
+      const uiMode = this.draftValue('streamMode', toUiMode(policy.mode))
+      const adaptive = uiMode === 'Adaptive'
+      const children = []
+      {
+        children.push(this.field(YonderTextField, {
+          key: 'name',
+          label: 'Name',
+          value: this.draftValue('name', (r.camera && r.camera.name) || ''),
+          placeholder: 'Cam 1',
+          max: 24,
+          hint: 'shown on this page, in the camera list and on the stream address',
+          'onUpdate:value': (v) => this.stage('name', v),
+        }))
+      }
+      children.push(this.field(YonderSegmented, {
+        key: 'streamMode',
+        reason: this.stagedReason('streamMode'),
+        label: 'Bitrate',
+        options: ['Fixed', 'Adaptive'],
+        value: uiMode,
+        onChange: (v) => this.stage('streamMode', v),
+      }))
+      if (adaptive) {
+        children.push(this.field(YonderSetBar, {
+          key: 'streamFloor',
+          label: 'Floor',
+          unit: 'kb/s',
+          min: 100,
+          max: 20000,
+          step: 100,
+          precision: 0,
+          actual: policy.floor_kbps ?? 100,
+          requested: this.stagedValue('streamFloor'),
+          onSet: (v) => this.stage('streamFloor', v),
+        }))
+        children.push(this.field(YonderSetBar, {
+          key: 'streamCeiling',
+          label: 'Ceiling',
+          unit: 'kb/s',
+          min: 100,
+          max: 20000,
+          step: 100,
+          precision: 0,
+          actual: policy.ceiling_kbps ?? 20000,
+          requested: this.stagedValue('streamCeiling'),
+          onSet: (v) => this.stage('streamCeiling', v),
+        }))
+      }
+      children.push(this.field(YonderSetBar, {
+        key: 'streamBitrate',
+        label: adaptive ? 'Encoder target' : 'Bitrate',
+        unit: 'kb/s',
+        min: 100,
+        max: 20000,
+        step: 100,
+        precision: 0,
+        actual: adaptive ? (this.report.runtime?.streamKbps ?? null) : ((applied && typeof applied.bitrate_kbps === 'number') ? applied.bitrate_kbps : (policy.bitrate_kbps ?? 0)),
+        readonly: adaptive,
+        requested: adaptive ? null : this.stagedValue('streamBitrate'),
+        onSet: adaptive ? undefined : (v) => this.stage('streamBitrate', v),
+      }))
+      const feedback = r.runtime?.rtspFeedback
+      const appliedAdaptive = (applied?.mode ?? policy.mode) === 'adaptive'
+      const stagedMode = adaptive !== appliedAdaptive
+      children.push(h('div', { class: ['y-deck__adaptation', { 'is-unavailable': feedback?.status === 'unavailable' }],
+        role: 'status', 'aria-label': 'Stream adaptation status' }, [
+        h('strong', stagedMode ? (adaptive ? 'Adaptive is staged' : 'Fixed bitrate is staged')
+          : appliedAdaptive ? 'Adaptive delivery' : 'Fixed bitrate'),
+        h('p', stagedMode ? 'Press Apply to change the active bitrate mode.'
+          : appliedAdaptive ? (r.runtime?.streamDecision?.reason || 'Waiting for delivery measurements.')
+            : 'The encoder target stays at the applied bitrate. Delivery feedback does not change it.'),
+        appliedAdaptive && !stagedMode ? h('p', feedback?.message || 'RTSP feedback is not available from this device yet.') : null,
+        feedback?.freshReaders > 0 ? h('p', { class: 'y-deck__feedback-values' }, [
+          feedback.deliveredKbps != null ? 'Delivery ' + Math.round(feedback.deliveredKbps) + ' kb/s' : '',
+          feedback.loss != null ? ' · reported loss ' + (feedback.loss * 100).toFixed(1) + '%' : '',
+          feedback.queuedMs != null ? ' · queued ' + Math.round(feedback.queuedMs) + ' ms' : '',
+          feedback.discarded > 0 ? ' · ' + feedback.discarded + ' video packets discarded' : '',
+        ]) : null,
+      ]))
+      // Beneath the bitrate bar, which is where spec §7 lists Resolution and
+      // where the blueprint draws it — in this column and not in Capture,
+      // because it is what leaves for the ground station.
+      const codecs = r.codecs || ['h264']
+      children.push(this.field(YonderPicker, {
+        key: 'codec', label: 'Codec',
+        value: this.draftValue('codec', r.policy?.capture?.codec || 'h264'),
+        options: codecs.map(value => ({ value, label: value === 'h265' ? 'H.265' : 'H.264' })),
+        state: this.signInRequired ? 'gated' : 'present',
+        onChange: value => { if (codecs.includes(value)) this.stage('codec', value) },
+      }))
+      children.push(h('p', { class: 'y-deck__connection-note' },
+        'This codec is for the ground-station stream. Changing codec restarts video.'))
+      for (const child of this.buildCaptureShape()) children.push(child)
+      return h(YonderColumn, { legend: GROUP_LEGEND.stream, qualifier: 'to the ground station', key: 'stream' }, () => children)
+    },
+    /**
+     * **Resolution and Frame rate — two pickers, not one** (R-CAM-14,
+     * R-VID-07, R-CTL-05; blueprint L-56 and its recorded divergence in
+     * `docs/console/design/blueprint-manifest.md`).
+     *
+     * The blueprint draws a single combined picker reading `1280×720 · 30
+     * fps`, and that works in the mock because its camera offers one rate per
+     * size. The bench camera offers eight, at ten sizes: eighty rows, of
+     * which eight in every ten differ only in a trailing number, read on a
+     * page an operator reaches for while an aircraft is flying. Two pickers
+     * is ten rows and eight, and mirrors the Size + Rate pair the Preview
+     * column already has. **This is a deliberate departure from an approved
+     * render, decided by the operator under CLAUDE.md rule 8** — written down
+     * here and in the manifest, because a departure nobody wrote down is how
+     * this console drifted from the blueprint in the first place.
+     *
+     * **Both menus are the device's own** (R-CAM-14). `captureSizes()` is
+     * `yonder-core`'s, not a list composed here: it takes the first format
+     * entry for each size, which is the entry `video/pipeline.ts` will
+     * actually run, so this never offers a rate the pipeline would refuse.
+     * The rate menu carries only the rates *that size* reported, which is the
+     * whole reason the pair is two controls.
+     *
+     * **A staged pair this camera cannot make is said here, before Apply.**
+     * `captureRefusal()` is the same function the apply route refuses with
+     * and `refuse()` returns at compose time — one comparison, three callers.
+     * A hand-edited `config.yaml` is the only way to reach the size branch,
+     * since the picker offers nothing else; the rate branch is reachable by
+     * choosing a size that does not make the rate now held.
+     *
+     * Drawn in both modes, as the blueprint draws it: `live.elp.night.png`
+     * and `setup.elp.night.png` both carry it. Staging still changes nothing
+     * until Apply — `stage()`, never `setControl()`, like everything else in
+     * this column.
+     */
+    buildCaptureShape () {
+      if (this.report?.accessory) return this.buildNativeShape()
+      const r = this.report
+      const cap = r.capabilities && r.capabilities.formats
+      // The one state that draws no control: a camera that answered no format
+      // has no menu to offer, and a picker over an empty list is a control
+      // that cannot be used. The fact says so, in `fact()`'s own words.
+      if (!cap || cap.state === 'not-offered') {
+        return [this.fact('formats', 'Resolution', 'this camera has answered no capture format')]
+      }
+      const { state, reason } = this.stateAndReason(cap)
+      const formats = cap.value || []
+      const sizes = captureSizes(formats)
+      const capture = (r.policy && r.policy.capture) || {}
+      // **A report with no `capture` block draws a fact, not two pickers.**
+      // `cameraDeck()` always composes one, so this is the older-daemon case —
+      // and without it the pickers compose `NaNxNaN`, offer a menu nothing in
+      // it is selected from, and say "this camera does not offer NaNxNaN". A
+      // control that draws over a value it does not have is the failure this
+      // whole deck was rewritten to remove.
+      if (typeof capture.width !== 'number' || typeof capture.height !== 'number'
+        || typeof capture.framerate !== 'number') {
+        return [this.fact('formats', 'Resolution', 'this device has not said what it is capturing')]
+      }
+      const width = Number(this.draftValue('width', capture.width))
+      const height = Number(this.draftValue('height', capture.height))
+      const framerate = Number(this.draftValue('framerate', capture.framerate))
+      const size = `${width}x${height}`
+      const held = sizes.find((s) => s.size === size)
+      const refusal = captureRefusal(formats, { width, height, framerate })
+      // Which control the refusal belongs under, decided from the menus and
+      // never by reading the sentence back — the same split the apply route
+      // makes when it names the path a problem is about.
+      const sizeWrong = held === undefined
+      return [
+        this.field(YonderPicker, {
+          key: 'captureSize',
+          label: 'Resolution',
+          value: size,
+          options: sizes.map((s) => ({ value: s.size, label: `${s.width}×${s.height}` })),
+          state,
+          reason: state !== 'present'
+            ? reason
+            : (sizeWrong ? refusal : this.stagedReason('width', this.stagedReason('height'))),
+          // Two paths from one press, because a size is two schema leaves and
+          // `DRAFT_PATHS` keeps them apart — the config has no `size` field to
+          // stage, and inventing one here would be a fourteenth name for the
+          // apply route to learn.
+          onChange: (v) => {
+            const [w, hgt] = String(v).split('x').map(Number)
+            this.stage('width', w)
+            this.stage('height', hgt)
+          },
+        }),
+        this.field(YonderPicker, {
+          key: 'captureRate',
+          label: 'Frame rate',
+          value: String(framerate),
+          // Only the rates this size reported. Empty when the held size is one
+          // the camera does not offer at all — there is no size to read rates
+          // from, and the picker above is where that is said.
+          options: (held ? held.rates : []).map((v) => ({ value: String(v), label: `${v} fps` })),
+          state,
+          reason: state !== 'present'
+            ? reason
+            : (sizeWrong ? '' : (refusal || this.stagedReason('framerate'))),
+          onChange: (v) => this.stage('framerate', Number(v)),
+        }),
+      ]
+    },
+    buildPreview () {
+      const r = this.report
+      const policy = (r.policy && r.policy.preview) || {}
+      const applied = r.applied && r.applied.preview
+      const uiMode = this.draftValue('previewMode', toUiMode(policy.mode))
+      const adaptive = uiMode === 'Adaptive'
+      const size = this.draftValue('previewSize', policy.size || 'auto')
+      const auto = size === 'auto'
+      const capture = r.policy?.capture || {}
+      const maxWidth = this.draftValue('width', capture.width || 0)
+      const maxHeight = this.draftValue('height', capture.height || 0)
+      const fitsCapture = option => {
+        if (option.value === 'auto') return true
+        const [width, height] = option.value.split('x').map(Number)
+        return width <= maxWidth && height <= maxHeight
+      }
+      const children = []
+      const hevc = typeof RTCRtpReceiver !== 'undefined' &&
+        RTCRtpReceiver.getCapabilities?.('video')?.codecs?.some(c => c.mimeType.toLowerCase() === 'video/h265')
+      const codecs = (r.codecs || ['h264']).filter(codec => codec !== 'h265' || hevc)
+      const previewCodec = this.draftValue('previewCodec', policy.codec || 'h264')
+      children.push(this.field(YonderPicker, {
+        key: 'previewCodec', label: 'Preview codec', value: previewCodec,
+        currentLabel: previewCodec === 'h265' ? 'H.265' : 'H.264',
+        options: codecs.map(value => ({ value, label: value === 'h265' ? 'H.265' : 'H.264' })),
+        state: this.signInRequired ? 'gated' : 'present',
+        onChange: value => { if (codecs.includes(value)) this.stage('previewCodec', value) },
+      }))
+      children.push(h('p', { class: 'y-deck__connection-note' }, hevc
+        ? 'This browser supports H.265. H.264 is available for compatibility; changing codec restarts video.'
+        : 'This browser does not advertise H.265 for WebRTC. Select H.264 for browser playback.'))
+      children.push(this.field(YonderSegmented, {
+        key: 'previewMode',
+        reason: this.stagedReason('previewMode'),
+        label: 'Bitrate',
+        options: ['Adaptive', 'Fixed'],
+        value: uiMode,
+        onChange: (v) => this.stage('previewMode', v),
+      }))
+      children.push(this.field(YonderPicker, {
+        key: 'previewSize',
+        reason: this.stagedReason('previewSize'),
+        label: 'Size',
+        value: size,
+        currentLabel: size === 'auto' ? 'Auto — steps with the link' : `${size.replace('x', '×')} — hold`,
+        options: PREVIEW_SIZE_OPTIONS.filter(fitsCapture),
+        onChange: (v) => this.stage('previewSize', v),
+      }))
+      if (auto) {
+        children.push(this.field(YonderPicker, {
+          key: 'previewLadderBottom',
+          label: 'Smallest automatic size',
+          value: this.draftValue('previewLadderBottom', policy.ladder_bottom || '640x360'),
+          currentLabel: this.draftValue('previewLadderBottom', policy.ladder_bottom || '640x360').replace('x', '×'),
+          options: PREVIEW_RUNG_OPTIONS.filter(fitsCapture),
+          onChange: (v) => this.stage('previewLadderBottom', v),
+        }))
+        children.push(this.field(YonderPicker, {
+          key: 'previewLadderTop',
+          label: 'Largest automatic size',
+          value: this.draftValue('previewLadderTop', policy.ladder_top || '1280x720'),
+          currentLabel: this.draftValue('previewLadderTop', policy.ladder_top || '1280x720').replace('x', '×'),
+          options: PREVIEW_RUNG_OPTIONS.filter(fitsCapture),
+          onChange: (v) => this.stage('previewLadderTop', v),
+        }))
+      }
+      children.push(this.field(YonderPicker, {
+        key: 'previewRate',
+        reason: this.stagedReason('previewRate'),
+        label: 'Rate',
+        value: String(this.draftValue('previewRate', policy.framerate ?? 15)),
+        options: PREVIEW_RATE_OPTIONS,
+        onChange: (v) => this.stage('previewRate', Number(v)),
+      }))
+      if (adaptive) {
+        children.push(this.field(YonderSetBar, {
+          key: 'previewFloor',
+          label: 'Floor',
+          unit: 'kb/s',
+          min: 100,
+          max: 4000,
+          step: 50,
+          precision: 0,
+          actual: policy.floor_kbps ?? 300,
+          requested: this.stagedValue('previewFloor'),
+          onSet: (v) => this.stage('previewFloor', v),
+        }))
+        children.push(this.field(YonderSetBar, {
+          key: 'previewCeiling',
+          label: 'Ceiling',
+          unit: 'kb/s',
+          min: 100,
+          max: 4000,
+          step: 50,
+          precision: 0,
+          actual: policy.ceiling_kbps ?? 2000,
+          requested: this.stagedValue('previewCeiling'),
+          onSet: (v) => this.stage('previewCeiling', v),
+        }))
+      }
+      children.push(this.field(YonderSetBar, {
+        key: 'previewBitrate',
+        label: adaptive ? 'Going out' : 'Bitrate',
+        unit: 'kb/s',
+        min: 100,
+        max: 4000,
+        step: 50,
+        precision: 0,
+        actual: adaptive ? (this.report.runtime?.previewKbps ?? null) : ((applied && typeof applied.bitrate_kbps === 'number') ? applied.bitrate_kbps : (policy.bitrate_kbps ?? 0)),
+        readonly: adaptive,
+        requested: adaptive ? null : this.stagedValue('previewBitrate'),
+        onSet: adaptive ? undefined : (v) => this.stage('previewBitrate', v),
+      }))
+      if (adaptive) children.push(h('p', { class: 'y-deck__note' }, this.report.runtime?.decision?.reason || 'Waiting for receiver feedback.'))
+      return h(YonderColumn, { legend: GROUP_LEGEND.preview, qualifier: 'to this browser', key: 'preview' }, () => children)
+    },
+    buildStreamColor () {
+      const image = this.report.policy?.image || { brightness: 0, contrast: 100, saturation: 100, hue: 0 }
+      const fields = [
+        ['imageBrightness', 'Brightness', 'brightness', -100, 100, '%'],
+        ['imageContrast', 'Contrast', 'contrast', 0, 200, '%'],
+        ['imageSaturation', 'Saturation', 'saturation', 0, 200, '%'],
+        ['imageHue', 'Hue', 'hue', -180, 180, '°'],
+      ]
+      return h(YonderColumn, { legend: 'Stream color', key: 'streamColor' }, () => [
+        h('p', { class: 'y-deck__color-note' }, "Adjusts Yonder's streams and thumbnails. Neutral values bypass processing; adjustments use CPU and can reduce frame rate. Camera-card files use native settings."),
+        ...fields.map(([key, label, property, min, max, unit]) => this.field(YonderSetBar, { key, label, unit, min, max, step: 1,
+          actual: image[property], requested: this.stagedValue(key), onSet: value => this.stage(key, value) })),
+      ])
+    },
+    buildOutputs () {
+      const outputs = [...(this.report.outputs || [])]
+      if (!outputs.some(output => output.kind === 'rtsp')) outputs.push({ kind: 'rtsp', label: 'RTSP', enabled: false, costKbps: null,
+        reach: { note: 'Enable for an authenticated player on your LAN or mesh.' } })
+      const rows = outputs.map((o) => h('div', { class: 'y-deck__out', key: o.kind }, [
+        h('span', { class: 'y-deck__out-l' }, o.label || o.kind),
+        this.field(YonderSegmented, {
+          key: OUTPUT_PATH[o.kind], label: o.kind === 'rtsp' ? 'Enable RTSP' : '',
+          options: ['Off', 'On'],
+          value: this.draftValue(OUTPUT_PATH[o.kind], o.enabled) ? 'On' : 'Off',
+          reason: this.stagedReason(OUTPUT_PATH[o.kind]),
+          onChange: (v) => this.toggleOutput(o.kind, v === 'On'),
+        }),
+        h('span', { class: 'y-deck__out-cost' }, typeof o.costKbps === 'number' ? `${o.costKbps} kb/s` : ''),
+        h('span', {
+          class: ['y-deck__out-reach', { 'y-deck__out-reach--warn': o.reach && !o.reach.reachable }],
+        }, (o.reach && o.reach.note) || ''),
+      ]))
+      return h(YonderColumn, { legend: GROUP_LEGEND.outputs, key: 'outputs' }, () => rows)
+    },
+    /**
+     * The gimbal pad — Live only, beside the picture, never one of `SLOTS`
+     * (the blueprint's own placement). `inhibited` is derived straight from
+     * `capabilities.aim` — `present` is live, `advertised`/`gated` disable
+     * the whole pad with the reason, and `not-offered` omits it entirely,
+     * the same three-way split every other capability on this page draws.
+     * Every `slew`/`stop` is relayed to the socket exactly as `YonderAimPad`
+     * computed it (R-CMD-04: this deck relays, it never originates one).
+     */
+
+    /**
+     * What is staged, what it would interrupt, and what the device refused.
+     *
+     * **The interruption is computed here, from this deck's own draft**
+     * (`interruption()` in `yonder-core`, the same function the apply's own
+     * answer carries). It used to be read off `report.interruption`, which
+     * the daemon composes as `[]` and can only ever compose as `[]` — the
+     * interruption a draft would cause is a fact about a draft that has not
+     * been sent, and the daemon has never seen it. So the warning spec §8.1
+     * asks for *before* Apply is pressed could not appear, while two doc
+     * comments said it did. Translating the flat draft and the flat applied
+     * values through `deckDraft()` is what lets one function serve both
+     * sides, rather than a second copy of §8.1's table living here.
+     *
+     * **A refusal's problems are shown beside the field each names.**
+     * `POST /cameras/:id/apply` answers them keyed by schema path;
+     * `draftPathFor()` is the reverse of the seam above, so
+     * `preview.floor_kbps` finds the `previewFloor` row it belongs to. One
+     * the deck cannot place is still drawn, on its own row with its path, so
+     * a problem is never silently dropped.
+     *
+     * **Two conditions before any of them is drawn, and both are about what
+     * a refusal actually is.** A refusal is a fact about *one camera's* draft:
+     *
+     * - `problemsFor` must name the camera on screen. The stash the flow
+     *   keeps is per device, not per camera, and without this a problem left
+     *   by camera A landed on camera B's matching staged path —
+     *   `previewFloor` reading "the floor is above the ceiling" beside a
+     *   perfectly valid value.
+     * - something must still be staged. With the draft discarded there is
+     *   nothing left for a problem to be about, and the block was drawing a
+     *   red sentence under a `Pending changes · 0` header. This is the rule
+     *   rather than a flag some other path has to remember to clear: the
+     *   draft going away *is* the refusal ceasing to apply.
+     */
+    buildPending () {
+      if (!this.report) return null
+      const pending = this.pendingEdits
+      const mine = this.report.problemsFor === this.camera
+      const problems = (mine && pending.length > 0 && Array.isArray(this.report.problems))
+        ? this.report.problems
+        : []
+      const stops = interruption(
+        deckDraft(this.draft).draft,
+        deckDraft(this.appliedFlat).draft,
+      )
+      if (pending.length === 0 && stops.length === 0) return null
+      const placed = new Set()
+      const problemFor = (path) => {
+        const found = problems.find((p) => draftPathFor(String(p && p.path)) === path)
+        if (found) placed.add(found)
+        return found
+      }
+      const rows = pending.map((p) => {
+        const problem = problemFor(p.path)
+        return h('div', { class: 'y-deck__pending-row', key: p.path }, [
+          h('span', { class: 'y-deck__pending-path' }, DRAFT_LABELS[p.path] || p.path),
+          h('span', { class: 'y-deck__pending-val' }, typeof p.requested === 'boolean' ? (p.requested ? 'On' : 'Off') : String(p.requested)),
+          ...(problem ? [h('span', { class: 'y-deck__pending-why' }, problem.message)] : []),
+        ])
+      })
+      const loose = problems.filter((p) => !placed.has(p))
+      return h('div', { class: 'y-deck__pending' }, [
+        h('div', { class: 'y-deck__pending-h' }, `Pending changes · ${pending.length}`),
+        ...rows,
+        ...loose.map((p, i) => h('div', { class: 'y-deck__pending-row', key: 'why' + i }, [
+          h('span', { class: 'y-deck__pending-path' }, String(p.path)),
+          h('span', { class: 'y-deck__pending-why' }, String(p.message)),
+        ])),
+        ...stops.map((s, i) => h('div', { class: 'y-deck__interrupt', key: 'int' + i }, s)),
+      ])
+    },
+    buildRail () {
+      const transaction = this.transaction
+      const active = transaction?.pending === true
+      const buttons = active
+        ? (transaction.keys || []).filter(key => ['confirm', 'revert'].includes(key.action)).map(key => h('button', {
+          type: 'button', class: ['y-deck__key', { 'y-deck__key--warn': key.action === 'confirm' }],
+          disabled: this.signInRequired || this.engineBusy, onClick: () => this.requestOperation(key.action, { transaction: `camera-${key.action}` }),
+        }, key.action === 'confirm' ? 'Keep' : 'Revert'))
+        : [h('button', { type: 'button', class: 'y-deck__key y-deck__key--warn', disabled: !this.canApply, onClick: () => this.apply() }, this.engineBusy && (!this.awaitingOperation || ['apply','confirm','revert'].includes(this.awaitingOperation.kind)) ? (this.awaitingOperation?.kind === 'confirm' ? 'Keeping…' : this.awaitingOperation?.kind === 'revert' || transaction?.state === 'reverting' ? 'Reverting…' : 'Applying…') : 'Apply'),
+          h('button', { type: 'button', class: 'y-deck__key', disabled: this.engineBusy || this.pendingEdits.length === 0, onClick: () => this.discard() }, 'Discard edits')]
+      const seconds = Number.isFinite(transaction?.expiresAt) ? Math.max(0, Math.ceil((transaction.expiresAt - (Number.isFinite(transaction.observedAt) && this.transactionReceivedAt !== null ? transaction.observedAt + this.now - this.transactionReceivedAt : this.now)) / 1000)) : null
+      return h('section', { class: 'y-deck__transaction', 'aria-label': 'Configuration changes' }, [
+        h('div', { class: 'y-deck__transaction-head' }, this.engineBusy ? 'Updating configuration' : active ? 'Keep or revert these changes' : 'Configuration changes'),
+        active ? h('p', { class: 'y-deck__transaction-message' }, transaction.movesRadio ? transaction.what || transaction.message : 'These settings are active. Choose Keep to save them or Revert to restore the previous settings.') : null,
+        active && seconds !== null ? h('p', { class: 'y-deck__transaction-countdown' }, `${seconds} seconds until automatic revert`) : null,
+        !active ? this.buildPending() : null,
+        this.awaitingOperation && !this.engineBusy && !active ? h('p', { class: 'y-deck__transaction-message', role: 'status' }, 'No completion reply received. Refresh camera to check the current settings before retrying.') : null,
+        this.engineBusy ? h('p', { class: 'y-deck__transaction-message', role: 'status' }, this.operationProgress) : null,
+        !active && !this.engineBusy && this.pendingEdits.length === 0 ? h('p', { class: 'y-deck__transaction-message' }, 'No local changes staged.') : null,
+        transaction?.state === 'rejected' ? h('p', { class: 'y-deck__transaction-error' }, transaction.message) : null,
+        this.operationResult ? h('p', { class: ['y-deck__result', `is-${this.operationResult.state}`], role: 'status' }, ['Last action: ', this.operationResult.message, h('button', { type: 'button', class: 'y-deck__dismiss', 'aria-label': 'Dismiss message', onClick: () => { this.dismissedResult = this.resultKey } }, 'Dismiss')]) : null,
+        h('div', { class: 'y-deck__rail' }, buttons),
+      ])
+    },
+    buildSlots (slots) {
+      const columns = slots.map(ids => ids.map(id => {
+        if (id === 'capture') return this.buildCapture()
+        if (id === 'stream') return this.buildStream()
+        if (id === 'preview') return this.buildPreview()
+        if (id === 'orientation') return this.buildOrientation()
+        return this.buildGroup(id)
+      }).filter(Boolean)).filter(column => column.length)
+      return h('div', { class: 'y-deck__cols' }, columns.map((column, index) => h('div', { class: 'y-deck__slot', key: index }, column)))
+    },
+  },
+  render () {
+    const r = this.report
+    if (!r) return h('div', { class: 'y-deck' }, [this.buildRail(), h('p', "Waiting for this camera's report.")])
+    const cam = r.camera || {}
+    return h('div', { class: 'y-deck y-deck--workspace' }, [
+      h(YonderPlacard, { kind: 'Camera', name: cam.name || '', unit: cam.spec || '' }),
+      this.signInRequired ? h('div', { class: 'y-deck__transaction', role: 'status' }, [h('a', { href: this.signInHref }, 'Sign in'), ' to restore camera controls. Your unsaved edits are kept.']) : null,
+      this.buildRail(),
+      h('div', { class: 'y-deck__tools' }, [
+        h('button', { type: 'button', class: 'y-deck__key', disabled: this.signInRequired || this.engineBusy || !this.videoControl.action, onClick: () => this.requestOperation(this.videoControl.action, { video: this.videoControl.action }) }, this.videoControl.label),
+        h('button', { type: 'button', class: 'y-deck__key', disabled: this.signInRequired || this.engineBusy, onClick: () => this.requestOperation('probe', { refresh: true }) }, 'Refresh camera'),
+        h('button', { type: 'button', class: 'y-deck__key', disabled: this.signInRequired, 'aria-expanded': this.connectionOpen, onClick: () => this.connectionOpen ? this.closeConnection() : this.loadConnection() }, this.connectionOpen ? 'Hide connection details' : 'Connection details'),
+      ]),
+      this.buildConnection(),
+      h('h2', { class: 'y-deck__section' }, 'Camera image and capture'),
+      h('p', { class: 'y-deck__hint' }, "Camera exposure and capture changes take effect immediately. The controls show the camera's readback."),
+      this.buildSlots(IMAGE_SLOTS),
+      h('h2', { class: 'y-deck__section' }, 'Stream, picture and outputs'),
+      h('p', { class: 'y-deck__hint' }, 'These edits are staged until you press Apply.'),
+      this.buildSlots(CONFIG_SLOTS),
+      this.buildOutputs(),
+    ])
+  },
+}
+</script>
+
+<style scoped>
+.y-deck__adaptation { margin: 12px 0; padding: 10px; border: 1px solid var(--yonder-divider); font-size: 12px; line-height: 1.5; overflow-wrap: anywhere; }
+.y-deck__adaptation p { margin: 4px 0 0; }
+.y-deck__adaptation.is-unavailable { border-color: var(--yonder-waiting); }
+.y-deck__feedback-values { color: var(--yonder-label); font-variant-numeric: tabular-nums; }
+.y-deck__connection { padding: 16px; border: 1px solid var(--yonder-divider); overflow-wrap: anywhere; font-size: 12px; }
+.y-deck__connection :deep(.y-id) { display: grid; grid-template-columns: minmax(0,1fr) auto; align-items: start; gap: 6px 12px; }
+.y-deck__connection :deep(.y-id__k) { grid-column: 1 / -1; }
+.y-deck__connection :deep(.y-id__v) { white-space: pre-wrap; overflow-wrap: anywhere; overflow: visible; text-overflow: clip; }
+.y-deck__connection-note { margin: 4px 0 18px; line-height: 1.5; }
+.y-deck__dismiss { margin-left:12px; color:inherit; font:inherit; text-decoration:underline; background:none; border:0; cursor:pointer; }
+
+.y-deck__transaction {
+    margin: 12px 0;
+    padding: 14px 16px;
+    border: 1px solid var(--yonder-divider, #2b333c);
+    border-radius: 3px;
+    background: var(--yonder-pane, #0a0e13);
+    overflow-wrap: anywhere;
+}
+.y-deck__transaction-head, .y-deck__section { font-size: 14px; font-weight: 600; color: var(--yonder-value, #fff); }
+.y-deck__transaction-message, .y-deck__hint { margin: 6px 0; font-size: 12px; line-height: 1.5; color: var(--yonder-label, #7f8a95); }
+.y-deck__transaction-countdown { margin: 6px 0; font-size: 13px; font-variant-numeric: tabular-nums; color: var(--yonder-waiting, #ffcf28); }
+.y-deck__transaction-error, .y-deck__result.is-rejected { color: var(--yonder-bad, #ff6b6b); }
+.y-deck__result { margin: 8px 0; font-size: 12px; line-height: 1.5; overflow-wrap: anywhere; }
+.y-deck__result.is-confirmed { color: var(--yonder-good, #6ddd97); }
+.y-deck__section { margin: 18px 0 0; padding: 0 16px; }
+.y-deck__hint { padding: 0 16px; }
+.y-deck__tools { display: flex; flex-wrap: wrap; gap: 8px; padding: 0 16px; }
+.y-deck__key:disabled { opacity: .5; cursor: not-allowed; }
+.y-deck :deep(.y-field--pending) {
+    background: color-mix(in srgb, var(--yonder-select, #2ad4f0) 9%, transparent);
+    outline: 1px solid color-mix(in srgb, var(--yonder-select, #2ad4f0) 50%, transparent);
+    box-shadow: 0 0 9px color-mix(in srgb, var(--yonder-select, #2ad4f0) 12%, transparent);
+    border-radius: 3px;
+}
+.y-deck__color-note { font-size: 11px; line-height: 1.4; color: var(--yonder-label, #7f8a95); }
+
+.y-deck {
+    display: flex;
+    flex-direction: column;
+    gap: 10px;
+    font-family: var(--yonder-font, system-ui, sans-serif);
+    background: var(--yonder-pane, #090d12);
+    color: var(--yonder-value, #ffffff);
+}
+.y-deck--empty {
+    padding: 24px;
+    color: var(--yonder-label, #7f8a95);
+}
+.y-deck__fact {
+    display: flex;
+    gap: 10px;
+    align-items: baseline;
+    padding: 4px 16px;
+    font-size: 13px;
+}
+.y-deck__fact-l {
+    font-size: 10.5px;
+    letter-spacing: 0.1em;
+    text-transform: uppercase;
+    color: var(--yonder-label, #7f8a95);
+    min-width: 90px;
+}
+.y-deck__fact-v { color: var(--yonder-neutral, #7d7869); }
+/* The line under Mirror, Flip and Rotation saying what is being done to the
+   picture (R-CTL-15) — the blueprint's own `.d-modenote`, to its own figures.
+   The label tone, not the caution one: a real pipeline element with a real
+   cost is a fact, not a warning. */
+.y-deck__turnnote {
+    font-size: 11px;
+    color: var(--yonder-label, #7f8a95);
+    margin-top: 2px;
+}
+/* A link, not a readout (blueprint L-47). The blueprint draws it beside the
+   shutter key in the deck's own type, and it opens the panel that lists what
+   the count is about. */
+.y-deck__captures {
+    /* Centred under the key it belongs to, which is itself centred. `margin:
+       auto` rather than `align-self`, because the column this lands in is not
+       a flex container and `align-self` there does nothing at all — which is
+       what it did. */
+    display: block;
+    margin: 4px auto 0;
+    padding: 6px 9px;
+    border: 0;
+    background: transparent;
+    font: inherit;
+    font-size: 11px;
+    letter-spacing: 0.06em;
+    color: var(--yonder-select, #2ad4f0);
+    cursor: pointer;
+}
+.y-deck__captures:hover { text-decoration: underline; }
+
+/* See the note beside `y-deck__mode` above: the shutter key has to clear the
+   fold at 1440x900, and this is where the room comes from. */
+/* The room the shutter needs to clear the fold comes from this control's own
+   height — never from the gap beneath it. A negative margin here took the eight
+   pixels back by pulling the key up over the `Video | Photo` buttons, which is
+   not saving space, it is hiding a control behind another one. */
+.y-deck__mode :deep(.y-seg__btn) { min-height: 26px; }
+.y-deck__mode :deep(.y-seg__label) { margin-bottom: 3px; }
+/* R-STO-06: a recording that ended by itself, said where the next press is.
+   The caution tone, because it is a thing that happened to the operator
+   rather than a thing they did. */
+.y-deck__ended {
+    font-size: 11px;
+    line-height: 1.4;
+    color: var(--yonder-waiting, #ffcf28);
+    padding: 4px 0;
+    text-align: center;
+}
+/* Fixed slots (SLOTS above), never a CSS-flow column: each holds whatever
+   groups it was assigned, in a fixed vertical order, and nothing moves
+   between slots when one group's own height changes. */
+.y-deck__cols {
+    display: flex;
+    align-items: flex-start;
+    gap: 4px;
+    flex-wrap: wrap;
+}
+.y-deck__slot {
+    display: flex;
+    flex-direction: column;
+    /* 220, not 252: the blueprint's own figure (`gallery.css` `.d-cols__slot`).
+       At 252 a fourth slot does not fit a 1280-wide page and wraps under the
+       first, which is how this deck came to photograph as three columns and a
+       stray — the four-column shape `SLOTS` declares only appeared at 1440. */
+    min-width: min(220px, 100%);
+    flex: 1 1 252px;
+    /* The rule between columns, which the blueprint draws and this did not.
+       Not decoration: four unruled columns of label/value pairs read as one
+       field of text, and the eye has nothing to tell it which qualifier —
+       *to the ground station*, *to this browser* — governs which reading.
+
+       Longhand, not the `border-left` shorthand: jsdom does not resolve custom
+       properties, so a shorthand carrying `var(--yonder-divider)` fails to
+       parse there and the width reads as something else entirely — which is
+       how the first version of this rule passed a test asserting 1px while
+       computing 16. Written this way the width and style are readable
+       whatever the colour resolves to. */
+    border-left-width: 1px;
+    border-left-style: solid;
+    border-left-color: var(--yonder-divider, #2b333c);
+}
+.y-deck__slot:first-child {
+    border-left-width: 0;
+}
+.y-deck__out {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: center;
+    gap: 10px;
+    padding: 6px 0;
+    font-size: 12px;
+}
+.y-deck__out + .y-deck__out { border-top: 1px solid var(--yonder-divider, #2b333c); }
+.y-deck__out-l { min-width: 110px; color: var(--yonder-value, #ffffff); }
+.y-deck__out-cost {
+    font-variant-numeric: tabular-nums;
+    text-transform: none;
+    color: var(--yonder-label, #7f8a95);
+}
+.y-deck__out-reach { color: var(--yonder-label, #7f8a95); font-size: 11px; overflow-wrap: anywhere; max-width: 100%; }
+.y-deck__out-reach--warn { color: var(--yonder-waiting, #ffcf28); }
+.y-deck__pending {
+    margin: 0 16px;
+    padding: 8px 10px;
+    border: 1px solid var(--yonder-select, #2ad4f0);
+    border-radius: 3px;
+}
+.y-deck__pending-h {
+    font-size: 11px;
+    letter-spacing: 0.1em;
+    text-transform: uppercase;
+    color: var(--yonder-select, #2ad4f0);
+    margin-bottom: 6px;
+}
+.y-deck__pending-row {
+    display: flex;
+    flex-wrap: wrap;
+    justify-content: space-between;
+    gap: 10px;
+    font-size: 12px;
+    padding: 2px 0;
+}
+.y-deck__pending-why {
+    flex-basis: 100%;
+    color: var(--yonder-bad, #ff4034);
+    font-size: 11px;
+}
+.y-deck__interrupt {
+    font-size: 11px;
+    color: var(--yonder-waiting, #ffcf28);
+    padding-top: 4px;
+}
+.y-deck__rail {
+    display: flex;
+    flex-wrap: wrap;
+    border-top: 1px solid var(--yonder-divider, #2b333c);
+    background: var(--yonder-pane, #090d12);
+}
+.y-deck__key {
+    flex: 0 0 auto;
+    min-width: 8rem;
+    min-height: 34px;
+    padding: 7px 6px;
+    border: 0;
+    border-right: 1px solid var(--yonder-divider, #2b333c);
+    background: transparent;
+    font: inherit;
+    font-family: var(--yonder-font-mono, ui-monospace, monospace);
+    font-size: 0.625rem;
+    font-weight: 700;
+    letter-spacing: 0.13em;
+    text-transform: uppercase;
+    color: var(--yonder-label, #7f8a95);
+    cursor: pointer;
+}
+.y-deck__key:disabled { cursor: not-allowed; opacity: 0.5; }
+.y-deck__key.on {
+    color: var(--yonder-value, #ffffff);
+    background: var(--yonder-raised, rgba(255, 255, 255, 0.06));
+    box-shadow: inset 0 2px 0 var(--yonder-select, #2ad4f0);
+}
+.y-deck__key--warn { color: var(--yonder-irreversible, #f03fce); }
+</style>

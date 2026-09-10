@@ -18,6 +18,12 @@
 # checks that nothing is clipped and no action spans its surface, and fails when
 # a page changed shape without somebody accepting it.
 #
+# Since R-UI-23 every reading in those captures is its **widest honest value**
+# (scripts/fixtures/specimens.json) rather than a grey box, so the pictures show
+# what each page does with the longest value its fields can carry — and the
+# camera pages are captured again at the two widths spec §5 writes a viewport
+# contract for, with the viewport photographed separately from the full page.
+#
 # What it does NOT prove: that a widget is usable on a tablet, that a reading is
 # legible in sunlight, or anything at all about hardware, systemd,
 # NetworkManager or a radio. Those need a board and a person holding it.
@@ -36,6 +42,15 @@ REPO=$(CDPATH='' cd -- "$HERE/.." && pwd)
 CORE="$REPO/packages/yonder-core"
 CONSOLE_TREE=${CONSOLE_TREE:-$REPO/vendor/console}
 PORT=${PORT:-18881}
+# The camera CI does not have.
+#
+# R-UI-03 builds navigation from detected hardware and R-UI-12 photographs
+# every page on every build, so with no camera attached there is no camera page
+# and this gate covers none of the camera work — without complaining, because
+# from its point of view there is nothing there. So the daemon is started
+# through scripts/pages-daemon.mjs with a capability set recorded off a
+# Raspberry Pi 4, and the camera pages exist to be photographed.
+CAMERAS=${CAMERAS:-$REPO/scripts/fixtures/camera-globalshutter.json}
 
 pass=0
 fail=0
@@ -52,6 +67,8 @@ command -v node >/dev/null 2>&1 || die "node is needed"
     || die "the contrib packages are not built; run: npm run build"
 [ -f "$REPO/packages/node-red-contrib-yonder-modem/dist/state.js" ] \
     || die "the modem package is not built; run: npm run build"
+[ -f "$REPO/packages/node-red-contrib-yonder-mavlink/dist/state.js" ] \
+    || die "the mavlink package is not built; run: npm run build"
 [ -f "$CONSOLE_TREE/node_modules/node-red/red.js" ] \
     || die "no console tree at $CONSOLE_TREE; run: ./installer/make-payload.sh --arch linux-arm64"
 [ -d "$CONSOLE_TREE/node_modules/@flowfuse/node-red-dashboard" ] \
@@ -68,7 +85,12 @@ JOURNAL="$ROOT/journal.log"
 BIN="$ROOT/bin"
 SYSTEMCTL_LOG="$ROOT/systemctl.log"
 
-mkdir -p "$ETC" "$RUN" "$STATE" "$CONSOLE" "$USERDIR" "$BIN"
+# `etc/mediamtx` as well as `etc/yonder`: with a camera configured, the media
+# renderer writes the media server's configuration on every apply, and a
+# missing directory is not a media failure — it fails the *whole* apply, so the
+# next theme change reports "the control is wired but dead". The installer's
+# 50-mediamtx.sh makes this directory on a board; this is the harness's copy.
+mkdir -p "$ETC" "$ROOT/etc/mediamtx" "$RUN" "$STATE" "$CONSOLE" "$USERDIR" "$BIN"
 : > "$JOURNAL"
 : > "$SYSTEMCTL_LOG"
 
@@ -76,9 +98,49 @@ mkdir -p "$ETC" "$RUN" "$STATE" "$CONSOLE" "$USERDIR" "$BIN"
 # development machine, and their absence would stop the run before it reached
 # anything under test. `ping` answers the way a host that replied does, so the
 # diagnostics route has something real to parse.
-cat > "$BIN/systemctl" <<'FAKE'
+# Where `mavlink-router` stands, as far as anything on this device can tell.
+#
+# Every other unit this daemon touches is fire-and-forget, and the stand-in
+# used to exit 0 for all of them — including `is-active`, which made the
+# telemetry renderer believe a router was already holding the serial port
+# before one had ever been started. It then declined to sweep (adopting a
+# link it could not read is the one thing that would take a port off a
+# working router), so the Telemetry page could never be captured with
+# anything on it. Only `mavlink-router` is tracked, because it is the only
+# unit anything here asks a question about.
+ROUTER_STATE="$ROOT/router-state"
+echo inactive > "$ROUTER_STATE"
+# What the router prints to its journal once a second with `ReportStats =
+# true`, written by the router stand-in in scripts/pages-daemon.mjs and read
+# back through `journalctl` — the path the renderer actually uses.
+ROUTER_STATS="$ROOT/router-stats"
+: > "$ROUTER_STATS"
+# What is on the other end of the serial port for this part of the run:
+# `linked`, `silent` or `noise` — R-MAV-13's three answers, and three of the
+# six states the Telemetry page has to be captured in. Read on every open,
+# never captured, the way $PROBE_ANSWER is.
+MAV_MODE="$ROOT/mav-mode"
+echo linked > "$MAV_MODE"
+
+cat > "$BIN/systemctl" <<FAKE
 #!/bin/sh
-printf '%s\n' "$*" >> "$SYSTEMCTL_LOG"
+printf '%s\n' "\$*" >> "\$SYSTEMCTL_LOG"
+case "\$*" in
+    *mavlink-router*)
+        case "\$1" in
+            is-active)      [ "\$(cat "$ROUTER_STATE")" = active ] || exit 3 ;;
+            start|restart)  echo active   > "$ROUTER_STATE" ;;
+            stop)           echo inactive > "$ROUTER_STATE" ;;
+        esac ;;
+esac
+exit 0
+FAKE
+# journalctl, which is how the renderer reads the router's own per-endpoint
+# counters (R-MAV-10, and the measurement §6 was reversed by). Nothing else
+# on this daemon runs it.
+cat > "$BIN/journalctl" <<FAKE
+#!/bin/sh
+cat "$ROUTER_STATS" 2>/dev/null
 exit 0
 FAKE
 # Which board this run is describing: 1 with a modem in the slot, 0 without.
@@ -151,6 +213,23 @@ case "\$*" in
 esac
 exit 0
 FAKE
+# Kernel observations for the same fixture board as nmcli. There is no default
+# route, so background reachability remains untested until this gate probes it.
+cat > "$BIN/ip" <<FAKE
+#!/bin/sh
+case "\$*" in
+    "-j address show")
+        if [ "\$(cat "$ETH_STATE")" = connected ]; then
+            printf '%s\n' '[{"ifname":"eth0","operstate":"UP","flags":["UP","LOWER_UP"],"mtu":1500,"addr_info":[{"local":"192.168.77.10","prefixlen":24,"scope":"global"}]},{"ifname":"wlan0","operstate":"DOWN","flags":["NO-CARRIER"],"mtu":1500,"addr_info":[]}]'
+        else
+            printf '%s\n' '[{"ifname":"eth0","operstate":"DOWN","flags":["NO-CARRIER"],"mtu":1500,"addr_info":[]},{"ifname":"wlan0","operstate":"DOWN","flags":["NO-CARRIER"],"mtu":1500,"addr_info":[]}]'
+        fi ;;
+    "-j -4 route show table main"|"-j -6 route show table main"|"-j -4 route show default") printf '[]\n' ;;
+    *) exit 1 ;;
+esac
+FAKE
+chmod +x "$BIN/ip"
+
 # mmcli, replaying what a real EC25-AF on a live SIM answered. The fixtures are
 # the ones yonder-core's own parser tests are written against, so the Cellular
 # tab is captured showing what that board actually reported rather than a panel
@@ -218,7 +297,7 @@ printf 'rtt min/avg/max/mdev = 8.294/9.117/10.352/0.884 ms\n'
 exit 0
 FAKE
 chmod +x "$BIN/systemctl" "$BIN/nmcli" "$BIN/mmcli" "$BIN/curl" "$BIN/rfkill" \
-    "$BIN/hostnamectl" "$BIN/ping"
+    "$BIN/hostnamectl" "$BIN/ping" "$BIN/journalctl"
 
 # The modem password this run puts on the device, and the one string that must
 # never come back out of it (R-SEC-10).
@@ -279,6 +358,22 @@ sed -e "s/^  port: .*/  port: $PORT/" "$REPO/config/defaults/config.yaml" \
       modem && /^    apn:/      { print "    apn: ereseller";     next }
       modem && /^    username:/ { print "    username: sim-user"; next }
       modem && /^    password:/ { print "    password:"; print "      secret: modem_password"; next }
+      # Two ground stations, and deliberately not three. The Telemetry page
+      # has three rows whether or not all three are configured, and an unset
+      # one is a different reading from a configured one that has gone quiet
+      # (R-UI-17, and `groundStationRow`s three answers) — so the third row
+      # stays empty and the page is captured saying so. The addresses are the
+      # ones the page was designed against.
+      /^  endpoints: \[\]$/ {
+          print "  endpoints:";
+          print "    - name: gcs0";
+          print "      host: 192.168.191.40";
+          print "      port: 14550";
+          print "    - name: gcs1";
+          print "      host: 10.147.20.8";
+          print "      port: 14551";
+          next
+      }
       { print }
     ' > "$ETC/config.yaml"
 grep -q "port: $PORT" "$ETC/config.yaml" || die "could not set the console port in $ETC/config.yaml"
@@ -304,6 +399,56 @@ umask 077
 printf 'modem_password: %s\n' "$MODEM_PASSWORD" > "$ETC/secrets.yaml"
 umask 022
 
+# The fixture's camera, into the configuration the daemon loads. Written by the
+# schema's own serialiser rather than by appending YAML here, so a schema change
+# breaks this loudly instead of producing a document that parses and means
+# something else.
+[ -f "$CAMERAS" ] || die "no camera fixture at $CAMERAS"
+CONFIG_PATH="$ETC/config.yaml" FIXTURE_PATH="$CAMERAS" REPO_PATH="$REPO" node -e '
+const { readFileSync, writeFileSync } = require("node:fs");
+const { parse, stringify } = require(process.env.REPO_PATH + "/node_modules/yaml");
+const path = process.env.CONFIG_PATH;
+const config = parse(readFileSync(path, "utf8"));
+config.cameras = [JSON.parse(readFileSync(process.env.FIXTURE_PATH, "utf8")).camera];
+writeFileSync(path, stringify(config));
+' || die "could not put the fixture's camera into $ETC/config.yaml"
+grep -q "^cameras:" "$ETC/config.yaml" || die "the fixture's camera did not reach $ETC/config.yaml"
+
+# The camera answer the daemon reads, and a second one for the half of R-CTL-15
+# no camera on this bench can draw.
+#
+# `pages-daemon.mjs` re-reads its fixture on every call, the way the
+# `nmcli`/`mmcli` stand-ins above re-read `$MODEM_PRESENT`, so swapping this
+# copy describes a different camera without restarting anything. The console
+# has to say which of the sensor and the board is turning the picture
+# (R-CTL-15); the Global Shutter Camera implements no `horizontal_flip`, no
+# `vertical_flip` and no `rotate`, so the board carries all three here and the
+# sensor's own sentence has no hardware to produce it. `camera-sensor-turns
+# .json` is the overlay that does, and it is merged rather than kept as a
+# second whole fixture so the board's recorded answers stay in one file.
+CAMERAS_LIVE="$ROOT/cameras.json"
+CAMERAS_SENSOR="$ROOT/cameras-sensor.json"
+SENSOR_OVERLAY="$REPO/scripts/fixtures/camera-sensor-turns.json"
+cp "$CAMERAS" "$CAMERAS_LIVE" || die "could not stage the camera fixture at $CAMERAS_LIVE"
+[ -f "$SENSOR_OVERLAY" ] || die "no sensor-turns overlay at $SENSOR_OVERLAY"
+# JavaScript template interpolation must reach Node literally.
+# shellcheck disable=SC2016
+BASE="$CAMERAS" OVERLAY="$SENSOR_OVERLAY" OUT="$CAMERAS_SENSOR" node -e '
+const { readFileSync, writeFileSync } = require("node:fs");
+const base = JSON.parse(readFileSync(process.env.BASE, "utf8"));
+const overlay = JSON.parse(readFileSync(process.env.OVERLAY, "utf8"));
+for (const [key, value] of Object.entries(overlay.capabilities)) {
+  // A capability the overlay names and the recorded fixture does not is a
+  // renamed key, not a camera that lacks it: written silently it would leave
+  // the sensor capture describing the board case and passing.
+  if (!(key in base.found[0].capabilities)) {
+    throw new Error(`the overlay names ${key}, which the recorded fixture has no key for`);
+  }
+  base.found[0].capabilities[key] = value;
+}
+writeFileSync(process.env.OUT, JSON.stringify(base, null, 2) + "\n");
+' || die "could not build the sensor-turns fixture at $CAMERAS_SENSOR"
+
 DAEMON_PID=""
 CONSOLE_PID=""
 cleanup() {
@@ -325,6 +470,17 @@ give_up() {
     die "$1"
 }
 
+# scripts/pages-daemon.mjs, not dist/daemon/server.js, and only here.
+#
+# `MavlinkRenderer` is assembled only when a caller hands `startServer` a way
+# to open a serial port, and nothing in this repository implements one — so
+# the shipped `main()` supplies none and every `/mav/*` route answers 503.
+# That is the true state of every device built to date and it is also a
+# Telemetry page with nothing on it, which is the failure R-UI-12 exists to
+# prevent. The harness entry point builds the same daemon from the same
+# environment and adds the serial stand-in, exactly as the files above stand
+# in for nmcli, mmcli, curl and ping. `scripts/verify-console.sh` still
+# starts the production entry point, so `main()`'s own wiring stays covered.
 start_daemon() {
     SYSTEMCTL_LOG="$SYSTEMCTL_LOG" \
     YONDER_SOCKET="$SOCKET" \
@@ -335,8 +491,15 @@ start_daemon() {
     YONDER_CONSOLE_USERDIR="$USERDIR" \
     YONDER_CONSOLE_CORE_TREE="$CORE" \
     YONDER_CONSOLE_UNIT="yonder-console.service" \
+    YONDER_PAGES_MAV_MODE="$MAV_MODE" \
+    YONDER_PAGES_MAV_CONF="$ETC/mavlink-router/main.conf" \
+    YONDER_PAGES_MAV_HINT="$STATE/mavlink-link.json" \
+    YONDER_PAGES_ROUTER_STATE="$ROUTER_STATE" \
+    YONDER_PAGES_ROUTER_STATS="$ROUTER_STATS" \
+    YONDER_CAMERAS_FIXTURE="$CAMERAS_LIVE" \
+    YONDER_MEDIA_CONFIG="$ROOT/etc/mediamtx/mediamtx.yml" \
     PATH="$BIN:$PATH" \
-        node "$CORE/dist/daemon/server.js" >>"$JOURNAL" 2>&1 &
+        node "$REPO/scripts/pages-daemon.mjs" >>"$JOURNAL" 2>&1 &
     DAEMON_PID=$!
 }
 
@@ -382,6 +545,24 @@ expect_contains() {
         *) bad "$what: '$needle' is not in the reply" ;;
     esac
 }
+# One field out of a JSON reply, parsed rather than pattern-matched.
+#
+# `sed -n 's/.*"id":"\([^"]*\)".*/\1/p'` is greedy, and `GET /status` carries
+# two ids: the pending change's and `lastResult`'s, left over from the apply
+# before it. So the pattern read the *previous* apply's id, confirmed a change
+# that was already over, and left the real one pending — which then refused
+# every apply after it and took the rest of the run with it.
+json_field() {
+    node -e '
+        let raw = "";
+        process.stdin.on("data", (d) => { raw += d; });
+        process.stdin.on("end", () => {
+            try { process.stdout.write(String(JSON.parse(raw)[process.argv[1]] ?? "")); }
+            catch { process.stdout.write(""); }
+        });
+    ' "$1"
+}
+
 expect_missing() {
     what="$1"; needle="$2"; haystack="$3"
     case "$haystack" in
@@ -417,11 +598,76 @@ check "and it is the day palette, which is the default" \
 # ---------------------------------------------------------------------------
 say "the routes the pages read, over the socket"
 
+expect_contains "GET /cameras finds the fixture's camera" '"card":"Global Shutter Camera' "$(sock /cameras)"
+expect_contains "and says whether its identity survives a reboot" 'survives a reboot' "$(sock /cameras)"
+expect_contains "and reports what was rejected, with a reason"    '"reason"' "$(sock /cameras)"
+expect_contains "GET /cameras/front reads the device, not a form" '"capabilities"' "$(sock /cameras/front)"
+expect_contains "and states what this camera cannot do"           '"facts"' "$(sock /cameras/front)"
+
+# A camera in the configuration means the media server has one too, before
+# anything tries to publish to it: mediamtx started with no paths accepts none,
+# and a pipeline publishing to it dies with 400 Bad Request.
+check "the media server's configuration was written for it" \
+    test -f "$ROOT/etc/mediamtx/mediamtx.yml"
+expect_contains "with a path for the picture the browser watches" \
+    "front-preview" "$(cat "$ROOT/etc/mediamtx/mediamtx.yml" 2>/dev/null)"
+# Asserted before it is used: a check against an empty needle matches
+# everything, so a secrets.yaml with no RTSP password would turn the two lines
+# below into a guard that always passes.
+check "the device generated its own RTSP credential" \
+    grep -q '^rtsp_password:' "$ETC/secrets.yaml"
+RTSP_SECRET=$(sed -n 's/^rtsp_password: //p' "$ETC/secrets.yaml" 2>/dev/null | tr -d '"')
+expect_missing "and it is in nothing either service printed" "$RTSP_SECRET" "$(cat "$JOURNAL")"
+
+# R-CFG-12 against R-CFG-03, on the two kinds of camera setting. This is what
+# the Setup deck's countdown is drawn from, so it is asserted here rather than
+# inferred from the page.
+kept=$(sock_post /cameras/front/settings '{"framerate":25}')
+expect_contains "a picture setting is kept, with nothing to confirm" '"expiresAt":null' "$kept"
+armed=$(sock_post /cameras/front/settings '{"bitrate_kbps":2500}')
+expect_missing "a bitrate change arms the confirmation window" '"expiresAt":null' "$armed"
+# Confirmed, and then put back and confirmed again — an apply left pending
+# blocks every apply behind it, including the theme change the capture gate
+# makes to reach the second palette. That is not hypothetical: it is how this
+# script first reported "pressing Night did nothing: the control is wired but
+# dead", and the control was fine.
+confirm_apply() {
+    id=$(printf '%s' "$1" | sed -n 's/.*"id":"\([^"]*\)".*/\1/p')
+    [ -n "$id" ] && sock_post /confirm "{\"id\":\"$id\"}" >/dev/null
+}
+confirm_apply "$armed"
+confirm_apply "$(sock_post /cameras/front/settings '{"bitrate_kbps":2000,"framerate":30}')"
+expect_contains "and the document really changed, not only the answer" \
+    '"bitrate_kbps":2000' "$(sock /config)"
+
+
 expect_contains "GET /system reports a board"        '"display"'   "$(sock /system)"
 expect_contains "GET /net/scan folds the mesh"       '"ssid":"HomeNetwork"' "$(sock /net/scan)"
 expect_missing  "and carries no key"                 'psk'         "$(sock /net/scan)"
 expect_contains "GET /log has the daemon's own start-up" '"level"' "$(sock /log)"
 expect_contains "GET /diag/reachable probes"         '"reachable":true' "$(sock /diag/reachable)"
+
+# The telemetry layer, which every device built to date does not have. See
+# start_daemon: this run has a serial stand-in, so these five routes answer
+# rather than 503, and the Telemetry page can be captured with something on it.
+wait_for_phase() {
+    i=0
+    while [ "$i" -lt "$TRIES" ]; do
+        case "$(sock /mav/state)" in *"\"phase\":\"$1\""*) return 0 ;; esac
+        sleep "$POLL"; i=$((i + 1))
+    done
+    return 1
+}
+if wait_for_phase linked; then
+    ok "GET /mav/state found the autopilot and says so"
+else
+    bad "GET /mav/state never reported a link: $(sock /mav/state)"
+fi
+mav=$(sock /mav/state)
+expect_contains "and names the port it was found on"   '"device":"/dev/ttyAMA0"' "$mav"
+expect_contains "and the speed the sweep settled at"   '"baud":57600' "$mav"
+expect_contains "with telemetry flowing to the ground stations" '"telemetryRunning":true' "$mav"
+expect_contains "GET /mav/check answers as a chain, not a verdict" '"autopilot"' "$(sock /mav/check)"
 
 ping_json=$(curl -s -H 'content-type: application/json' --data '{"host":"1.1.1.1"}' \
     --unix-socket "$SOCKET" http://localhost/diag/ping)
@@ -436,29 +682,45 @@ say "the shipped flows, in a real Node-RED with the real dashboard"
 # What 30-console.sh does on a board: place the flows, and put the contrib
 # packages where the console's own node resolution will find them.
 cp "$REPO/flows/flows.json" "$USERDIR/flows.json"
-mkdir -p "$CONSOLE/node_modules"
+mkdir -p "$CONSOLE/node_modules" "$USERDIR/node_modules"
+# **Into the user directory as well as the console tree, and that is what
+# makes this gate photograph the packages under test** (K-46).
+#
+# Node-RED finds a node module by walking up from its *own* directory looking
+# for `node_modules`, and `node-red` here is a symlink into `vendor/console`
+# — which node resolves, so the walk starts in this repository and climbs out
+# of it. On a checkout whose parent directory happens to hold another
+# workspace's `node_modules`, the packages it finds are that other one's:
+# every yonder node loaded from a different tree, silently, and a package
+# this branch added was simply absent. `$CONSOLE/node_modules` is not on that
+# path at all, so the careful staging below was never what got loaded.
+#
+# `<userDir>/node_modules` is scanned first and its modules win the dedupe
+# outright (`localfilesystem.scanTreeForNodesModules` marks them `local` and
+# sorts them ahead), so linking them there is what pins the gate to this
+# tree. The console tree's copy stays, because that is where a board has them
+# and this script exists to run what a board runs.
+#
 # rm then ln, never `ln -sfn`: -n is not POSIX, and without it `ln -sf` onto an
 # existing symlink-to-a-directory creates the link inside it.
 for pkg in node-red-contrib-yonder-system node-red-contrib-yonder-network \
            node-red-contrib-yonder-remote node-red-contrib-yonder-modem \
+           node-red-contrib-yonder-video node-red-contrib-yonder-mavlink \
            node-red-dashboard-2-yonder; do
-    rm -f "$CONSOLE/node_modules/$pkg"
+    rm -f "$CONSOLE/node_modules/$pkg" "$USERDIR/node_modules/$pkg"
     ln -s "$REPO/packages/$pkg" "$CONSOLE/node_modules/$pkg"
+    # Dashboard discovers a third-party widget package by reading the *user
+    # directory's* package.json for a dependency and resolving it beneath that
+    # directory, so the widget package has to be here whatever else is (K-28).
+    ln -s "$REPO/packages/$pkg" "$USERDIR/node_modules/$pkg"
 done
-rm -f "$CONSOLE/node_modules/yonder-core"
+rm -f "$CONSOLE/node_modules/yonder-core" "$USERDIR/node_modules/yonder-core"
 ln -s "$CORE" "$CONSOLE/node_modules/yonder-core"
-# What 30-console.sh also does, and what the widgets do not appear without:
-# Dashboard discovers a third-party widget package by reading the *user
-# directory's* package.json for a dependency and resolving it beneath that
-# directory. A package in the console tree's node_modules is where Node-RED
-# finds the nodes and is invisible to that scan (K-28).
-mkdir -p "$USERDIR/node_modules"
-rm -f "$USERDIR/node_modules/node-red-dashboard-2-yonder"
-ln -s "$REPO/packages/node-red-dashboard-2-yonder" \
-      "$USERDIR/node_modules/node-red-dashboard-2-yonder"
-cat > "$USERDIR/package.json" <<'MANIFEST'
+ln -s "$CORE" "$USERDIR/node_modules/yonder-core"
+WIDGET_VERSION=$(node -p 'require(process.argv[1]).version' "$REPO/packages/node-red-dashboard-2-yonder/package.json")
+cat > "$USERDIR/package.json" <<MANIFEST
 { "name": "yonder-console-state", "version": "0.0.0", "private": true,
-  "dependencies": { "node-red-dashboard-2-yonder": "0.1.0" } }
+  "dependencies": { "node-red-dashboard-2-yonder": "$WIDGET_VERSION" } }
 MANIFEST
 # The dashboard and node-red itself come from the staged tree.
 for entry in "$CONSOLE_TREE/node_modules"/*; do
@@ -505,18 +767,25 @@ else
     ok "the console logged no error at all"
 fi
 
+# Stream addresses now use the authenticated camera connection route; the
+# reusable yonder-stream-address node is intentionally absent from shipped flows.
 # yonder-confirm is named again, and that is what closed K-30.
 #
 # R-CFG-11 removed the operator confirmation of a *join* - joining takes the
 # access point off the air, so the console you would confirm from goes with it
 # - and the wiring that used this node went with it while the node stayed.
-# R-UI-15 gave it a real caller: an apply that does not move the radio still
-# goes through the engine's confirmation timer, and Status now carries the
-# banner that shows one. `yonder-revert` is its twin, and `yonder-pending` is
-# what reads the state both act on. Naming them here is the half of K-30 that
-# stopped watching.
-for type in yonder-status yonder-activity yonder-diag yonder-config yonder-scan yonder-apply \
-            yonder-join yonder-pending yonder-confirm yonder-revert; do
+# It removed nothing from R-CFG-03, and two callers have put the node back.
+# R-UI-15 gave it one: an apply that does not move the radio still goes
+# through the engine's confirmation timer, and Status now carries the banner
+# that shows one. `yonder-revert` is its twin, and `yonder-pending` is what
+# reads the state both act on. The camera page gave it the other: a camera's
+# bitrate is spend on the path the console is standing on, nobody has measured
+# what a saturated uplink does to a console session, and that apply arms a
+# window somebody has to confirm. Naming them all here is the half of K-30
+# that stopped watching.
+for type in yonder-status yonder-activity yonder-diag yonder-config yonder-scan \
+            yonder-apply yonder-join yonder-pending yonder-confirm yonder-revert \
+            yonder-cameras yonder-camera yonder-stream; do
     if grep -q "\"$type\"" "$USERDIR/flows.json" || grep -q "$type" "$REPO/flows/flows.json"; then
         ok "the flows use $type"
     else
@@ -544,6 +813,21 @@ expect_missing  "the static mount does not expose settings.js" "uiPort" "$(body 
 dash=$(body /dashboard/)
 expect_missing "the dashboard is past the gate with a session" "Sign in" "$dash"
 expect_contains "and it is the dashboard" "id=\"app\"" "$dash"
+
+# R-UI-22. The stylesheet has to be *in the document the browser is handed*,
+# not fetched by something the document later runs: a link the SPA adds after
+# boot is a link that arrives after the first paint, and the console flashes
+# white on every load. So this asks the two questions separately — is it there
+# at all, and is it there before the browser has anything to paint.
+expect_contains "the theme is in the served document" "/yonder/theme.css" "$dash"
+head_of_dash=${dash%%</head>*}
+[ "$head_of_dash" = "$dash" ] && head_of_dash=""
+expect_contains "and it is in the head, so the first paint has it" \
+    "/yonder/theme.css" "$head_of_dash"
+# The way it used to arrive. A ui-template's @import is injected over
+# Dashboard's own socket, which does not exist until the SPA has booted.
+expect_missing "and nothing imports it from inside a style block" \
+    "@import" "$dash"
 
 # ---------------------------------------------------------------------------
 say "R-SEC-10: the password is nowhere in the journal"
@@ -647,12 +931,29 @@ say "R-UI-12: capture every page, in both palettes, and look at them"
 # machine — so a missing playwright is a loud skip rather than a failure, and
 # CI installs it so that there it is neither.
 if node -e 'import("playwright")' >/dev/null 2>&1; then
+    # The gate's own rules, before the console is asked anything.
+    #
+    # Everything below this line proves the rules against the pages this
+    # console happens to have, which is the claim that matters and is also the
+    # claim's limit: a rule can only be seen working on a defect that is
+    # actually there. `measure-page.test.mjs` builds the defect instead — six
+    # lines of HTML per case, each written as a mutation, so a case that
+    # passes because the rule never fires cannot pass quietly. The sideways
+    # rule shipped with a false negative that no page here reaches.
+    if node "$REPO/scripts/measure-page.test.mjs"; then
+        ok "the rules that run inside a page hold against a page built to break them"
+    else
+        bad "the rules that run inside a page: see the output above"
+    fi
+
     capture() {
         if node "$REPO/scripts/capture-pages.mjs" \
                 --base-url "http://127.0.0.1:$PORT" \
                 --password "$PASSWORD" \
                 --palette "$1" \
                 --artifacts "$REPO/vendor/capture" \
+                --synthetic-cameras "$CAMERAS" \
+                --secrets "$ETC/secrets.yaml" \
                 ${ACCEPT_SHAPE:+--accept}; then
             ok "the $1 palette: every page captured, and none changed shape"
         else
@@ -709,12 +1010,12 @@ if node -e 'import("playwright")' >/dev/null 2>&1; then
     node "$REPO/scripts/capture-pages.mjs" \
         --base-url "http://127.0.0.1:$PORT" --password "$PASSWORD" \
         --palette day --artifacts "$REPO/vendor/capture" \
-        --press NIGHT >/dev/null 2>&1 || true
+        --only settings --press Night >/dev/null 2>&1 || true
 
     if wait_for_theme night; then
-        ok "pressing NIGHT on the rail actually reached the device"
+        ok "pressing Night in Settings actually reached the device"
     else
-        bad "pressing NIGHT did nothing: the control is wired but dead"
+        bad "pressing Night did nothing: the control is wired but dead"
     fi
 
     # One page, in one state, under a name of its own.
@@ -861,10 +1162,64 @@ if node -e 'import("playwright")' >/dev/null 2>&1; then
             '"standing":"down"' "$(sock /reach/state)"
     }
 
+    # R-CTL-15's other sentence: the camera turning its own picture.
+    #
+    # Mirror, Flip and Rotation are drawn on **every** camera, because where
+    # the sensor will not turn the picture the board does, after decoding
+    # (`video/orientation.ts`). The two are identical in the picture and not
+    # in their cost, so the console says which of them is carrying each
+    # control — and that is two sentences, of which the base captures can only
+    # ever show one. The Global Shutter Camera implements none of the three:
+    # every capture above this line photographs the *board* case, with the
+    # recorded fixture's own `horizontalFlip: true` being carried by a
+    # `videoflip`.
+    #
+    # **There is no hardware here that can draw the other one**, which is why
+    # this swaps the fixture rather than pressing something. A gate that only
+    # ever photographed the board's sentence would not notice the sensor's
+    # going wrong, and the sensor's is the one that says a correction is free.
+    #
+    # Only `camera-live`: the group is the same group on Setup, drawn by the
+    # same method from the same payload, and a second picture of it would cost
+    # a capture to prove nothing the first does not.
+    capture_sensor_turns() {
+        cp "$CAMERAS_SENSOR" "$CAMERAS_LIVE"
+        # One poll of the camera page's own report, so the deck is drawing
+        # this camera and not the one before it.
+        sleep 7
+        # The whole hop, through a real daemon: this camera's sensor answers a
+        # mirror of its own, and the deck's payload says the camera is
+        # carrying it. `orientation.test.ts` proves the answer and
+        # `present.test.ts` proves the payload; this is the only place the two
+        # are joined by the daemon that actually composes them.
+        expect_contains "the deck says the camera is turning its own picture, not the board" \
+            '"by":"sensor"' "$(sock /cameras/front)"
+        if node "$REPO/scripts/capture-pages.mjs" \
+                --base-url "http://127.0.0.1:$PORT" \
+                --password "$PASSWORD" \
+                --palette "$1" \
+                --only camera \
+                --as camera-sensor-turns \
+                --artifacts "$REPO/vendor/capture" \
+                --synthetic-cameras "$CAMERAS_SENSOR" \
+                --secrets "$ETC/secrets.yaml" \
+                ${ACCEPT_SHAPE:+--accept}; then
+            ok "the $1 palette: Orientation on a camera whose sensor turns its own picture"
+        else
+            bad "the $1 palette: Orientation on a camera whose sensor turns it, see above"
+        fi
+        # Back to the board's own camera before anything else is captured:
+        # every other picture in this run is of the recorded fixture.
+        cp "$CAMERAS" "$CAMERAS_LIVE"
+        sleep 7
+        expect_contains "the recorded camera is back for the rest of the run" \
+            '"horizontalFlip":{"state":"not-offered"}' "$(sock /cameras/front)"
+    }
+
     # Status's third shape, and the one the confirmation timer exists for
     # (R-UI-15, R-CFG-03). A change is applied and deliberately *not*
     # confirmed, so the banner is up with a real countdown on it — then the
-    # gate presses `REVERT NOW` and asserts the device put the previous
+    # gate presses `REVERT` and asserts the device put the previous
     # configuration back.
     #
     # `system.hostname` is the change: it affects reachability, so the apply
@@ -903,7 +1258,7 @@ if node -e 'import("playwright")' >/dev/null 2>&1; then
         rail=$(body "/dashboard/_debug/datastore/keys-pending")
         expect_contains "the rail is offered CONFIRM for a change the operator can confirm" \
             '"action":"confirm"' "$rail"
-        expect_contains "and REVERT NOW beside it" '"action":"revert"' "$rail"
+        expect_contains "and REVERT beside it" '"action":"revert"' "$rail"
         # **And the message stopped there.** The rail's output goes to the node
         # that re-reads `/status` and feeds the rail, so a widget that
         # forwarded its input would turn one poll into an endless loop of
@@ -941,9 +1296,9 @@ if node -e 'import("playwright")' >/dev/null 2>&1; then
                 --only status \
                 --as status-pending \
                 --artifacts "$REPO/vendor/capture" \
-                --press "REVERT NOW" \
+                --press "REVERT" \
                 ${ACCEPT_SHAPE:+--accept}; then
-            ok "the $1 palette: Status with a change pending, and REVERT NOW to press"
+            ok "the $1 palette: Status with a change pending, and REVERT to press"
         else
             bad "the $1 palette: Status with a change pending, see above"
         fi
@@ -952,7 +1307,7 @@ if node -e 'import("playwright")' >/dev/null 2>&1; then
             case "$(sock /status)" in *'"state":"idle"'*) break ;; esac
             sleep "$POLL"; i=$((i + 1))
         done
-        expect_contains "pressing REVERT NOW rolled the change back" \
+        expect_contains "pressing REVERT rolled the change back" \
             '"outcome":"reverted"' "$(sock /status)"
         expect_contains "and the device is running the previous configuration" \
             '"hostname":"yonder"' "$(sock /config)"
@@ -970,14 +1325,14 @@ if node -e 'import("playwright")' >/dev/null 2>&1; then
     # a press either does nothing useful or is made by somebody who cannot see
     # that the device is already fine — and it ends the device's own check
     # early. The countdown is still there, the prose says who is confirming,
-    # and `REVERT NOW` is still there because deciding you do not want the
+    # and `REVERT` is still there because deciding you do not want the
     # change is still a real thing to want.
     #
     # Two things make this capturable at all. The join never lands on this
     # board — nothing here issues an address — so `$JOIN_DELAY` holds the
     # verifier's first poll open rather than letting its 20-second grace run
     # out mid-screenshot. And the press at the end is the proof that matters:
-    # `REVERT NOW` is the operator's only remaining control over this apply,
+    # `REVERT` is the operator's only remaining control over this apply,
     # so a picture of it that nobody pressed would be a picture of a key that
     # might be dead.
     capture_pending_radio() {
@@ -1003,7 +1358,7 @@ if node -e 'import("playwright")' >/dev/null 2>&1; then
         # the widget. A picture shows one key rather than two — this says
         # *which* key, and that the other one is not merely off screen.
         rail=$(body "/dashboard/_debug/datastore/keys-pending")
-        expect_contains "the rail still offers REVERT NOW for a radio move" \
+        expect_contains "the rail still offers REVERT for a radio move" \
             '"action":"revert"' "$rail"
         expect_missing "and offers no CONFIRM, because the device is confirming" \
             '"action":"confirm"' "$rail"
@@ -1017,9 +1372,9 @@ if node -e 'import("playwright")' >/dev/null 2>&1; then
                 --only status \
                 --as status-pending-radio \
                 --artifacts "$REPO/vendor/capture" \
-                --press "REVERT NOW" \
+                --press "REVERT" \
                 ${ACCEPT_SHAPE:+--accept}; then
-            ok "the $1 palette: Status with a radio move pending, and only REVERT NOW to press"
+            ok "the $1 palette: Status with a radio move pending, and only REVERT to press"
         else
             bad "the $1 palette: Status with a radio move pending, see above"
         fi
@@ -1028,10 +1383,10 @@ if node -e 'import("playwright")' >/dev/null 2>&1; then
             case "$(sock /status)" in *'"state":"idle"'*) break ;; esac
             sleep "$POLL"; i=$((i + 1))
         done
-        # **The point of the press.** `REVERT NOW` is the only control this
+        # **The point of the press.** `REVERT` is the only control this
         # banner still offers, so a rail that drew it and could not act on it
         # would be worse than the confirm control it replaced.
-        expect_contains "pressing REVERT NOW undid the radio move" \
+        expect_contains "pressing REVERT undid the radio move" \
             '"outcome":"reverted"' "$(sock /status)"
         expect_contains "and the device is back on its access point" \
             '"ssid":null' "$(sock /config)"
@@ -1039,6 +1394,162 @@ if node -e 'import("playwright")' >/dev/null 2>&1; then
         # that is no longer pending, where the engine ignores it. Let go of it
         # for the rest of the run.
         echo 0 > "$JOIN_DELAY"
+        sleep 7
+    }
+
+    # ---- the Telemetry page, in each of the states it hides ---------------
+    #
+    # R-UI-12: a surface that hides part of itself is captured in each of
+    # those parts, and this page hides five of its six behind live readings.
+    # The design README enumerates them, so the gate works from a list rather
+    # than from a judgement — and every one is reached the way an operator
+    # reaches it, through the daemon, never by writing a payload into a widget.
+    #
+    # `telemetry` itself is the sixth: the base capture above, taken with an
+    # autopilot answering and telemetry flowing.
+    capture_telemetry() {
+        # $1 palette, $2 the name this state is filed under
+        if node "$REPO/scripts/capture-pages.mjs" \
+                --base-url "http://127.0.0.1:$PORT" \
+                --password "$PASSWORD" \
+                --palette "$1" \
+                --only telemetry \
+                --as "$2" \
+                --artifacts "$REPO/vendor/capture" \
+                ${ACCEPT_SHAPE:+--accept}; then
+            ok "the $1 palette: $2"
+        else
+            bad "the $1 palette: $2, see above"
+        fi
+    }
+
+    # R-MAV-09, and the distinction the two running fields exist for: a stop
+    # takes the ground stations out of what is generated and leaves the
+    # flight-controller link and the loopback copy up. So the Autopilot half
+    # of the page stays lit and only the Ground stations half goes quiet — a
+    # page that greyed the aircraft out here would be the defect
+    # `routerRunning` was separated from `telemetryRunning` to prevent.
+    capture_telemetry_stopped() {
+        sock_post /mav/stop "{}" >/dev/null
+        stopped=$(sock /mav/state)
+        expect_contains "stopping telemetry stops the sending" \
+            '"telemetryRunning":false' "$stopped"
+        expect_contains "and leaves mavlink-router carrying the aircraft" \
+            '"routerRunning":true' "$stopped"
+        # One poll of the page, so it is showing the stop and not the moment
+        # before it.
+        sleep 7
+        capture_telemetry "$1" telemetry-stopped
+        sock_post /mav/start "{}" >/dev/null
+        if wait_for_phase linked; then
+            ok "and starting it again brings the link back"
+        else
+            bad "telemetry never came back after the stop: $(sock /mav/state)"
+        fi
+        sleep 7
+    }
+
+    # R-MAV-13's two kinds of nothing, which are two different pictures and
+    # two different things to do about them. Driven by changing what is on the
+    # other end of the serial stand-in and asking the device to look again —
+    # `POST /mav/detect` is the only route that takes the port back off the
+    # router, which is why nothing else in this run re-probes.
+    capture_telemetry_nothing() {
+        # $1 palette, $2 the mode the stand-in answers in, $3 the phase that
+        # produces, $4 the name this state is filed under
+        echo "$2" > "$MAV_MODE"
+        sock_post /mav/detect "{}" >/dev/null
+        if wait_for_phase "$3"; then
+            ok "the sweep came back $3 with $2 on the wire"
+        else
+            bad "the sweep never reported $3: $(sock /mav/state)"
+        fi
+        sleep 7
+        capture_telemetry "$1" "$4"
+    }
+
+    # R-MAV-07 and R-UI-15, in one press.
+    #
+    # Where MAVLink is accepted from is configuration and is **not** exempt
+    # from the confirmation window, so pressing ANY NETWORK applies a whole
+    # document and the change pends — which is two states, not one: the page
+    # with the banner up, and the page once the change is in force.
+    #
+    # The press is the point. This rail was wired in the change that captured
+    # it, and every soft key on this console shipped dead once, because
+    # Dashboard drops a widget-action from a widget that did not register
+    # onAction and says nothing. Only pressing it says otherwise.
+    capture_telemetry_ingest() {
+        node "$REPO/scripts/capture-pages.mjs" \
+            --base-url "http://127.0.0.1:$PORT" --password "$PASSWORD" \
+            --palette "$1" --only telemetry --as telemetry \
+            --artifacts "$REPO/vendor/capture" \
+            --press "ANY NETWORK" >/dev/null 2>&1 || true
+        i=0
+        while [ "$i" -lt "$TRIES" ]; do
+            case "$(sock /status)" in *'"state":"pending"'*) break ;; esac
+            sleep "$POLL"; i=$((i + 1))
+        done
+        pending=$(sock /status)
+        expect_contains "pressing ANY NETWORK on the rail reached the device" \
+            '"state":"pending"' "$pending"
+        expect_missing "and it is an ordinary change, not one that moves the radio" \
+            '"movesRadio":true' "$pending"
+        sleep 7
+        capture_telemetry "$1" telemetry-pending
+        pending_id=$(printf '%s' "$pending" | json_field id)
+        [ -n "$pending_id" ] && sock_post /confirm "{\"id\":\"$pending_id\"}" >/dev/null
+        # Confirmed, not idle: the engine's state after a confirm is
+        # `confirmed`, and only a revert ends at `idle`. Waiting for the wrong
+        # word here spent forty seconds and then carried on regardless.
+        i=0
+        while [ "$i" -lt "$TRIES" ]; do
+            case "$(sock /status)" in *'"state":"pending"'*) ;; *) break ;; esac
+            sleep "$POLL"; i=$((i + 1))
+        done
+        sleep 7
+        expect_contains "confirming it leaves MAVLink accepted from any network" \
+            '"loopback_only":false' "$(sock /config)"
+        capture_telemetry "$1" telemetry-ingest-open
+
+        # Back to loopback before anything else is captured: every other
+        # picture in this run describes a device that accepts MAVLink from
+        # itself alone, which is the shipped default (R-MAV-07).
+        sock /config > "$ROOT/config.json"
+        node -e '
+            const config = require(process.argv[1]);
+            config.mavlink.ingest.loopback_only = true;
+            process.stdout.write(JSON.stringify(config));
+        ' "$ROOT/config.json" > "$ROOT/closed.json"
+        closed=$(curl -s -H 'content-type: application/json' --data @"$ROOT/closed.json" \
+            --unix-socket "$SOCKET" http://localhost/apply)
+        closed_id=$(printf '%s' "$closed" | json_field id)
+        [ -n "$closed_id" ] && sock_post /confirm "{\"id\":\"$closed_id\"}" >/dev/null
+        i=0
+        while [ "$i" -lt "$TRIES" ]; do
+            case "$(sock /status)" in *'"state":"pending"'*) ;; *) break ;; esac
+            sleep "$POLL"; i=$((i + 1))
+        done
+        expect_contains "the ingest path is closed again for the rest of the run" \
+            '"loopback_only":true' "$(sock /config)"
+        sleep 7
+    }
+
+    # Every state this page hides, in one palette. Called from both.
+    capture_telemetry_states() {
+        capture_telemetry_stopped "$1"
+        capture_telemetry_ingest "$1"
+        capture_telemetry_nothing "$1" silent silent telemetry-searching
+        capture_telemetry_nothing "$1" noise  noise  telemetry-not-mavlink
+        # Back to an autopilot on the wire, so the next palette starts where
+        # this one did and the base capture is of a linked device.
+        echo linked > "$MAV_MODE"
+        sock_post /mav/detect "{}" >/dev/null
+        if wait_for_phase linked; then
+            ok "the autopilot is back on the wire for the rest of the run"
+        else
+            bad "the link never came back: $(sock /mav/state)"
+        fi
         sleep 7
     }
 
@@ -1091,6 +1602,60 @@ if node -e 'import("playwright")' >/dev/null 2>&1; then
         fi
     }
 
+    # ---------------------------------------------------------------------
+    # The viewport contract, spec §5 (R-UI-23, R-UI-12).
+    #
+    # Every capture above is at 1280x900, which is what makes the shape
+    # references comparable. It is also a width nobody flies with. Spec §5
+    # names two surfaces the camera pages have to hold their shape on and
+    # states a different promise for each: a notebook at 1440x900 with the
+    # sidebar open, where the picture, the Aim panel and the shutter key fit
+    # above the fold and the deck may run past it; and a landscape tablet
+    # below the 1100 px breakpoint, where the Aim panel drops beneath the
+    # picture and the groups flow into fewer columns.
+    #
+    # **A tall full-page PNG is not evidence that anything fits above the
+    # fold**, which is the sentence spec §13 ends that paragraph with, so
+    # `--fold` photographs the viewport on its own beside the full page and
+    # asserts what is inside it.
+    #
+    # Only the camera pages, because that is what the contract is written
+    # about — the picture, the Aim panel, the shutter key, one deck and one
+    # rail. Every other page is checked for sideways scroll and clipped text
+    # at 1280 like everything else.
+    #
+    # Each width records a shape reference of its own, under its own `--as`
+    # name, so a 1440 rendering is never compared against a 1024 one.
+    #
+    # **`--secrets`, because these runs write committed images too.**
+    # `deviceSecret()` answers `null` without it, which switches off both
+    # R-SEC-10 guards — the page-HTML check and the specimen-file check — and
+    # these are the two pages that carry the resolved stream address. Sixteen
+    # images went into `docs/console/capture/` from this function with neither
+    # guard running. `--synthetic-cameras` goes with it: without `--secrets`
+    # it is what makes the gate say "nothing checked the real credential"
+    # rather than pass quietly, and the pair is what the base capture uses.
+    capture_fold() {
+        # $1 palette, $2 surface name, $3 viewport
+        camera_page=camera
+            if node "$REPO/scripts/capture-pages.mjs" \
+                    --base-url "http://127.0.0.1:$PORT" \
+                    --password "$PASSWORD" \
+                    --palette "$1" \
+                    --only "$camera_page" \
+                    --as "$camera_page-$2" \
+                    --viewport "$3" \
+                    --fold \
+                    --artifacts "$REPO/vendor/capture" \
+                    --synthetic-cameras "$CAMERAS" \
+                    --secrets "$ETC/secrets.yaml" \
+                    ${ACCEPT_SHAPE:+--accept}; then
+                ok "the $1 palette: $camera_page holds its shape on a $2 at $3"
+            else
+                bad "the $1 palette: $camera_page on a $2 at $3, see above"
+            fi
+    }
+
     if reach_theme night; then
         ok "the device reached the night palette through /ui/theme"
         capture night
@@ -1103,6 +1668,10 @@ if node -e 'import("playwright")' >/dev/null 2>&1; then
         capture_unplugged night
         capture_status_pending night
         capture_pending_radio night
+        capture_sensor_turns night
+        capture_fold night notebook 1440x900
+        capture_fold night tablet 1024x768
+        capture_telemetry_states night
     else
         bad "the console never regenerated theme.css as night, so it was not captured"
     fi
@@ -1118,6 +1687,10 @@ if node -e 'import("playwright")' >/dev/null 2>&1; then
         capture_unplugged day
         capture_status_pending day
         capture_pending_radio day
+        capture_sensor_turns day
+        capture_fold day notebook 1440x900
+        capture_fold day tablet 1024x768
+        capture_telemetry_states day
     else
         bad "the console is still in the night palette; a held run will be wrong"
     fi

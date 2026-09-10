@@ -1,0 +1,14 @@
+{
+  "source": "Native cockpit with explicitly synthetic telemetry; local display bands configured through UI",
+  "checks": [
+    "Explicit local display bands applied",
+    "Source/style preview cancels without saving",
+    "Same PFD and map retained across MFD layouts",
+    "Direct inspector search, source selection and pin",
+    "Saved fields and layout restore on reload",
+    "Instrument visibility remains independent of PFD",
+    "Notice opens received message",
+    "Landscape and portrait tablet layouts"
+  ],
+  "errors": []
+}

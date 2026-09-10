@@ -1,6 +1,6 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 import { describe, it, expect } from "vitest";
-import { boundedRunner, redactArgv, redactText, systemRunner } from "./runner.js";
+import { boundedRunner, inFlightRunner, redactArgv, redactText, systemRunner } from "./runner.js";
 
 describe("redactArgv", () => {
   it("redacts the value after a wifi-security psk key", () => {
@@ -48,6 +48,95 @@ describe("redactText", () => {
 
   it("does not redact an empty value into every gap in the text", () => {
     expect(redactText("Error: nothing", ["x", "password", ""])).toBe("Error: nothing");
+  });
+});
+
+describe("inFlightRunner", () => {
+  it("runs identical pending observations once and gives each caller its own result", async () => {
+    let started = 0;
+    let release: (() => void) | undefined;
+    const gate = new Promise<void>((resolve) => { release = resolve; });
+    const observed = inFlightRunner(async () => {
+      started += 1;
+      await gate;
+      return { code: 0, stdout: "one reading", stderr: "" };
+    });
+
+    const first = observed(["nmcli", "device", "status"]);
+    const second = observed(["nmcli", "device", "status"]);
+    expect(started).toBe(1);
+    release?.();
+    const [a, b] = await Promise.all([first, second]);
+
+    expect(a).toEqual({ code: 0, stdout: "one reading", stderr: "" });
+    expect(b).toEqual(a);
+    expect(b).not.toBe(a);
+    a.stdout = "caller one changed its copy";
+    expect(b.stdout).toBe("one reading");
+  });
+
+  it("starts a fresh observation after the pending one settles", async () => {
+    let calls = 0;
+    const observed = inFlightRunner(async () => ({
+      code: 0, stdout: `reading ${++calls}`, stderr: "",
+    }));
+
+    await expect(observed(["mmcli", "-L"])).resolves.toMatchObject({ stdout: "reading 1" });
+    await expect(observed(["mmcli", "-L"])).resolves.toMatchObject({ stdout: "reading 2" });
+    expect(calls).toBe(2);
+  });
+
+  it("clears a rejected observation so the next poll can retry", async () => {
+    let calls = 0;
+    const observed = inFlightRunner(async () => {
+      calls += 1;
+      if (calls === 1) throw new Error("ModemManager disappeared");
+      return { code: 0, stdout: "back", stderr: "" };
+    });
+
+    await expect(observed(["mmcli", "-L"])).rejects.toThrow("ModemManager disappeared");
+    await expect(observed(["mmcli", "-L"])).resolves.toMatchObject({ stdout: "back" });
+    expect(calls).toBe(2);
+  });
+
+  it("leaves the original runner direct while observations share their pending call", async () => {
+    let started = 0;
+    let release: (() => void) | undefined;
+    const gate = new Promise<void>((resolve) => { release = resolve; });
+    const direct = async () => {
+      started += 1;
+      if (started === 1) await gate;
+      return { code: 0, stdout: String(started), stderr: "" };
+    };
+    const observed = inFlightRunner(direct);
+
+    const first = observed(["nmcli", "device", "status"]);
+    const shared = observed(["nmcli", "device", "status"]);
+    const mutationPath = await direct(["nmcli", "device", "status"]);
+    expect(started).toBe(2);
+    expect(mutationPath.stdout).toBe("2");
+    release?.();
+    await Promise.all([first, shared]);
+  });
+
+  it("does not share commands whose argv or execution options differ", async () => {
+    let calls = 0;
+    let release: (() => void) | undefined;
+    const gate = new Promise<void>((resolve) => { release = resolve; });
+    const observed = inFlightRunner(async (_argv, opts) => {
+      calls += 1;
+      await gate;
+      return { code: 0, stdout: opts?.env?.YONDER_TEST ?? "none", stderr: "" };
+    });
+
+    const answers = Promise.all([
+      observed(["mmcli", "-L"], { env: { YONDER_TEST: "one" } }),
+      observed(["mmcli", "-L"], { env: { YONDER_TEST: "two" } }),
+      observed(["mmcli", "-m", "0"], { env: { YONDER_TEST: "one" } }),
+    ]);
+    expect(calls).toBe(3);
+    release?.();
+    expect((await answers).map((answer) => answer.stdout)).toEqual(["one", "two", "one"]);
   });
 });
 

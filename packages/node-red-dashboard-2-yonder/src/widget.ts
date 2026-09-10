@@ -113,11 +113,32 @@ export function registerWidget(RED: RED, definition: WidgetDefinition): void {
 
     // Static configuration travels to the component as `props`. The live value
     // arrives separately, on msg.payload, and Dashboard's default input
-    // handling stores and forwards it — which is all these widgets need.
+    // handling stores it.
+    //
+    // **`passthru: false`, for every widget in this package, always.**
+    // Dashboard's default input handler ends `if (hasProperty(widgetConfig,
+    // 'passthru')) { if (widgetConfig.passthru) send(msg) } else { send(msg) }`
+    // — so a widget that does not say otherwise *echoes every message it is
+    // sent straight out of its own output*. Not one instrument here is a
+    // pass-through node: they draw what they are given and emit only what an
+    // operator pressed. Left on, a widget with both an input and an output
+    // turns a poll into a command: the Cameras index was fed its rows every
+    // few seconds, echoed them, and the flow behind it read the echo as a row
+    // press and navigated the browser to the camera page — on every page, on
+    // every poll, which is a page nobody could stay on. That is CLAUDE.md
+    // rule 4 broken by a framework default: a command nobody originated.
+    //
+    // Set here rather than per widget because the failure is invisible until
+    // a widget's output happens to be wired, and the next one to be wired
+    // would find it again.
     //
     // `onAction` is what makes a press reach the node's output. See the note
     // on `emitsActions`: without it Dashboard silently drops the event.
     const events = definition.emitsActions ? { onAction: true } : {};
-    group.register(node, { ...config, ...definition.props(node, config) }, events);
+    group.register(
+      node,
+      { ...config, ...definition.props(node, config), passthru: false },
+      events,
+    );
   });
 }

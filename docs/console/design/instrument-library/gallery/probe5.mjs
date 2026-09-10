@@ -1,0 +1,16 @@
+import { chromium } from "playwright";
+const b = await chromium.launch(); const p = await b.newPage({ viewport: { width: 1512, height: 900 }, deviceScaleFactor: 2 });
+const errs = []; p.on("pageerror", e => errs.push(e.message));
+await p.goto("http://127.0.0.1:18930/index.html", { waitUntil: "networkidle" });
+console.log("nav    :", (await p.locator(".d-nav").innerText()).replace(/\n+/g, " | "));
+console.log("thumbs :", (await p.locator(".d-thumbs").innerText()).replace(/\n+/g, " | "));
+await p.locator(".d-thumb", { hasText: "Cam 2" }).click(); await p.waitForTimeout(300);
+console.log("after thumb press, placard:", await p.locator(".d-placard span").first().innerText());
+console.log("nav active:", await p.locator(".d-nav .v-list-item--active").innerText());
+await p.locator(".d-shell").screenshot({ path: ".superpowers/gallery/live.pocket2.night.png" });
+await p.locator(".d-nav__i", { hasText: "Cam 1" }).click(); await p.waitForTimeout(300);
+console.log("after nav press, placard:", await p.locator(".d-placard span").first().innerText());
+await p.locator(".d-rail button", { hasText: /setup/i }).click(); await p.waitForTimeout(300);
+console.log("setup via rail, name field:", await p.locator(".d-tf").count());
+console.log(errs.length ? "ERRORS: " + errs.join(" | ") : "no errors");
+await b.close();

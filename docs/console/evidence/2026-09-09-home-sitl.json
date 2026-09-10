@@ -1,0 +1,182 @@
+{
+  "firmware": "Official ArduPlane 4.7.1",
+  "sourceCommit": "dbe792162d06cab66c3475fd5556bf7a120f119e",
+  "scope": "Disposable SITL only; never connects to physical hardware",
+  "startedAt": "2026-09-09T19:41:52.556Z",
+  "outcome": "passed",
+  "finishedAt": "2026-09-09T19:42:06.629Z",
+  "cases": [
+    {
+      "gps": false,
+      "home": {
+        "lat": 35.9612345,
+        "lon": -83.3654321,
+        "alt": 343.25
+      },
+      "fixType": null,
+      "armed": false,
+      "mission": {
+        "revision": "1fc0326ee82c95b5f06ed624",
+        "items": [
+          {
+            "seq": 0,
+            "command": 16,
+            "frame": 0,
+            "current": false,
+            "autocontinue": true,
+            "params": [
+              0,
+              0,
+              0,
+              0
+            ],
+            "x": 35.9612345,
+            "y": -83.3654321,
+            "z": 343.25
+          },
+          {
+            "seq": 1,
+            "command": 16,
+            "frame": 3,
+            "current": false,
+            "autocontinue": true,
+            "params": [
+              0,
+              0,
+              0,
+              0
+            ],
+            "x": 35.9622345,
+            "y": -83.3654321,
+            "z": 100
+          }
+        ],
+        "synchronization": "verified",
+        "currentSeq": 0,
+        "currentFresh": true,
+        "reachedSeq": null,
+        "transfer": null,
+        "message": "Vehicle mission downloaded and verified"
+      },
+      "outcome": "passed",
+      "operations": [
+        {
+          "kind": "stream-setup",
+          "state": "accepted",
+          "message": "Essential streams requested; 12 optional instrumentation streams unavailable",
+          "effect": "unavailable"
+        },
+        {
+          "kind": "mission-download",
+          "state": "observed",
+          "message": "Complete vehicle mission downloaded",
+          "effect": "observed"
+        },
+        {
+          "kind": "set-home",
+          "state": "observed",
+          "message": "Requested aircraft state observed",
+          "effect": "observed"
+        },
+        {
+          "kind": "mission-upload",
+          "state": "observed",
+          "message": "Mission accepted and downloaded copy verified; home is the actual vehicle home",
+          "effect": "observed"
+        },
+        {
+          "kind": "set-home",
+          "state": "observed",
+          "message": "Requested aircraft state observed",
+          "effect": "observed"
+        }
+      ]
+    },
+    {
+      "gps": true,
+      "home": {
+        "lat": 35.9612345,
+        "lon": -83.3654321,
+        "alt": 343.25
+      },
+      "fixType": 6,
+      "armed": false,
+      "mission": {
+        "revision": "1fc0326ee82c95b5f06ed624",
+        "items": [
+          {
+            "seq": 0,
+            "command": 16,
+            "frame": 0,
+            "current": false,
+            "autocontinue": true,
+            "params": [
+              0,
+              0,
+              0,
+              0
+            ],
+            "x": 35.9612345,
+            "y": -83.3654321,
+            "z": 343.25
+          },
+          {
+            "seq": 1,
+            "command": 16,
+            "frame": 3,
+            "current": false,
+            "autocontinue": true,
+            "params": [
+              0,
+              0,
+              0,
+              0
+            ],
+            "x": 35.9622345,
+            "y": -83.3654321,
+            "z": 100
+          }
+        ],
+        "synchronization": "verified",
+        "currentSeq": 0,
+        "currentFresh": true,
+        "reachedSeq": null,
+        "transfer": null,
+        "message": "Vehicle mission downloaded and verified"
+      },
+      "outcome": "passed",
+      "operations": [
+        {
+          "kind": "stream-setup",
+          "state": "accepted",
+          "message": "Essential streams requested; 12 optional instrumentation streams unavailable",
+          "effect": "unavailable"
+        },
+        {
+          "kind": "mission-download",
+          "state": "observed",
+          "message": "Complete vehicle mission downloaded",
+          "effect": "observed"
+        },
+        {
+          "kind": "set-home",
+          "state": "observed",
+          "message": "Requested aircraft state observed",
+          "effect": "observed"
+        },
+        {
+          "kind": "mission-upload",
+          "state": "observed",
+          "message": "Mission accepted and downloaded copy verified; home is the actual vehicle home",
+          "effect": "observed"
+        },
+        {
+          "kind": "set-home",
+          "state": "observed",
+          "message": "Requested aircraft state observed",
+          "effect": "observed"
+        }
+      ]
+    }
+  ]
+}

@@ -1,0 +1,1051 @@
+/* SPDX-License-Identifier: GPL-3.0-or-later */
+.y-cockpit {
+  position: relative;
+  padding: 0;
+  container-type: inline-size;
+  container-name: yonder-cockpit;
+  inset: auto;
+  width: 100%;
+  height: var(--cockpit-height, 100dvh);
+  z-index: 0;
+  display: flex;
+  flex-direction: column;
+  background: #07121a;
+  color: #e8f1f4;
+  font-family: var(--yonder-font, Arial, sans-serif);
+  font-variant-numeric: tabular-nums;
+  box-sizing: border-box;
+  isolation: isolate;
+  --cockpit-pane: #10232dea;
+  --cockpit-line: #526770;
+  --cockpit-muted: #a8bec9
+}
+
+.y-cockpit * {
+  box-sizing: border-box
+}
+
+.y-cockpit button,
+.y-cockpit select,
+.y-cockpit input {
+  font: inherit
+}
+
+.y-cockpit button {
+  cursor: pointer;
+  touch-action: manipulation;
+  min-height: 44px;
+  border: 1px solid var(--cockpit-line);
+  border-radius: 3px;
+  background: #163140;
+  color: #e8f1f4;
+  padding: 8px 12px
+}
+
+.y-cockpit button:disabled {
+  opacity: .45;
+  cursor: default
+}
+
+.y-cockpit button:focus-visible,
+.y-cockpit select:focus-visible,
+.y-cockpit input:focus-visible {
+  outline: 2px solid #6adeff;
+  outline-offset: 2px
+}
+
+.y-cockpit a {
+  color: #6adeff
+}
+
+.y-cockpit .cockpit-header {
+  height: 52px;
+  min-height: 52px;
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 4px max(10px, env(safe-area-inset-right)) 4px max(10px, env(safe-area-inset-left));
+  border-bottom: 1px solid var(--cockpit-line);
+  background: #0c1c25;
+  z-index: 8
+}
+
+.y-cockpit .cockpit-brand {
+  letter-spacing: 3px;
+  font-weight: 800;
+  text-decoration: none;
+  white-space: nowrap
+}
+
+.y-cockpit .cockpit-brand span {
+  font-size: 11px;
+  letter-spacing: 0;
+  color: #a8bec9
+}
+
+.y-cockpit .cockpit-source {
+  margin-left: auto;
+  font-size: 11px
+}
+
+.y-cockpit .unavailable {
+  color: #ffc786
+}
+
+.y-cockpit .cockpit-body {
+  position: relative;
+  flex: 1;
+  min-height: 0;
+  overflow: hidden;
+  display: grid;
+  grid-template-columns: minmax(0, 1fr);
+  gap: 0
+}
+
+.y-cockpit .cockpit-primary {
+  display: flex;
+  flex-direction: column;
+  min-height: 0;
+  min-width: 0;
+  border: 0;
+  position: relative;
+  grid-row: 1;
+  grid-column: 1;
+  width: 100%;
+  height: 100%
+}
+
+.y-cockpit .pfd-panel>.screen-title {
+  display: none
+}
+
+.y-cockpit .pfd-panel>.display-foot {
+  display: flex;
+  padding: 5px 12px;
+  min-height: 24px;
+  height: 24px;
+  background: #0c1c25;
+  font-size: 10px
+}
+
+.y-cockpit .pfd-screen {
+  aspect-ratio: auto;
+  flex: 1;
+  min-height: 0;
+  display: block;
+  background: transparent
+}
+
+.y-cockpit .pfd-instrument-canvas {
+  height: 100%;
+  width: 100%;
+  aspect-ratio: auto;
+  display: flex;
+  justify-content: center;
+  align-items: center;
+  overflow: hidden
+}
+
+.y-cockpit .pfd-instrument-canvas>.pfd-svg {
+  height: 100%;
+  width: auto;
+  max-width: 100%;
+  max-height: 100%;
+  position: relative;
+  flex: none;
+  z-index: 2;
+  pointer-events: none
+}
+
+.y-cockpit .pfd-touch-surfaces {
+  width: auto;
+  aspect-ratio: 640/650;
+  height: 100%;
+  max-width: 100%;
+  left: 50%;
+  right: auto;
+  transform: translateX(-50%);
+  z-index: 3
+}
+
+.y-cockpit .pfd-hotspot {
+  min-height: 0;
+  padding: 0;
+  border-color: transparent;
+  background: transparent
+}
+
+.y-cockpit .cockpit-background {
+  position: absolute;
+  inset: 0;
+  z-index: 0;
+  background: linear-gradient(#285d85 0 49%, #5b533a 50% 100%)
+}
+
+.y-cockpit .cockpit-background:has(.terrain-vision[data-terrain-ready="false"]) {
+  background: #102430
+}
+
+.y-cockpit .cockpit-camera {
+  width: 100%;
+  height: 100%
+}
+
+.y-cockpit .cockpit-camera .y-pic__strip {
+  display: none
+}
+
+.y-cockpit .cockpit-empty-background {
+  display: grid;
+  place-content: center;
+  height: 100%
+}
+
+.y-cockpit .pfd-menu-strip {
+  position: relative;
+  z-index: 7;
+  flex: none
+}
+
+.y-cockpit .pfd-menu-strip button {
+  min-height: 44px;
+  font-size: 12px;
+  border-radius: 0
+}
+
+.y-cockpit .cockpit-mission,
+.y-cockpit .cockpit-map-pane {
+  position: absolute;
+  bottom: 83px;
+  width: clamp(230px, 25cqw, 370px);
+  height: clamp(155px, 28vh, 260px);
+  border: 1px solid #b8c7c980;
+  border-radius: 7px;
+  overflow: hidden;
+  background: var(--cockpit-pane);
+  box-shadow: 0 2px 12px #0008;
+  z-index: 5;
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
+  min-height: 0
+}
+
+.y-cockpit .cockpit-mission {
+  left: 14px
+}
+
+.y-cockpit .cockpit-map-pane {
+  right: 14px
+}
+
+.y-cockpit .cockpit-mission>header,
+.y-cockpit .cockpit-map-pane>header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 5px;
+  min-height: 37px;
+  background: #10232ddd;
+  padding-left: 10px;
+  font-size: 11px;
+  letter-spacing: 1px;
+  z-index: 2
+}
+
+.y-cockpit .cockpit-mission>header button,
+.y-cockpit .cockpit-map-pane>header button {
+  min-height: 37px;
+  border: 0;
+  border-radius: 0;
+  font-size: 19px;
+  padding: 3px 12px
+}
+
+.y-cockpit .cockpit-mission-summary {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 8px 10px;
+  border-bottom: 1px solid #5267706b;
+  font-size: 12px
+}
+
+.y-cockpit .cockpit-mission-summary b {
+  color: #fa8ae9
+}
+
+.y-cockpit .cockpit-mission-summary span {
+  font-size: 10px;
+  color: #d2e0e5
+}
+.y-cockpit .cockpit-mission-sequence {min-width:0; flex:1}
+.y-cockpit .cockpit-mission-sequence b {display:block;white-space:normal;overflow-wrap:anywhere}
+.y-cockpit .cockpit-mission-sequence small {display:block;font-size:9px;color:#c5dce5;margin-top:4px}
+.y-cockpit .cockpit-mission-summary>span {max-width:45%}
+.y-cockpit .mission-sequence-badge {margin-left:auto;align-self:center;white-space:nowrap;font-size:9px;font-style:normal;color:#cfdfed}
+.y-cockpit .active .mission-sequence-badge {color:#ff8bec;font-weight:700}
+.y-cockpit .cockpit-mission-list>button.next {box-shadow:inset 2px 0 #c8d9e6}
+
+.y-cockpit .cockpit-mission-list {
+  overflow: auto;
+  flex: 1;
+  min-height: 0
+}
+
+.y-cockpit .cockpit-mission-list>button {
+  display: flex;
+  gap: 13px;
+  width: 100%;
+  text-align: left;
+  background: transparent;
+  border: 0;
+  border-bottom: 1px solid #52677066;
+  border-radius: 0;
+  padding: 6px 12px;
+  font-size: 12px
+}
+
+.y-cockpit .cockpit-mission-list>button.active {
+  background: #6b36695c
+}
+
+.y-cockpit .cockpit-mission-list>button b {
+  color: #ef92e7
+}
+
+.y-cockpit .cockpit-mission-list small {
+  display: block;
+  color: #a8bec9;
+  font-size: 10px;
+  margin-top: 3px
+}
+
+.y-cockpit .cockpit-mission-list p {
+  padding: 8px 12px;
+  font-size: 12px
+}
+
+.y-cockpit .cockpit-mission>nav {
+  display: flex;
+  gap: 4px;
+  padding: 4px;
+  flex: none
+}
+
+.y-cockpit .cockpit-mission>nav button {
+  min-height: 34px;
+  font-size: 11px;
+  padding: 5px 8px
+}
+
+.y-cockpit .cockpit-map-pane>footer {
+  display: flex;
+  gap: 3px;
+  padding: 3px;
+  background: #10232dea;
+  z-index: 2
+}
+
+.y-cockpit .cockpit-map-pane>footer button {
+  font-size: 10px;
+  padding: 2px 5px;
+  min-height: 28px;
+  border: 0
+}
+
+.y-cockpit .cockpit-map {
+  position: relative;
+  flex: 1;
+  min-height: 0
+}
+
+.y-cockpit .cockpit-map-canvas {
+  position: absolute;
+  inset: 0;
+  background: #132c30
+}
+
+.y-cockpit .cockpit-map-tools {
+  position: absolute;
+  right: 6px;
+  top: 6px;
+  display: flex;
+  z-index: 500;
+  gap: 3px;
+  flex-wrap: wrap;
+  max-width: 95%
+}
+
+.y-cockpit .cockpit-map-tools button,
+.y-cockpit .cockpit-map-tools select {
+  min-height: 34px;
+  background: #18323aed;
+  color: white;
+  border: 1px solid #67868a;
+  padding: 4px 7px;
+  font-size: 11px
+}
+
+.y-cockpit .cockpit-map-status {
+  position: absolute;
+  left: 5px;
+  bottom: 15px;
+  max-width: 90%;
+  font-size: 9px;
+  padding: 3px 5px;
+  z-index: 500;
+  background: #102027d9;
+  color: #d2e8ed
+}
+
+.y-cockpit .cockpit-map-status span {
+  display: none
+}
+
+.y-cockpit .cockpit-map-pick {
+  position: absolute;
+  top: 48px;
+  left: 8px;
+  right: 8px;
+  background: #663854ee;
+  color: #fff;
+  padding: 10px;
+  z-index: 500;
+  font-size: 12px
+}
+
+.y-cockpit .leaflet-tooltip {
+  background: #10232ddd;
+  color: white;
+  border-color: #667d87;
+  box-shadow: none;
+  font-size: 10px
+}
+
+.y-cockpit .leaflet-control-attribution {
+  max-width: 100%;
+  color: #284049
+}
+
+.y-cockpit .cockpit-registration,
+.y-cockpit .cockpit-error {
+  position: absolute;
+  left: 50%;
+  top: 10px;
+  transform: translateX(-50%);
+  max-width: 65%;
+  background: #3b281af2;
+  color: #ffd8a4;
+  padding: 6px 10px;
+  font-size: 11px;
+  z-index: 8;
+  border: 1px solid #d2aa74
+}
+
+.y-cockpit .cockpit-error {
+  top: auto;
+  bottom: 73px;
+  background: #143341f2;
+  color: #d3e9f3;
+  max-width: 75%
+}
+
+.y-cockpit[data-layout="mission"] .cockpit-body,
+.y-cockpit[data-layout="map"] .cockpit-body {
+  grid-template-columns: minmax(0, 1fr) minmax(360px, .72fr)
+}
+
+.y-cockpit[data-layout="mission"] .cockpit-mission,
+.y-cockpit[data-layout="map"] .cockpit-map-pane {
+  grid-row: 1;
+  grid-column: 2;
+  position: relative;
+  left: auto;
+  right: auto;
+  bottom: auto;
+  width: 100%;
+  height: 100%;
+  border-radius: 0;
+  border-top: 0;
+  border-bottom: 0;
+  box-shadow: none
+}
+
+.y-cockpit[data-layout="mission"] .cockpit-map-pane,
+.y-cockpit[data-layout="map"] .cockpit-mission {
+  display: none
+}
+
+.y-cockpit .expanded>.cockpit-mission-summary {
+  padding: 14px;
+  font-size: 18px
+}
+
+.y-cockpit .expanded .cockpit-mission-list button {
+  min-height: 58px;
+  font-size: 14px
+}
+
+.y-cockpit .expanded .cockpit-mission-list small {
+  font-size: 12px
+}
+
+.y-cockpit .expanded .cockpit-map-tools button,
+.y-cockpit .expanded .cockpit-map-tools select {
+  min-height: 44px;
+  font-size: 13px
+}
+
+.y-cockpit .expanded .cockpit-map-status {
+  font-size: 11px
+}
+
+.y-cockpit .expanded .cockpit-map-status span {
+  display: inline
+}
+
+.y-cockpit .cockpit-mobile-tabs {
+  display: none
+}
+
+.y-cockpit .cockpit-scrim {
+  position: absolute;
+  inset: 0;
+  z-index: 4000;
+  background: #0009;
+  display: grid;
+  place-items: center;
+  padding: 16px
+}
+
+.y-cockpit .cockpit-dialog {
+  width: 520px;
+  max-width: 100%;
+  max-height: calc(100dvh - 32px);
+  display: flex;
+  flex-direction: column;
+  border: 1px solid #9bb1bd;
+  border-radius: 9px;
+  background: #10232d;
+  box-shadow: 0 20px 80px #000b;
+  overflow: hidden
+}
+
+.y-cockpit .cockpit-dialog>header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  gap: 15px;
+  padding: 12px 16px;
+  background: #203a49;
+  border-bottom: 1px solid #597181
+}
+
+.y-cockpit .cockpit-dialog h2 {
+  font-size: 20px;
+  margin: 0
+}
+
+.y-cockpit .cockpit-dialog h3 {
+  font-size: 17px
+}
+
+.y-cockpit .cockpit-dialog-body {
+  padding: 16px 20px;
+  overflow: auto;
+  min-height: 0
+}
+
+.y-cockpit .cockpit-dialog-body p {
+  font-size: 13px;
+  line-height: 1.5;
+  color: #c2d4dd
+}
+
+.y-cockpit .cockpit-dialog-body label {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 15px;
+  min-height: 49px;
+  border-bottom: 1px solid #52677055;
+  font-size: 14px
+}
+
+.y-cockpit .cockpit-dialog-body input[type="checkbox"] {
+  width: 24px;
+  height: 24px;
+  accent-color: #41c5e5
+}
+
+.y-cockpit .cockpit-dialog-body select {
+  max-width: 250px;
+  background: #071720;
+  color: #e2f1f4;
+  border: 1px solid #69818d;
+  padding: 10px;
+  font-size: 13px;
+  border-radius: 3px
+}
+
+.y-cockpit .cockpit-dialog-body>button {
+  margin: 5px
+}
+
+.y-cockpit .cockpit-dialog dl {
+  font-size: 13px
+}
+
+.y-cockpit .cockpit-dialog dl>div {
+  display: flex;
+  justify-content: space-between;
+  gap: 20px;
+  padding: 8px 0;
+  border-bottom: 1px solid #52677066
+}
+
+.y-cockpit .cockpit-dialog dd {
+  margin: 0;
+  overflow-wrap: anywhere
+}
+
+.y-cockpit .cockpit-dialog dt {
+  color: #adc5d0
+}
+
+.y-cockpit .cockpit-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  margin-top: 16px
+}
+
+.y-cockpit .cockpit-confirm {
+  background: #753662;
+  border-color: #ff8feb
+}
+
+.y-cockpit .cockpit-dialog article {
+  border-top: 1px solid #597181;
+  margin-top: 12px;
+  padding-top: 10px
+}
+
+.y-cockpit .mission-touch-scrim,
+.y-cockpit .pfd-modal-scrim {
+  z-index: 3500
+}
+
+.y-cockpit .mission-touch-header small {
+  color: #98c3d3
+}
+
+.y-cockpit .mission-touch {
+  max-height: calc(100dvh - 24px)
+}
+
+@container yonder-cockpit (max-width:1100px) {
+
+  .y-cockpit .cockpit-mission,
+  .y-cockpit .cockpit-map-pane {
+    width: 23cqw;
+    min-width: 205px;
+    height: 190px;
+    bottom: 77px
+  }
+
+  .y-cockpit .cockpit-header {
+    gap: 5px
+  }
+
+  .y-cockpit .cockpit-source {
+    font-size: 9px
+  }
+
+  .y-cockpit .cockpit-header button {
+    font-size: 11px;
+    padding: 6px 8px
+  }
+
+  .y-cockpit .cockpit-brand {
+    font-size: 13px
+  }
+
+  .y-cockpit .cockpit-brand span {
+    display: block;
+    font-size: 9px
+  }
+
+  .y-cockpit[data-layout="mission"] .cockpit-body,
+  .y-cockpit[data-layout="map"] .cockpit-body {
+    grid-template-columns: minmax(0, 1fr) minmax(330px, .8fr)
+  }
+}
+
+@container yonder-cockpit (max-width:760px) {
+  .y-cockpit .cockpit-source {
+    display: none
+  }
+
+  .y-cockpit .cockpit-header {
+    min-height: 48px;
+    height: 48px
+  }
+
+  .y-cockpit .cockpit-brand {
+    margin-right: auto
+  }
+
+  .y-cockpit .cockpit-header button {
+    font-size: 10px
+  }
+
+  .y-cockpit .cockpit-mission,
+  .y-cockpit .cockpit-map-pane {
+    width: 40%;
+    min-width: 145px;
+    height: 150px;
+    bottom: 76px
+  }
+
+  .y-cockpit .cockpit-mission {
+    left: 5px
+  }
+
+  .y-cockpit .cockpit-map-pane {
+    right: 5px
+  }
+
+  .y-cockpit .cockpit-mission-summary {
+    display: none
+  }
+
+  .y-cockpit .cockpit-map-status {
+    display: none
+  }
+
+  .y-cockpit .cockpit-map-tools button {
+    display: none
+  }
+
+  .y-cockpit .cockpit-map-tools select {
+    max-width: 85px
+  }
+
+  .y-cockpit .cockpit-mission>header,
+  .y-cockpit .cockpit-map-pane>header {
+    font-size: 9px;
+    letter-spacing: 0
+  }
+
+  .y-cockpit[data-layout="mission"] .cockpit-body,
+  .y-cockpit[data-layout="map"] .cockpit-body {
+    grid-template-columns: minmax(0, 1fr);
+    grid-template-rows: minmax(240px, 1fr) minmax(230px, .7fr)
+  }
+
+  .y-cockpit[data-layout="mission"] .cockpit-mission,
+  .y-cockpit[data-layout="map"] .cockpit-map-pane {
+    grid-column: 1;
+    grid-row: 2
+  }
+
+  .y-cockpit .expanded .cockpit-map-tools button {
+    display: block
+  }
+
+  .y-cockpit .cockpit-registration {
+    max-width: 92%;
+    font-size: 10px
+  }
+
+  .y-cockpit .pfd-panel>.display-foot {
+    font-size: 8px
+  }
+
+  .y-cockpit .cockpit-error {
+    max-width: 95%;
+    font-size: 10px
+  }
+}
+
+@container yonder-cockpit (max-width:480px) {
+
+  .y-cockpit .cockpit-mission,
+  .y-cockpit .cockpit-map-pane {
+    bottom: 78px;
+    width: 42%;
+    height: 130px
+  }
+
+  .y-cockpit[data-mobile-inset="map"][data-layout="full"] .cockpit-mission,
+  .y-cockpit[data-mobile-inset="mission"][data-layout="full"] .cockpit-map-pane {
+    display: none
+  }
+
+  .y-cockpit .cockpit-mobile-tabs {
+    display: flex;
+    height: 37px;
+    flex: none;
+    gap: 1px;
+    background: #081a24
+  }
+
+  .y-cockpit .cockpit-mobile-tabs button {
+    min-height: 34px;
+    flex: 1;
+    border: 0;
+    border-radius: 0;
+    font-size: 11px
+  }
+
+  .y-cockpit .cockpit-mobile-tabs button[aria-pressed="true"] {
+    color: #61d9f3
+  }
+
+  .y-cockpit .cockpit-header button {
+    padding: 4px 6px
+  }
+
+  .y-cockpit .cockpit-dialog-body {
+    padding: 10px 13px
+  }
+
+  .y-cockpit .cockpit-dialog-body label {
+    gap: 5px;
+    font-size: 12px
+  }
+
+  .y-cockpit .cockpit-dialog-body select {
+    max-width: 180px
+  }
+}
+
+.y-cockpit[data-embedded="true"] {
+  position: relative;
+  inset: auto;
+  height: 760px;
+  width: 100%;
+  z-index: 0
+}
+
+/* Insets occupy the prototype's optional secondary summaries; primary geometry is unchanged. */
+.y-cockpit[data-layout="full"] .pfd-secondary>:not(:last-child) {
+  display: none
+}
+
+.y-cockpit[data-layout="full"] .pfd-touch-vsi,
+.y-cockpit[data-layout="full"] .pfd-touch-bank,
+.y-cockpit[data-layout="full"] .pfd-touch-navigation {
+  display: none
+}
+
+.y-cockpit[data-palette="day"] {
+  --cockpit-pane: #e8f0f3ed;
+  --cockpit-line: #667f8b;
+  --cockpit-muted: #375664;
+  color: #152c38
+}
+
+.y-cockpit[data-palette="day"] :is(.cockpit-header, .cockpit-mission>header, .cockpit-map-pane>header, .cockpit-map-pane>footer, .cockpit-dialog, .cockpit-dialog>header, .mission-touch, .mission-touch-header, .mission-link-status, .pfd-control-panel, .pfd-control-header, .pfd-menu-strip, .cockpit-primary>.display-foot) {
+  background: #dce8ed;
+  color: #122b37
+}
+
+.y-cockpit[data-palette="day"] :is(button:not(.pfd-hotspot), input, select) {
+  background: #e3edf1;
+  color: #102d3c;
+  border-color: #65818f
+}
+
+.y-cockpit[data-palette="day"] :is(.cockpit-dialog-body p, .cockpit-mission-summary span, .cockpit-mission-list small, .mission-touch-note, .mission-action-grid small, .mission-touch-wide small, .mission-selected-summary p, .mission-command-heading p, .mission-parameter-field small, .mission-selected-summary>span, .mission-link-status, .mission-link-status strong, .mission-categories button, .mission-command-list p, .mission-command-list small, .pfd-control-panel p, .pfd-control-panel small) {
+  color: #395967
+}
+
+.y-cockpit[data-palette="day"] :is(.cockpit-mission-summary b, .cockpit-mission-list>button b) {
+  color: #862877
+}
+
+.y-cockpit[data-palette="day"] :is(.mission-action-grid button, .mission-touch-wide, .mission-mode-grid button, .mission-form-actions button, .mission-command-list button) {
+  background: #e5eef1;
+  color: #122b37
+}
+
+.y-cockpit[data-palette="day"] :is(.mission-action-grid .mission-execute, .mission-touch-wide.mission-execute, .mission-mode-grid .mission-execute, .cockpit-confirm) {
+  background: #e4e2cc;
+  color: #302d1b
+}
+
+.y-cockpit[data-palette="day"] .pfd-menu-strip button {
+  background: #dce8ed;
+  color: #122b37
+}
+
+.y-cockpit[data-palette="day"] .cockpit-source {
+  color: #174e61
+}
+
+.y-cockpit[data-palette="day"] .unavailable {
+  color: #7c4210
+}
+
+.y-cockpit .cockpit-forecast {
+  position: absolute;
+  left: 12px;
+  top: 12px;
+  z-index: 6;
+  max-width: 245px;
+  padding: 7px 10px;
+  font-size: 11px;
+  background: #172e3de8;
+  text-align: left
+}
+
+.y-cockpit .cockpit-forecast small {
+  display: block;
+  font-size: 9px;
+  margin-top: 4px
+}
+
+.y-cockpit .cockpit-forecast[data-level="warning"] {
+  border-color: #ff7169;
+  color: #ffd1ca;
+  background: #442421ed
+}
+
+.y-cockpit .cockpit-forecast[data-level="caution"] {
+  border-color: #dfb852;
+  color: #ffe3a3;
+  background: #3b3321ed
+}
+
+.y-cockpit[data-palette="day"] .pfd-control-panel>header {
+  background: #ccdde5;
+  color: #102d3c
+}
+
+@container yonder-cockpit (max-width:760px) {
+  .y-cockpit .cockpit-forecast {
+    top: 3px;
+    left: 3px;
+    max-width: 125px;
+    font-size: 9px;
+    padding: 4px
+  }
+
+  .y-cockpit .cockpit-forecast small {
+    font-size: 8px
+  }
+}
+
+/* The widget can be narrower than the browser beside Dashboard navigation. */
+.y-cockpit[data-layout="full"] :is(.cockpit-mission,.cockpit-map-pane){width:clamp(115px,calc((100cqw - 320px)/2 - 14px),370px);min-width:0}
+@container yonder-cockpit (max-width:600px){
+ .y-cockpit[data-mobile-inset="map"][data-layout="full"] .cockpit-mission,.y-cockpit[data-mobile-inset="mission"][data-layout="full"] .cockpit-map-pane{display:none}
+ .y-cockpit .cockpit-mobile-tabs{display:flex;height:37px;flex:none;gap:1px;background:#081a24}
+ .y-cockpit .cockpit-mobile-tabs button{min-height:34px;flex:1;border:0;border-radius:0;font-size:11px}
+ .y-cockpit .cockpit-mobile-tabs button[aria-pressed="true"]{color:#61d9f3}
+ .y-cockpit .cockpit-mission>header,.y-cockpit .cockpit-map-pane>header{font-size:8px;letter-spacing:0}
+}
+
+/* The original MFD strip remains available as the full-width navigation data band. */
+.y-cockpit .cockpit-navigation-data { flex:none; min-width:0 }
+.y-cockpit .cockpit-navigation-data .pfd-telemetry-strip { min-height:50px; padding:5px 6px }
+.y-cockpit .cockpit-navigation-data .pfd-telemetry-strip small { margin-bottom:3px }
+.y-cockpit .cockpit-course-strip { display:flex; flex:none; gap:10px; align-items:center; padding:5px 12px; border-bottom:1px solid var(--cockpit-line); min-height:62px }
+.y-cockpit .cockpit-course-bearing { width:70px; flex:none }
+.y-cockpit .cockpit-course-bearing small { display:block; font-size:9px; color:var(--cockpit-muted) }
+.y-cockpit .cockpit-course-bearing b { font-weight:500; font-size:18px }
+.y-cockpit .cockpit-deviation { flex:1; min-width:0; text-align:center }
+.y-cockpit .lateral-deviation-display { display:block; width:100%; height:40px }
+.y-cockpit .cockpit-deviation small { display:block; font-size:9px; color:var(--cockpit-muted) }
+.y-cockpit[data-palette="day"] .cockpit-navigation-data :is(small,i) { color:#415b6a }
+
+.y-cockpit .pfd-telemetry-strip>button { min-width:0; min-height:44px; padding:0 8px; border:0; border-right:1px solid var(--cockpit-line); border-radius:0; background:transparent; color:inherit; text-align:left }
+.y-cockpit .pfd-telemetry-strip>button:last-child { border-right:0 }
+.y-cockpit .pfd-telemetry-strip>button:hover { background:#627e8b33 }
+.y-cockpit[data-palette="day"] .pfd-telemetry-strip { background:#e3edf1; color:#102d3c }
+
+/* One uniform instrument scale over the full responsive scene. */
+.y-cockpit .pfd-instrument-canvas>.pfd-svg { width:100%; height:100%; max-width:none; position:absolute; inset:0 }
+.y-cockpit .pfd-touch-surfaces { width:100%; height:100%; max-width:none; aspect-ratio:auto; left:0; right:0; transform:none }
+.y-cockpit .pfd-touch-vsi-scale { right:auto }
+.y-cockpit .flight-mode-annunciator { position:absolute; z-index:5; left:50%; top:5px; transform:translateX(-50%); display:grid; grid-template-columns:minmax(110px,1fr) auto; max-width:calc(100% - 190px); min-width:230px; color:#e0f9eb; background:#06140fe8; border:1px solid #799b8e99; border-radius:4px; pointer-events:auto; overflow:hidden }
+.y-cockpit .flight-mode-annunciator button { border:0; border-radius:0; background:transparent; min-height:30px; padding:3px 10px; line-height:1.15; text-align:center; color:inherit }
+.y-cockpit .flight-mode-actual { grid-row:span 2; border-right:1px solid #799b8e66!important }
+.y-cockpit .flight-mode-actual small { display:block; font-size:8px; letter-spacing:1px; color:#a8c6b9 }
+.y-cockpit .flight-mode-actual strong { display:block; color:#7df1a7; font-size:20px; letter-spacing:1.5px; padding-top:2px }
+.y-cockpit .flight-mode-annunciator .flight-mode-arm { font-size:10px; min-height:23px }
+.y-cockpit .flight-mode-annunciator .flight-mode-fd { color:#ff9eec; font-size:10px; min-height:22px; border-top:1px solid #799b8e66 }
+.y-cockpit .flight-mode-annunciator .flight-mode-request { grid-column:1/-1; display:flex; justify-content:center; gap:8px; padding:4px 7px; font-size:10px; background:#0a1b27f2; color:#dbe9f0; border-top:1px solid #799b8e66; white-space:normal; text-align:left; cursor:pointer }
+.y-cockpit .flight-mode-request small { color:#f4d098; font-size:inherit }
+.y-cockpit .flight-mode-annunciator.unavailable .flight-mode-actual strong,.y-cockpit .flight-mode-annunciator.caution .flight-mode-request { color:#ffcf89 }
+.y-cockpit .flight-control-host { flex:none; position:relative; z-index:30 }
+.y-cockpit .flight-control-strip { display:grid; grid-template-columns:repeat(8,minmax(0,1fr)); background:#06121c; border-bottom:1px solid var(--cockpit-line); gap:1px }
+.y-cockpit .flight-control-strip button { display:flex; flex-direction:column; align-items:center; justify-content:center; gap:3px; min-width:0; min-height:51px; border:0; border-right:1px solid #617b8855; border-radius:0; padding:6px 3px; background:#132b38; color:#ecf7fa; font-size:12px }
+.y-cockpit .flight-control-strip button small { font-size:9px; color:#a9c3cc; white-space:nowrap }
+.y-cockpit .flight-control-strip button[aria-expanded="true"] { background:#234856; box-shadow:inset 0 -3px #77dcee }
+.y-cockpit .flight-control-scrim { z-index:90 }
+.y-cockpit .flight-control-dialog { width:min(630px,calc(100vw - 24px)); max-height:calc(100dvh - 24px) }
+.y-cockpit .flight-control-actual { display:flex; align-items:center; gap:13px; padding:12px 18px; border-bottom:1px solid var(--cockpit-line); color:#c7dadd; background:#0c202b; font-size:12px }
+.y-cockpit .flight-control-actual small { font-size:9px; letter-spacing:.8px }
+.y-cockpit .flight-control-actual strong { color:#8de9b8 }
+.y-cockpit .flight-control-dialog .mission-mode-grid button { min-height:47px }
+.y-cockpit .flight-control-dialog .mission-mode-grid small { display:block; font-size:9px; color:var(--cockpit-muted); margin-top:4px }
+.y-cockpit .flight-request-form { display:grid; gap:15px }
+.y-cockpit .flight-request-form .mission-field-grid { margin:0 }
+.y-cockpit .loiter-local-preview { display:flex; align-items:center; gap:14px; margin:12px 0; padding:8px 12px; border:1px solid var(--cockpit-line); border-radius:5px; background:#12303a55 }
+.y-cockpit .loiter-local-preview svg { width:120px; height:96px; flex:none; fill:none; stroke:#66dbe4; stroke-width:2 }
+.y-cockpit .loiter-preview-arrow { stroke-width:4; stroke-linejoin:round }
+.y-cockpit .loiter-local-preview b { display:block; font-size:13px }
+.y-cockpit .loiter-local-preview small { display:block; font-size:11px; color:var(--cockpit-muted); margin-top:7px }
+.y-cockpit[data-palette="day"] .flight-control-strip { background:#90a8b2 }
+.y-cockpit[data-palette="day"] .flight-control-strip button { background:#dce8ed; color:#152c38 }
+.y-cockpit[data-palette="day"] .flight-control-strip button small { color:#395763 }
+.y-cockpit[data-palette="day"] .flight-control-strip button[aria-expanded="true"] { background:#bedee4; box-shadow:inset 0 -3px #137386 }
+.y-cockpit[data-palette="day"] .flight-control-actual { background:#cbdde4; color:#183c4e }
+.y-cockpit[data-palette="day"] .flight-control-actual strong { color:#176c3c }
+.y-cockpit[data-palette="day"] .loiter-local-preview svg { stroke:#117383 }
+@container yonder-cockpit (max-width:800px) {
+ .y-cockpit .flight-control-strip { grid-template-columns:repeat(4,minmax(0,1fr)) }
+ .y-cockpit .flight-control-strip button { min-height:44px; font-size:11px }
+ .y-cockpit .flight-control-strip button small { font-size:8px }
+}
+@container yonder-cockpit (max-width:480px) {
+ .y-cockpit .flight-mode-annunciator { min-width:190px; max-width:calc(100% - 90px); top:4px }
+ .y-cockpit .flight-mode-actual strong { font-size:15px }
+ .y-cockpit .flight-mode-request { flex-direction:column; align-items:center; gap:2px; font-size:8px; padding:3px }
+ .y-cockpit .flight-mode-annunciator button { padding:3px 6px }
+ .y-cockpit .loiter-local-preview svg { width:85px; height:72px }
+}
+.y-cockpit .cockpit-target-prompt { position:absolute; z-index:1200; left:12px; right:12px; bottom:55px; display:flex; justify-content:space-between; align-items:center; gap:10px; padding:7px 10px; background:var(--cockpit-pane); border:1px solid var(--cockpit-line); font-size:12px }
+.y-cockpit .cockpit-camera-fallback { position:absolute; z-index:12; top:100px; left:50%; transform:translateX(-50%); display:flex; align-items:center; gap:12px; padding:7px 12px; border:1px solid #a5b9bd; border-radius:5px; background:var(--cockpit-pane); font-size:12px }
+.y-cockpit[data-palette="day"] .flight-mode-annunciator { background:#e5f0e8ed; color:#254e3b }
+.y-cockpit[data-palette="day"] .flight-mode-actual strong { color:#186039 }
+.y-cockpit[data-palette="day"] .flight-mode-actual small { color:#426852 }
+.y-cockpit[data-palette="day"] .flight-mode-request { background:#deebed; color:#183c4e }
+.y-cockpit[data-palette="day"] .flight-mode-request small { color:#784200 }
+
+/* Keep inset tops below the tapes when persistent controls consume vertical space. */
+.y-cockpit[data-layout="full"] :is(.cockpit-mission,.cockpit-map-pane) { max-height:calc((var(--cockpit-height,100dvh) - 235px)*.36) }
+/* Keep the actual-mode strip above the authored bank ticks at laptop scale. */
+.y-cockpit .flight-mode-annunciator { top:0; grid-template-columns:auto auto auto; min-width:280px; overflow:visible }
+.y-cockpit .flight-mode-actual { grid-row:auto; white-space:nowrap }
+.y-cockpit .flight-mode-actual small { display:inline; font-size:8px; letter-spacing:.2px; margin-right:7px }
+.y-cockpit .flight-mode-actual strong { display:inline; padding:0; font-size:17px }
+.y-cockpit .flight-mode-annunciator button { min-height:27px; padding:2px 7px }
+.y-cockpit .flight-mode-annunciator .flight-mode-arm,.y-cockpit .flight-mode-annunciator .flight-mode-fd { min-height:27px; font-size:9px; border-top:0 }
+.y-cockpit .flight-mode-annunciator .flight-mode-fd { border-left:1px solid #799b8e66 }
+@container yonder-cockpit (min-width:1000px) {
+ .y-cockpit .flight-mode-request { position:absolute; left:calc(100% + 10px); top:0; width:230px; max-width:calc((100cqw - 640px)/2); min-height:27px; border:1px solid #799b8e66; border-radius:3px; flex-direction:column; gap:3px }
+}
+@container yonder-cockpit (max-width:480px) {
+ .y-cockpit .flight-mode-annunciator { min-width:260px }
+ .y-cockpit .flight-mode-actual small { font-size:7px; margin-right:4px }
+ .y-cockpit .flight-mode-actual strong { font-size:15px }
+}
+
+.y-cockpit .mission-view-tabs{display:flex;gap:6px;padding:6px 10px;border-bottom:1px solid #5267706b}.y-cockpit .mission-view-tabs button{min-height:36px;padding:5px 16px}.y-cockpit .mission-view-tabs button[aria-pressed="true"]{border-color:#fa8ae9;color:#fa8ae9}
+
+.y-cockpit .mission-waypoint-head{display:grid;grid-template-columns:minmax(100px,1fr) 112px 70px;gap:3px;padding:6px 0 6px 28px;font-size:9px;color:#b9d2e0}.y-cockpit .mission-waypoint-head span:not(:first-child){text-align:right;padding-right:7px}.y-cockpit .expanded .waypoint-table .waypoint-row small{font-size:9px}

@@ -1,0 +1,49 @@
+<!-- SPDX-License-Identifier: GPL-3.0-or-later -->
+<!--
+  The editor half of the captures panel. Node-RED finds this by basename
+  beside the node's .js; without it the widget registers and shows as "unknown
+  node". A form and a registration, nothing else (CLAUDE.md rule 2, R-UI-01).
+-->
+<script type="text/html" data-template-name="ui-yonder-captures">
+  <div class="form-row"><label for="node-input-group"><i class="fa fa-table"></i> Group</label>
+    <input type="text" id="node-input-group" /></div>
+  <div class="form-row"><label for="node-input-name"><i class="fa fa-tag"></i> Name</label>
+    <input type="text" id="node-input-name" placeholder="Name" /></div>
+  <div class="form-tips">
+    <b>What this board is holding (R-CAM-18).</b> This node draws the listing
+    entirely from <code>msg.payload</code> &mdash; there is no other
+    configuration.
+  </div>
+</script>
+<script type="text/html" data-help-name="ui-yonder-captures">
+<p>Every capture this camera has, newest first, with a thumbnail, when it was
+taken, its shape and its size &mdash; and View, Download and Delete for the
+ones this board holds (R-CAM-18).</p>
+<p>Reads one <code>msg.payload</code>, exactly as
+<code>GET /cameras/&lt;id&gt;/captures</code> answers it:</p>
+<pre>{ camera: "cam0",
+  captures: [{ name, at, bytes, width, height, held }] }</pre>
+<p><b>A capture the camera holds carries none of the three keys.</b> Yonder
+never saw the file, so it cannot be fetched or deleted; the row is still
+listed, with the sentence saying where it is. A photograph that exists and is
+not on this board is a fact an operator needs.</p>
+<p><b>Delete asks first.</b> The row's keys become <i>Delete this? &middot;
+DELETE &middot; KEEP</i>, and only the second press emits
+<code>{ remove: "&lt;name&gt;" }</code>. It cannot be undone.</p>
+<p><b>View and Download need no round trip</b> &mdash; both are the console's
+own capture route, behind the same credential as the picture (R-SEC-13).</p>
+</script>
+<script type="text/javascript">
+  RED.nodes.registerType("ui-yonder-captures", {
+    category: "dashboard 2", color: "#c7e0d4",
+    defaults: {
+      name: { value: "" },
+      group: { type: "ui-group", required: true },
+      order: { value: 0 }, width: { value: 0 }, height: { value: 0 }
+    },
+    inputs: 1, outputs: 1,
+    icon: "font-awesome/fa-photo",
+    paletteLabel: "yonder captures panel",
+    label: function () { return this.name || "yonder captures panel"; }
+  });
+</script>

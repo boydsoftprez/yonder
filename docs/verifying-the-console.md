@@ -287,10 +287,19 @@ committed reference is a `.darwin.json` and the runner is Linux, so the gate tak
 *record* branch and writes `.linux.json` files that are **untracked** — which `git diff`
 does not see, and did not, on every run since the job was written.
 
-**A picture**, in `docs/console/capture/`, written every run. The committed copy masks live
-readings — a load average changes between two runs and would leave the file permanently
-dirty — so what it records is the layout. The unmasked copy goes to `vendor/capture/`, which
-CI uploads as an artifact.
+**A picture**, written every run — a masked copy under `docs/console/capture/` and the whole
+one under `vendor/capture/`, which CI uploads as the artifact a reviewer downloads. **Neither
+is committed**, and that is a correction rather than an omission: the masked set *was*
+tracked, all 7.3 MB of it, growing two files per page per state.
+
+It was removed because **no job ever compared it**. CI checks `docs/console/shape/` — the
+geometry — and nothing else; the pictures went to an artifact instead. An earlier version of
+this paragraph said nothing wrote that directory, which was wrong: `capture-pages.mjs` writes
+it on every run and always has. What was true is the part that mattered — the file was
+produced, committed, and never read. The evidence that is kept and compared is the geometry, in
+`docs/console/shape/`; the picture is per-platform pixels, and the defect that provoked the
+legibility rule showed its words plainly at 1.05:1. A picture is committed only when it is
+*evidence* for a known issue rather than a gate artifact, and then one file at a time.
 
 **And a page in more than one state, where it has them.** R-UI-12 says a surface that hides
 part of itself is captured in each of those parts. A tabbed page hides its other tabs, which
@@ -388,25 +397,53 @@ status-pending-radio.day.png                and one only the device can confirm
 status-psk-changed.day.png                  the same board, on a passphrase the operator set
 ```
 
-The countdown is masked in the committed picture and only there: it is the one annunciator
-caption on this console that is a *reading*, so without masking that file would differ by a
-second or two on every run. The widget says so about itself with `className: "yonder-live"`,
-which is what the mask list matches — the lamp and its box are untouched, and the unmasked
-copy under `vendor/capture/` carries the digits. The *caption* goes whole, the word with the
-digits: the annunciator draws both in one element and there is no smaller one to mask. The
-two lines under it wear `yonder-fixed`, so what the banner is about is still readable.
+The countdown is one of the few readings still masked, and `specimens.json` says why: it has
+a widest honest value — the full window, at three digits — and writing it would put `CHANGE
+PENDING` on every page captured with nothing pending, which is the one thing about this
+annunciator a picture has to get right. The pending captures exist to photograph the other
+state. The widget says so about itself with `className: "yonder-live"`, which is what the
+mask list matches — the lamp and its box are untouched, and the copy under `vendor/capture/`
+carries the digits. The *caption* goes whole, the word with the digits: the annunciator draws
+both in one element and there is no smaller one to mask. The two lines under it wear
+`yonder-fixed`, so what the banner is about is still readable.
+
+The five gauges are the other exemption. A gauge draws the same number twice — once as text
+and once as a needle — and a specimen written from outside moves only one of them, which
+would commit a picture of a needle at one value with another written beside it. A
+widest-value gauge has to be driven through the daemon.
 
 `className: "yonder-fixed"` is the mirror of that. `If you lose this console` wears it, and
-so does every row of `Way out`. Data-bar cells and text values are masked as *kinds*,
-because most of them carry readings; those two panels carry none — an SSID, an address, a
-hostname and either the published passphrase or the sentence that stands in for a changed
-one; an interface name from a device list and one of five fixed sentences. Masked, each
-panel's states were the same picture, which is most of the reason for taking the second one.
+so does every row of `Way out`. Data-bar cells and text values are found as *kinds*, because
+most of them carry readings; those two panels carry none — an SSID, an address, a hostname
+and either the published passphrase or the sentence that stands in for a changed one; an
+interface name from a device list and one of five fixed sentences. It exempts them from both
+halves: no specimen is written over them and no mask is painted on them, so each panel's
+states are different pictures, which is most of the reason for taking the second one.
 
 `capture-pages.mjs --only <page> --as <name>` is what takes one of them, so a state capture
 is held to exactly the rules and the shape reference every other page is. The shape manifest
 is what proves the degradation rather than the picture: the two gauges appear in the
 without-modem reference carrying `d-none` and a zero box, and the panel is 120 px shorter.
+
+### The viewport contract
+
+Every capture above is taken at 1280×900, which is what makes the shape references
+comparable and is also a width nobody flies with. The camera pages are captured again at the
+two surfaces the console is designed for: a notebook at 1440×900 with the sidebar open,
+where the picture, the Aim panel and the shutter key have to fit above the fold and the deck
+may run past it; and a landscape tablet at 1024×768, below the 1100 px breakpoint where the
+Aim panel drops beneath the picture.
+
+Those runs photograph the **viewport on its own**, beside the full page, because a tall
+full-page PNG is not evidence that anything fits above the fold — it is evidence that
+everything is reachable, which is a different claim and also worth having. Each records a
+shape reference under its own name, so a 1440 rendering is never compared against a 1024 one.
+
+Three assertions come with them: each named part is inside the viewport (and a part that is
+not on the page at all is a finding, not a pass — a check that cannot tell *nothing to find*
+from *did not look* is not a check); nothing inside a deck has a scrollbar of its own, since
+one vertical page scroll is the contract and an inner scrollbar is the one nobody finds; and
+the rail is still in the viewport with the page scrolled to the bottom.
 
 ```
 ./scripts/verify-pages.sh                    # capture, and gate
@@ -443,5 +480,22 @@ debt list nobody prunes stops being a list of debts and becomes a list of excuse
   problem for the same reason.
 
 **What it still does not prove.** That a reading is legible in sunlight, that a target is
-big enough for a gloved finger, or that any of it works on a board. A headless browser at
-1280×900 is not a tablet on a wing.
+comfortable to hit, or that any of it works on a board. A headless browser at 1280×900 is
+one viewport on one machine, and no substitute for the screen somebody is holding.
+
+
+## Combined camera workspace gate (R-UI-29)
+
+The operator-approved [camera workspace revision](superpowers/specs/2026-09-08-camera-workspace.md)
+supersedes the Live/Setup split. The capture gate now photographs `camera`, including
+its sensor-turns state, at notebook and tablet widths. Picture and Aim remain in the
+notebook viewport. Capture and the single transaction area are checked for full
+reachability by page scrolling; the legacy shutter-above-fold and bottom-rail rules
+remain applicable to legacy decks, not this revised composition. Overflow, contrast,
+nested scrolling, credentials, and committed geometry checks remain enforced.
+
+The network harness supplies kernel interface and route observations alongside
+NetworkManager fixtures, keeping automatic reachability untested until explicitly
+probed. Palette changes are exercised from Settings, and pending changes through the
+current Revert control. Retired databar/diagnostic readings have been removed from the
+specimen inventory; controller-path labels use their current names.

@@ -324,6 +324,19 @@
       "additionalProperties": false,
       "default": {}
     },
+    "storage": {
+      "type": "object",
+      "properties": {
+        "reserve_mb": {
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 1048576,
+          "default": 1024
+        }
+      },
+      "additionalProperties": false,
+      "default": {}
+    },
     "remote": {
       "type": "object",
       "properties": {
@@ -345,6 +358,1054 @@
                 }
               ],
               "default": null
+            }
+          },
+          "additionalProperties": false,
+          "default": {}
+        }
+      },
+      "additionalProperties": false,
+      "default": {}
+    },
+    "cameras": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "properties": {
+          "id": {
+            "type": "string",
+            "pattern": "^[a-z0-9][a-z0-9-]{0,31}$"
+          },
+          "name": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 48
+          },
+          "source": {
+            "type": "string",
+            "enum": [
+              "usb",
+              "accessory",
+              "csi"
+            ]
+          },
+          "accessory_mount": {
+            "anyOf": [
+              {
+                "type": "object",
+                "properties": {
+                  "mount": {
+                    "type": "string",
+                    "minLength": 1,
+                    "maxLength": 64
+                  },
+                  "envelopes": {
+                    "type": "array",
+                    "items": {
+                      "type": "object",
+                      "properties": {
+                        "yaw": {
+                          "type": "array",
+                          "minItems": 2,
+                          "maxItems": 2,
+                          "items": [
+                            {
+                              "type": "number",
+                              "minimum": -360,
+                              "maximum": 360
+                            },
+                            {
+                              "type": "number",
+                              "minimum": -360,
+                              "maximum": 360
+                            }
+                          ]
+                        },
+                        "pitch": {
+                          "type": "array",
+                          "minItems": 2,
+                          "maxItems": 2,
+                          "items": [
+                            {
+                              "type": "number",
+                              "minimum": -360,
+                              "maximum": 360
+                            },
+                            {
+                              "type": "number",
+                              "minimum": -360,
+                              "maximum": 360
+                            }
+                          ]
+                        },
+                        "roll": {
+                          "type": "array",
+                          "minItems": 2,
+                          "maxItems": 2,
+                          "items": [
+                            {
+                              "type": "number",
+                              "minimum": -360,
+                              "maximum": 360
+                            },
+                            {
+                              "type": "number",
+                              "minimum": -360,
+                              "maximum": 360
+                            }
+                          ]
+                        },
+                        "mount": {
+                          "type": "string",
+                          "minLength": 1,
+                          "maxLength": 64
+                        },
+                        "mode": {
+                          "type": "number",
+                          "enum": [
+                            0,
+                            1,
+                            2
+                          ]
+                        }
+                      },
+                      "required": [
+                        "mount",
+                        "mode"
+                      ],
+                      "additionalProperties": false
+                    },
+                    "maxItems": 12
+                  },
+                  "signs": {
+                    "type": "object",
+                    "properties": {
+                      "pan": {
+                        "anyOf": [
+                          {
+                            "type": "number",
+                            "enum": [
+                              1,
+                              -1
+                            ]
+                          },
+                          {
+                            "type": "null"
+                          }
+                        ]
+                      },
+                      "tilt": {
+                        "anyOf": [
+                          {
+                            "type": "number",
+                            "enum": [
+                              1,
+                              -1
+                            ]
+                          },
+                          {
+                            "type": "null"
+                          }
+                        ]
+                      }
+                    },
+                    "required": [
+                      "pan",
+                      "tilt"
+                    ],
+                    "additionalProperties": false
+                  },
+                  "limitDirections": {
+                    "type": "object",
+                    "properties": {
+                      "yaw": {
+                        "type": "number",
+                        "enum": [
+                          1,
+                          -1
+                        ]
+                      },
+                      "pitch": {
+                        "type": "number",
+                        "enum": [
+                          1,
+                          -1
+                        ]
+                      }
+                    },
+                    "additionalProperties": false
+                  },
+                  "actions": {
+                    "type": "array",
+                    "items": {
+                      "type": "object",
+                      "properties": {
+                        "mount": {
+                          "type": "string",
+                          "minLength": 1,
+                          "maxLength": 64
+                        },
+                        "fromMode": {
+                          "type": "number",
+                          "enum": [
+                            0,
+                            1,
+                            2
+                          ]
+                        },
+                        "command": {
+                          "anyOf": [
+                            {
+                              "type": "object",
+                              "properties": {
+                                "kind": {
+                                  "type": "string",
+                                  "const": "recentre"
+                                }
+                              },
+                              "required": [
+                                "kind"
+                              ],
+                              "additionalProperties": false
+                            },
+                            {
+                              "type": "object",
+                              "properties": {
+                                "kind": {
+                                  "type": "string",
+                                  "const": "mode"
+                                },
+                                "mode": {
+                                  "type": "number",
+                                  "enum": [
+                                    0,
+                                    1,
+                                    2
+                                  ]
+                                }
+                              },
+                              "required": [
+                                "kind",
+                                "mode"
+                              ],
+                              "additionalProperties": false
+                            }
+                          ]
+                        },
+                        "start": {
+                          "type": "object",
+                          "properties": {
+                            "yaw": {
+                              "type": "array",
+                              "minItems": 2,
+                              "maxItems": 2,
+                              "items": [
+                                {
+                                  "type": "number",
+                                  "minimum": -360,
+                                  "maximum": 360
+                                },
+                                {
+                                  "type": "number",
+                                  "minimum": -360,
+                                  "maximum": 360
+                                }
+                              ]
+                            },
+                            "pitch": {
+                              "type": "array",
+                              "minItems": 2,
+                              "maxItems": 2,
+                              "items": [
+                                {
+                                  "type": "number",
+                                  "minimum": -360,
+                                  "maximum": 360
+                                },
+                                {
+                                  "type": "number",
+                                  "minimum": -360,
+                                  "maximum": 360
+                                }
+                              ]
+                            },
+                            "roll": {
+                              "type": "array",
+                              "minItems": 2,
+                              "maxItems": 2,
+                              "items": [
+                                {
+                                  "type": "number",
+                                  "minimum": -360,
+                                  "maximum": 360
+                                },
+                                {
+                                  "type": "number",
+                                  "minimum": -360,
+                                  "maximum": 360
+                                }
+                              ]
+                            }
+                          },
+                          "required": [
+                            "yaw",
+                            "pitch",
+                            "roll"
+                          ],
+                          "additionalProperties": false
+                        },
+                        "trajectory": {
+                          "type": "object",
+                          "properties": {
+                            "yaw": {
+                              "type": "array",
+                              "minItems": 2,
+                              "maxItems": 2,
+                              "items": [
+                                {
+                                  "type": "number",
+                                  "minimum": -360,
+                                  "maximum": 360
+                                },
+                                {
+                                  "type": "number",
+                                  "minimum": -360,
+                                  "maximum": 360
+                                }
+                              ]
+                            },
+                            "pitch": {
+                              "type": "array",
+                              "minItems": 2,
+                              "maxItems": 2,
+                              "items": [
+                                {
+                                  "type": "number",
+                                  "minimum": -360,
+                                  "maximum": 360
+                                },
+                                {
+                                  "type": "number",
+                                  "minimum": -360,
+                                  "maximum": 360
+                                }
+                              ]
+                            },
+                            "roll": {
+                              "type": "array",
+                              "minItems": 2,
+                              "maxItems": 2,
+                              "items": [
+                                {
+                                  "type": "number",
+                                  "minimum": -360,
+                                  "maximum": 360
+                                },
+                                {
+                                  "type": "number",
+                                  "minimum": -360,
+                                  "maximum": 360
+                                }
+                              ]
+                            }
+                          },
+                          "required": [
+                            "yaw",
+                            "pitch",
+                            "roll"
+                          ],
+                          "additionalProperties": false
+                        }
+                      },
+                      "required": [
+                        "mount",
+                        "fromMode",
+                        "command",
+                        "start",
+                        "trajectory"
+                      ],
+                      "additionalProperties": false
+                    },
+                    "maxItems": 32
+                  }
+                },
+                "required": [
+                  "mount",
+                  "envelopes",
+                  "signs",
+                  "limitDirections",
+                  "actions"
+                ],
+                "additionalProperties": false
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "gimbal_presets": {
+            "type": "object",
+            "properties": {
+              "revision": {
+                "type": "integer",
+                "minimum": 0
+              },
+              "slots": {
+                "type": "array",
+                "items": {
+                  "type": "object",
+                  "properties": {
+                    "slot": {
+                      "type": "integer",
+                      "minimum": 1,
+                      "maximum": 6
+                    },
+                    "name": {
+                      "type": "string",
+                      "minLength": 1,
+                      "maxLength": 32,
+                      "pattern": "^[^\\x00-\\x1f\\x7f]+$"
+                    },
+                    "frame": {
+                      "type": "string",
+                      "const": "hg211-joints-v1"
+                    },
+                    "mode": {
+                      "type": "number",
+                      "const": 1
+                    },
+                    "pan": {
+                      "type": "number",
+                      "minimum": -250,
+                      "maximum": 90
+                    },
+                    "tilt": {
+                      "type": "number",
+                      "minimum": -180,
+                      "maximum": 70
+                    },
+                    "savedAt": {
+                      "type": "integer",
+                      "minimum": 0
+                    }
+                  },
+                  "required": [
+                    "slot",
+                    "name",
+                    "frame",
+                    "mode",
+                    "pan",
+                    "tilt",
+                    "savedAt"
+                  ],
+                  "additionalProperties": false
+                },
+                "maxItems": 6
+              }
+            },
+            "required": [
+              "revision",
+              "slots"
+            ],
+            "additionalProperties": false
+          },
+          "device": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 128
+          },
+          "enabled": {
+            "type": "boolean",
+            "default": true
+          },
+          "autostart": {
+            "type": "boolean",
+            "default": false
+          },
+          "width": {
+            "type": "integer",
+            "minimum": 160,
+            "maximum": 3840,
+            "default": 1280
+          },
+          "height": {
+            "type": "integer",
+            "minimum": 90,
+            "maximum": 2160,
+            "default": 720
+          },
+          "framerate": {
+            "type": "integer",
+            "minimum": 1,
+            "maximum": 60,
+            "default": 30
+          },
+          "codec": {
+            "type": "string",
+            "enum": [
+              "h264",
+              "h265"
+            ],
+            "default": "h264"
+          },
+          "bitrate_kbps": {
+            "type": "integer",
+            "minimum": 100,
+            "maximum": 20000,
+            "default": 2000
+          },
+          "preview": {
+            "type": "object",
+            "properties": {
+              "codec": {
+                "type": "string",
+                "enum": [
+                  "h264",
+                  "h265"
+                ]
+              },
+              "mode": {
+                "type": "string",
+                "enum": [
+                  "adaptive",
+                  "fixed"
+                ],
+                "default": "adaptive"
+              },
+              "size": {
+                "type": "string",
+                "enum": [
+                  "auto",
+                  "1920x1080",
+                  "1280x720",
+                  "854x480",
+                  "640x360"
+                ],
+                "default": "auto"
+              },
+              "ladder_top": {
+                "type": "string",
+                "enum": [
+                  "1920x1080",
+                  "1280x720",
+                  "854x480",
+                  "640x360"
+                ],
+                "default": "1280x720"
+              },
+              "ladder_bottom": {
+                "type": "string",
+                "enum": [
+                  "1920x1080",
+                  "1280x720",
+                  "854x480",
+                  "640x360"
+                ],
+                "default": "640x360"
+              },
+              "floor_kbps": {
+                "type": "integer",
+                "minimum": 100,
+                "maximum": 4000,
+                "default": 300
+              },
+              "ceiling_kbps": {
+                "type": "integer",
+                "minimum": 100,
+                "maximum": 4000,
+                "default": 2000
+              },
+              "bitrate_kbps": {
+                "type": "integer",
+                "minimum": 100,
+                "maximum": 4000,
+                "default": 400
+              },
+              "framerate": {
+                "type": "integer",
+                "minimum": 1,
+                "maximum": 30,
+                "default": 15
+              }
+            },
+            "additionalProperties": false,
+            "default": {}
+          },
+          "controls": {
+            "type": "object",
+            "properties": {
+              "brightness": {
+                "anyOf": [
+                  {
+                    "type": "integer",
+                    "minimum": -100,
+                    "maximum": 100
+                  },
+                  {
+                    "type": "null"
+                  }
+                ],
+                "default": null
+              },
+              "contrast": {
+                "anyOf": [
+                  {
+                    "type": "integer",
+                    "minimum": -100,
+                    "maximum": 100
+                  },
+                  {
+                    "type": "null"
+                  }
+                ],
+                "default": null
+              },
+              "rotation": {
+                "type": "number",
+                "enum": [
+                  0,
+                  90,
+                  180,
+                  270
+                ],
+                "default": 0
+              },
+              "zoom": {
+                "anyOf": [
+                  {
+                    "type": "integer",
+                    "minimum": 0,
+                    "maximum": 65535
+                  },
+                  {
+                    "type": "null"
+                  }
+                ],
+                "default": null
+              },
+              "focus": {
+                "anyOf": [
+                  {
+                    "type": "integer",
+                    "minimum": 0,
+                    "maximum": 65535
+                  },
+                  {
+                    "type": "null"
+                  }
+                ],
+                "default": null
+              },
+              "exposureTime": {
+                "anyOf": [
+                  {
+                    "type": "integer",
+                    "minimum": 0,
+                    "maximum": 4294967295
+                  },
+                  {
+                    "type": "null"
+                  }
+                ],
+                "default": null
+              },
+              "whiteBalanceTemperature": {
+                "anyOf": [
+                  {
+                    "type": "integer",
+                    "minimum": 0,
+                    "maximum": 65535
+                  },
+                  {
+                    "type": "null"
+                  }
+                ],
+                "default": null
+              },
+              "gain": {
+                "anyOf": [
+                  {
+                    "type": "integer",
+                    "minimum": 0,
+                    "maximum": 65535
+                  },
+                  {
+                    "type": "null"
+                  }
+                ],
+                "default": null
+              },
+              "backlightCompensation": {
+                "anyOf": [
+                  {
+                    "type": "integer",
+                    "minimum": 0,
+                    "maximum": 65535
+                  },
+                  {
+                    "type": "null"
+                  }
+                ],
+                "default": null
+              },
+              "gamma": {
+                "anyOf": [
+                  {
+                    "type": "integer",
+                    "minimum": 0,
+                    "maximum": 65535
+                  },
+                  {
+                    "type": "null"
+                  }
+                ],
+                "default": null
+              },
+              "sharpness": {
+                "anyOf": [
+                  {
+                    "type": "integer",
+                    "minimum": 0,
+                    "maximum": 65535
+                  },
+                  {
+                    "type": "null"
+                  }
+                ],
+                "default": null
+              },
+              "saturation": {
+                "anyOf": [
+                  {
+                    "type": "integer",
+                    "minimum": 0,
+                    "maximum": 65535
+                  },
+                  {
+                    "type": "null"
+                  }
+                ],
+                "default": null
+              },
+              "hue": {
+                "anyOf": [
+                  {
+                    "type": "integer",
+                    "minimum": -32768,
+                    "maximum": 32767
+                  },
+                  {
+                    "type": "null"
+                  }
+                ],
+                "default": null
+              },
+              "powerLineFrequency": {
+                "anyOf": [
+                  {
+                    "type": "integer",
+                    "minimum": 0,
+                    "maximum": 3
+                  },
+                  {
+                    "type": "null"
+                  }
+                ],
+                "default": null
+              },
+              "autoExposure": {
+                "anyOf": [
+                  {
+                    "type": "integer",
+                    "minimum": 0,
+                    "maximum": 3
+                  },
+                  {
+                    "type": "null"
+                  }
+                ],
+                "default": null
+              },
+              "autoWhiteBalance": {
+                "type": [
+                  "boolean",
+                  "null"
+                ],
+                "default": null
+              },
+              "autoFocus": {
+                "type": [
+                  "boolean",
+                  "null"
+                ],
+                "default": null
+              },
+              "horizontalFlip": {
+                "type": [
+                  "boolean",
+                  "null"
+                ],
+                "default": null
+              },
+              "verticalFlip": {
+                "type": [
+                  "boolean",
+                  "null"
+                ],
+                "default": null
+              }
+            },
+            "additionalProperties": false,
+            "default": {}
+          },
+          "image": {
+            "type": "object",
+            "properties": {
+              "brightness": {
+                "type": "integer",
+                "minimum": -100,
+                "maximum": 100,
+                "default": 0
+              },
+              "contrast": {
+                "type": "integer",
+                "minimum": 0,
+                "maximum": 200,
+                "default": 100
+              },
+              "saturation": {
+                "type": "integer",
+                "minimum": 0,
+                "maximum": 200,
+                "default": 100
+              },
+              "hue": {
+                "type": "integer",
+                "minimum": -180,
+                "maximum": 180,
+                "default": 0
+              }
+            },
+            "additionalProperties": false,
+            "default": {}
+          },
+          "outputs": {
+            "type": "array",
+            "items": {
+              "anyOf": [
+                {
+                  "type": "object",
+                  "properties": {
+                    "kind": {
+                      "type": "string",
+                      "const": "rtp"
+                    },
+                    "enabled": {
+                      "type": "boolean",
+                      "default": true
+                    },
+                    "host": {
+                      "type": "string",
+                      "pattern": "^(25[0-5]|2[0-4]\\d|1\\d\\d|[1-9]?\\d)(\\.(25[0-5]|2[0-4]\\d|1\\d\\d|[1-9]?\\d)){3}$"
+                    },
+                    "port": {
+                      "type": "integer",
+                      "minimum": 1,
+                      "maximum": 65535
+                    }
+                  },
+                  "required": [
+                    "kind",
+                    "host",
+                    "port"
+                  ],
+                  "additionalProperties": false
+                },
+                {
+                  "type": "object",
+                  "properties": {
+                    "kind": {
+                      "type": "string",
+                      "const": "rtsp"
+                    },
+                    "enabled": {
+                      "type": "boolean",
+                      "default": true
+                    },
+                    "password": {
+                      "type": "object",
+                      "properties": {
+                        "secret": {
+                          "type": "string",
+                          "minLength": 1
+                        }
+                      },
+                      "required": [
+                        "secret"
+                      ],
+                      "additionalProperties": false
+                    }
+                  },
+                  "required": [
+                    "kind",
+                    "password"
+                  ],
+                  "additionalProperties": false
+                },
+                {
+                  "type": "object",
+                  "properties": {
+                    "kind": {
+                      "type": "string",
+                      "const": "srt"
+                    },
+                    "enabled": {
+                      "type": "boolean",
+                      "default": true
+                    },
+                    "port": {
+                      "type": "integer",
+                      "minimum": 1,
+                      "maximum": 65535
+                    }
+                  },
+                  "required": [
+                    "kind",
+                    "port"
+                  ],
+                  "additionalProperties": false
+                }
+              ]
+            },
+            "maxItems": 8,
+            "default": []
+          },
+          "stream": {
+            "type": "object",
+            "properties": {
+              "mode": {
+                "type": "string",
+                "enum": [
+                  "fixed",
+                  "adaptive"
+                ],
+                "default": "fixed"
+              },
+              "floor_kbps": {
+                "type": "integer",
+                "minimum": 100,
+                "maximum": 20000
+              },
+              "ceiling_kbps": {
+                "type": "integer",
+                "minimum": 100,
+                "maximum": 20000
+              }
+            },
+            "additionalProperties": false,
+            "default": {}
+          }
+        },
+        "required": [
+          "id",
+          "name",
+          "source",
+          "device"
+        ],
+        "additionalProperties": false
+      },
+      "maxItems": 8,
+      "default": []
+    },
+    "mavlink": {
+      "type": "object",
+      "properties": {
+        "serial": {
+          "type": "object",
+          "properties": {
+            "device": {
+              "type": "string",
+              "minLength": 1,
+              "default": "auto"
+            },
+            "baud": {
+              "anyOf": [
+                {
+                  "type": "string",
+                  "const": "auto"
+                },
+                {
+                  "type": "number",
+                  "enum": [
+                    57600,
+                    115200,
+                    230400,
+                    921600
+                  ]
+                }
+              ],
+              "default": "auto"
+            }
+          },
+          "additionalProperties": false,
+          "default": {}
+        },
+        "endpoints": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "properties": {
+              "name": {
+                "type": "string",
+                "pattern": "^[A-Za-z0-9][A-Za-z0-9_.-]{0,62}$"
+              },
+              "host": {
+                "type": "string",
+                "pattern": "^[A-Za-z0-9][A-Za-z0-9._:%-]{0,252}$"
+              },
+              "port": {
+                "type": "integer",
+                "minimum": 1,
+                "maximum": 65535
+              }
+            },
+            "required": [
+              "name",
+              "host",
+              "port"
+            ],
+            "additionalProperties": false
+          },
+          "maxItems": 3,
+          "default": []
+        },
+        "tcp_server": {
+          "type": "object",
+          "properties": {
+            "enabled": {
+              "type": "boolean",
+              "default": true
+            },
+            "port": {
+              "type": "integer",
+              "minimum": 1,
+              "maximum": 65535,
+              "default": 5760
+            }
+          },
+          "additionalProperties": false,
+          "default": {}
+        },
+        "autocast": {
+          "type": "boolean",
+          "default": true
+        },
+        "ingest": {
+          "type": "object",
+          "properties": {
+            "loopback_only": {
+              "type": "boolean",
+              "default": true
             }
           },
           "additionalProperties": false,
