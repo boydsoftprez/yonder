@@ -1,6 +1,6 @@
 # Official terrain source investigation
 
-Date: 2026-09-11. This records the first implementation-plan discovery task; it does not establish flight readiness or authorize a source-format change.
+Date: 2026-09-11. This records the first implementation-plan discovery task; it does not establish flight readiness. The operator subsequently approved the HGT adjustment described below.
 
 ## Source and format
 
@@ -8,13 +8,13 @@ The official ArduPilot service identifies SRTM1 as JAXA ALOS-derived, nominal on
 
 The web generator returns an area ZIP. Current source also uses whole-degree gzip DAT objects under `https://terrain.ardupilot.org/tilesdat1/`. That endpoint is an observed implementation contract, not a published versioned API. Sources are mutable; store source timestamps, content hashes, format and generation metadata rather than treating the URL as an immutable release.
 
-## Missing-height ambiguity — design decision required
+## Missing-height ambiguity — approved HGT adjustment
 
 The pinned generator's `fast_gen.py` lines 87–88 replace raw HGT nodata `-32768` with `-1` before interpolation. `srtm.py` lines 408–409 do the same in the alternate path. Negative one metre can also be a valid elevation. The prebuilt DAT does not retain the original sample validity mask, so a CRC-valid DAT cannot distinguish these cases. Interpolation can mix the replacement value with neighboring heights; rejecting only DAT values equal to -1 would not repair the problem.
 
 This conflicts with the approved design's requirement to reject missing data rather than invent terrain. The source investigation therefore does not approve a DAT-only serving implementation.
 
-Recommended adjustment for operator review: retain the same official SRTM1/ALOS source, but acquire its HGT source tiles, preserve their explicit missing-data sentinel, and generate requested 30 m subgrids using reference-tested ArduPilot coordinate/interpolation behavior. If any contributing sample is missing, withhold the affected subgrid and report incomplete coverage. This changes storage/processing format, not the terrain dataset. Do not retain a second durable DAT dataset; bounded derived RAM blocks are sufficient. It adds a reference-tested sampling path, but preserves the agreed missing-data semantics.
+Approved adjustment: retain the same official SRTM1/ALOS source, but acquire its HGT source tiles, preserve their explicit missing-data sentinel, and generate requested 30 m subgrids using reference-tested ArduPilot coordinate/interpolation behavior. If any contributing sample is missing, withhold the affected subgrid and report incomplete coverage. This changes storage/processing format, not the terrain dataset. Do not retain a second durable DAT dataset; bounded derived RAM blocks are sufficient. It adds a reference-tested sampling path, but preserves the agreed missing-data semantics.
 
 An alternative is DAT plus a separately proven source-validity mask, built from corresponding HGT input. That adds download/generation matching and dual-artifact validation; mutable upstream files make correspondence itself an acceptance problem. Treating DAT heights as canonical without source validity would weaken the approved contract and is not the recommended approach.
 

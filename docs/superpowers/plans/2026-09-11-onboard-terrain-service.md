@@ -23,7 +23,9 @@
 
 ## Discovery gate status
 
-Task 1 identified a material incompatibility between DAT-only storage and the approved missing-data contract. See [source findings](../../terrain-official-source.md). Tasks 2 onward describe the DAT-first plan and must not start until the operator approves a format adjustment and these tasks are updated. Recommended adjustment: official HGT source tiles with preserved nodata, retaining the same ALOS dataset and 30 m request grid. Planning is otherwise complete; this is an explicit discovery dependency, not an implementation-ready claim.
+Task 1 identified a material incompatibility between DAT-only storage and the approved missing-data contract. See [source findings](../../terrain-official-source.md). The operator approved using official HGT source tiles with preserved nodata, retaining the same ALOS dataset and 30 m request grid. Tasks 2 onward still describe the original DAT-first representation and must be revised to that approved choice before implementation.
+
+The operator requested a real-controller memory feasibility check before the full build. See [bench evidence](../../terrain-controller-bench.md). GPS-free cache testing does not qualify autonomous request-driven operation, navigation memory headroom, or flight readiness. Controller status must preserve raw observations and their limitations; diskless pending/loaded counters alone cannot establish usable coverage.
 
 ## Shared interfaces and initial limits
 
