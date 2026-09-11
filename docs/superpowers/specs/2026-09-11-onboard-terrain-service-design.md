@@ -9,7 +9,7 @@ Yonder prepares official ArduPilot terrain data on persistent SD storage and ans
 
 Use the ArduPilot service's JAXA ALOS-derived SRTM1 product and 30 m controller grid spacing. Retain the existing high-resolution Cove ground/surface pack for detailed display. Flight-related terrain datum calculations use the official source, with explicit provenance and compatible altitude references. Never substitute display terrain for missing official data. Neither dataset establishes current obstacle clearance.
 
-This continues the approved terrain design after a firmware feasibility exercise. The bench HEEWING-F405v2 now runs a custom terrain-enabled ArduPlane 4.7.1 build. Capability and diskless configuration were observed, but no complete terrain exchange or flight qualification has been demonstrated. Software must discover compatibility at runtime rather than assume this board or version.
+This continues the approved terrain design after a firmware feasibility exercise. The bench HEEWING-F405v2 now runs a custom terrain-enabled ArduPlane 4.7.1 build. Capability, diskless configuration and a bounded simulated-GPS terrain exchange were observed; flight qualification has not been established. See the [bench evidence](../../terrain-controller-gps-simulation.md). Software must discover compatibility at runtime rather than assume this board or version.
 
 ## Existing foundation and requirement contract
 
@@ -21,9 +21,9 @@ Implementation adds stable R-FLT-27 for operator-enabled persistent official ter
 
 ## Selected approach and alternatives
 
-Add a dedicated official-terrain store and responder within yonder-core, beside the existing display pack service. Prefer storing validated upstream ArduPilot DAT blocks and reading their samples directly: this preserves upstream grid layout/version information and avoids a second durable converted dataset. Establish the exact official download contract and block semantics against pinned upstream fixtures before settling implementation interfaces. A transient decoded block cache is bounded separately.
+Add a dedicated official-terrain store and responder within yonder-core, beside the existing display pack service. The operator-approved source adjustment uses official SRTM1/ALOS HGT tiles, preserving raw nodata, and reference-tested generation of requested 30 m subgrids. DAT-only storage was rejected because upstream conversion loses nodata identity; see [source findings](../../terrain-official-source.md). Store one validated raw HGT payload per source generation and tile, with bounded derived sample windows and subgrids rather than a second durable DAT dataset. A transient decoded block cache is bounded separately.
 
-Reusing the existing detailed display pack was rejected: it has different coverage and provenance and is not the agreed official FC source. Browser-only serving was rejected because service must survive browser closure and loss of the ground link. Independently generating a new terrain database from raw elevation rasters adds conversion and maintenance work; use it only if upstream delivery proves unsuitable, with that change returned for design review.
+Reusing the existing detailed display pack was rejected: it has different coverage and provenance and is not the agreed official FC source. Browser-only serving was rejected because service must survive browser closure and loss of the ground link. The approved HGT adjustment adds maintained sampling and coordinate-conversion logic, so pinned numerical fixtures are required; it does not change the chosen elevation dataset.
 
 ## Preparation and storage lifecycle
 
@@ -31,7 +31,7 @@ An explicit Prepare action selects aircraft-side official downloads and presents
 
 Two area inputs are supported: the current mission with home/rally return coverage, or a manually selected map area. Mission preparation binds to a mission revision and home/rally snapshot. Include continuous legs, declared loiter extents and return corridors, not just waypoint cells. Show a map preview and editable coverage buffer; require review of that buffer instead of asserting an aircraft-independent safe radius. Unresolved jumps, missing home, or unsupported route geometry prevent a complete mission-coverage claim. A route change marks the associated preparation stale without deleting data. Manual areas make no automatic mission-completeness claim.
 
-A preparation job records selected bounds, revision, provider identity, dataset/version, grid spacing, vertical-reference evidence, timestamps, expected files, verified files, hashes and coverage. Publish each complete validated object atomically; interrupted downloads remain staging objects and are never sampled or transmitted. Reject traversal paths, symlinks, malformed archives/blocks, invalid coordinates, version mismatches, nodata and unexpected decompression size. Record local hashes as integrity evidence, not as independent provider authenticity.
+A preparation job records selected bounds, revision, provider identity, dataset/version, grid spacing, vertical-reference evidence, timestamps, expected files, verified files, hashes and coverage. Publish each complete validated object atomically; interrupted downloads remain staging objects and are never sampled or transmitted. Reject traversal paths, symlinks, malformed archives, invalid coordinates, unsupported manifest versions and unexpected decompression size. Preserve source nodata in valid stored tiles; withhold affected samples/subgrids and report incomplete coverage instead of rejecting unrelated valid portions or converting nodata to a height. Record local hashes as integrity evidence, not as independent provider authenticity.
 
 The storage location must resolve to the image's writable persistent data volume. Do not assume that /tmp, browser storage or a writable overlay survives restart. If persistent writable storage cannot be established, report unavailable. Keep downloaded content out of config.yaml; its declarative policy owns enablement, quota and provider selection through the existing apply mechanism.
 
@@ -49,6 +49,10 @@ Only complete valid requested sub-blocks can be sent. Missing, corrupt or incomp
 
 Firmware version is informational, not sufficient proof. Discover the terrain capability bit, relevant parameters and reported spacing; diskless deployments require the disable-disk option. Unsupported configuration displays the exact mismatch. Any operator-requested FC configuration goes through the existing review, write and readback path. This feature does not automatically alter TERRAIN_FOLLOW, mission frames, arming checks or cache size.
 
+### Multiple terrain responders — unresolved ownership
+
+The controller does not elect an authoritative provider. Matching replies from another GCS can overwrite or mix with Yonder data. The proposed single-responder policy, routing bypass limitations, ownership decision and competing-responder acceptance cases are recorded in [terrain-provider ownership](../../terrain-provider-ownership.md). Resolve that contract before claiming multi-station exclusivity or FC cache provenance; source/store work can continue independently. No automatic failover or routing filter is authorized by this note.
+
 ## PFD behavior and datum handling
 
 Extend the existing Map, terrain & data controls with area preview, Prepare/Cancel, prepared-area list, pin/delete controls, storage usage and source details. Preserve the existing synthetic-vision and detailed surface controls. A compact PFD status opens these details.
@@ -65,7 +69,7 @@ Use the official sample path for flight-related terrain datum availability and c
 
 ## Verification and acceptance
 
-Software evidence: upstream-reference block decode/CRC/version/grid tests; coordinate boundaries and negative elevations; corrupt/nodata rejection; bounded archive handling; atomic publish and restart recovery; quota/pin/shared-object deletion; request-mask mapping and exact encoded replies; target/reboot isolation; retry/rate/queue caps; no internet on request; no unsolicited aircraft command or parameter mutation; source/datum/mission-revision gates.
+Software evidence: upstream-reference HGT signed-byte decoding, archive CRC/size/identity, manifest-version and grid tests; coordinate boundaries and negative elevations; corrupt/nodata rejection; bounded archive handling; atomic publish and restart recovery; quota/pin/shared-object deletion; request-mask mapping and exact encoded replies; target/reboot isolation; competing responders and ownership-boundary tests; retry/rate/queue caps; no internet on request; no unsolicited aircraft command or parameter mutation; source/datum/mission-revision gates.
 
 Integration evidence: real daemon and routed MAVLink test with a compatible simulated controller, browser closed and network unavailable after preparation. Exercise controller reboot, interrupted download, missing tile, mismatched spacing, stale status, vehicle change and concurrent mission/command traffic. Demonstrate that terrain transmission does not starve command handling. Compare official sample values with the controller's terrain results at known locations.
 

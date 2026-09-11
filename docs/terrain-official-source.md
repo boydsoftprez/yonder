@@ -18,6 +18,14 @@ Approved adjustment: retain the same official SRTM1/ALOS source, but acquire its
 
 An alternative is DAT plus a separately proven source-validity mask, built from corresponding HGT input. That adds download/generation matching and dual-artifact validation; mutable upstream files make correspondence itself an acceptance problem. Treating DAT heights as canonical without source validity would weaken the approved contract and is not the recommended approach.
 
+## HGT storage and sampling contract
+
+The implementation plan uses a single validated raw HGT payload as the durable object. The official ZIP is download staging and integrity evidence, not a second retained terrain dataset. Each supported 3601×3601 tile is exactly 25,934,402 bytes (24.73 MiB), signed big-endian int16 with rows ordered north to south and columns west to east. The explicit missing value is -32768. Zero and -1 remain valid elevations. Tile identity and source generation live in a versioned manifest because raw HGT has no internal identity/version header.
+
+The inspected N35W084 archive is 10,817,094 bytes, giving roughly 35.1 MiB of simultaneous ZIP-plus-raw staging for that example before metadata and filesystem overhead. Other tiles compress differently; admission uses independent bounded compressed/staging costs and exact raw size, not this example as a universal estimate. Validate the archive member identity, CRC, dimensions and decoded length before atomic publication. Read raw row/windows from disk and bound the combined window/derived-grid cache to 16 MiB; never allocate an entire tile as an assumed cache entry.
+
+Interpolation with any contributing nodata stays unavailable. Valid tiles may contain missing regions; keep the validity information and report coverage gaps rather than rejecting every valid sample in that tile. Generate requested 30 m samples against pinned coordinate behavior, including neighboring tiles at overlaps and degree boundaries. Do not assign a new numeric datum correction without source evidence.
+
 ## Hardware storage evidence
 
 Read-only SSH inspection of the image mule found `/var/lib/yonder` on the persistent ext4 state partition, bind-mounted from its app directory. The state partition is 512 MiB, with approximately 450 MiB available. `/var/lib/yonder/captures` is a separate 1.2 GiB ext4 media partition. Root is read-only. These observations establish mount layout, not a reboot persistence test.
