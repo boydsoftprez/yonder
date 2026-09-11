@@ -39,7 +39,7 @@ Therefore `loaded=0` and `pending=672` do not mean no usable terrain in this exp
 
 ## Remaining acceptance gates
 
-- Observe genuine controller requests and bounded offline replies with valid position input, including movement across cache boundaries, request retries and return to evicted locations.
+- The subsequent [simulated-GPS UART experiment](terrain-controller-gps-simulation.md) observed genuine requests and replies across moving block boundaries. Real-sensor operation, prefetch behavior and request-driven return to evicted locations remain acceptance work.
 - Measure memory with GPS/EKF and the intended operational peripherals and telemetry active. A disarmed no-GPS result cannot establish navigation or VTOL transition headroom.
 - Verify whole-block completeness separately; transmitting all 56 subgrids and obtaining a point height is not an acknowledgement of every cell.
 - Exercise the production service on persistent Radxa storage, browser closed and external network unavailable, including source nodata and storage-reserve refusal.
