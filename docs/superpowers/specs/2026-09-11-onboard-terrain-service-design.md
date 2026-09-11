@@ -1,6 +1,6 @@
 # Onboard terrain preparation and serving
 
-Status: design for written review; implementation has not started.
+Status: approved by the operator on 2026-09-11; implementation follows the linked plan.
 Baseline: main e1c4e1f5539f3353c3d50b029c2ba9727351a252, matching origin/main on 2026-09-11.
 
 ## Outcome and agreed scope
