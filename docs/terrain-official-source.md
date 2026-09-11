@@ -28,6 +28,36 @@ The inspected N35W084 archive is 10,817,094 bytes, giving roughly 35.1 MiB of si
 
 Interpolation with any contributing nodata stays unavailable. Valid tiles may contain missing regions; keep the validity information and report coverage gaps rather than rejecting every valid sample in that tile. Generate requested 30 m samples against pinned coordinate behavior, including neighboring tiles at overlaps and degree boundaries. Do not assign a new numeric datum correction without source evidence.
 
+## Coordinate boundary contract
+
+The pinned `TerrainUtil.cpp::calculate_grid_info` floors signed integer E7
+coordinates to a degree origin; truncation toward zero is wrong south of the
+equator and west of Greenwich. Block strides are 24 north × 28 east samples,
+while the full block is 28 × 32. Bit 55 therefore shares its 4×4 samples with
+bit 0 of the block one stride north and east.
+
+The pinned generator computes each sample from the degree origin plus its
+global grid index, then selects the HGT tile by flooring that sample's
+coordinates. It does not reuse the request-origin tile for all samples.
+A source-helper check at degree origin (-36, -84), block indices (154, 107),
+30 m spacing gives request origin E7 (-350039423, -830082118). Bit 55 runs
+from (-349974744, -829989830) through (-349966659, -829979949): its samples
+belong to S35W083, across both degree boundaries from S36W084. These are
+coordinate controls, not measured elevation fixtures.
+
+At exact integer-degree edges, select the tile beginning at that edge;
+its south/west boundary samples and the next row/column form the interpolation
+window. Do not request a sample beyond index 3600 from the preceding tile.
+Raw source interpolation is distinct from interpolation through the generated
+integer-height 30 m grid used by the controller.
+
+The generator's `add_offset` and controller's `Location::offset_latlng` are
+not interchangeable at every boundary: the controller wraps longitude at
+±180°, while the pinned generator helper returns an unwrapped longitude.
+The existing real fixtures establish interior agreement only. Antimeridian
+and controller-origin recovery need explicit reference cases before enabling
+the request mapper; neither is qualified by the current decoder tests.
+
 ## Hardware storage evidence
 
 Read-only SSH inspection of the image mule found `/var/lib/yonder` on the persistent ext4 state partition, bind-mounted from its app directory. The state partition is 512 MiB, with approximately 450 MiB available. `/var/lib/yonder/captures` is a separate 1.2 GiB ext4 media partition. Root is read-only. These observations establish mount layout, not a reboot persistence test.
