@@ -25,6 +25,7 @@ const objectId = (record: {tile: string; sha256: string}) => `${record.tile}.${r
 export class OfficialTerrainStore {
   private index: TerrainIndex = {schemaVersion: 1, objects: [], areas: []};
   private active = new Map<string, number>();
+  private deferredDiscard = new Map<string, {tile: string; sha256: string}>();
   private verified = new Map<string, {mtimeMs: number; size: number}>();
   private tail: Promise<unknown> = Promise.resolve();
   private closed = false;
@@ -45,7 +46,9 @@ export class OfficialTerrainStore {
       await unlink(join(store.stagingDirectory, entry.name));
     }
     for (const record of store.index.objects) await store.verify(record);
-    await store.collectUnreferenced();
+    // A previous process may have published objects before its area record.
+    // No reader survives a restart, so reclaim those incomplete generations.
+    await store.collectUnreferenced(true);
     await store.restoreMetadataHeadroom();
     return store;
   }
@@ -185,11 +188,30 @@ export class OfficialTerrainStore {
       await this.collectUnreferenced(true);
     });
   }
-  private async collectUnreferenced(evict = false): Promise<void> {
+  /**
+   * Discard incomplete preparation objects after their job has ended.  Scope the
+   * eviction to that job's candidates so another operation's cache entries are
+   * left alone; references and live readers always win over eviction.
+   */
+  async discardUnreferenced(candidates: readonly {tile: string; sha256: string}[]): Promise<void> {
+    return this.serialize(async () => {
+      await this.collectUnreferenced(true, candidates);
+      const referenced = new Set(this.index.areas.flatMap(area => area.objects.map(objectId)));
+      for (const candidate of candidates) {
+        const id = objectId(candidate);
+        if (this.index.objects.some(record => objectId(record) === id) && !referenced.has(id) && this.active.has(id)) {
+          this.deferredDiscard.set(id, candidate);
+        } else this.deferredDiscard.delete(id);
+      }
+    });
+  }
+  private async collectUnreferenced(evict = false, candidates?: readonly {tile: string; sha256: string}[]): Promise<void> {
     // Keep indexed objects available between object publication and area publication.
     // Explicit area deletion reclaims only objects no remaining area or reader uses.
     const referenced = new Set(this.index.areas.flatMap(area => area.objects.map(objectId)));
-    const removable = this.index.objects.filter(record => !referenced.has(objectId(record)) && !this.active.has(objectId(record)));
+    const candidateIds = candidates && new Set(candidates.map(objectId));
+    const removable = this.index.objects.filter(record => (!candidateIds || candidateIds.has(objectId(record)))
+      && !referenced.has(objectId(record)) && !this.active.has(objectId(record)));
     if (evict && removable.length) {
       await this.publish({...this.index, objects: this.index.objects.filter(record => !removable.includes(record))});
     }
@@ -232,6 +254,11 @@ export class OfficialTerrainStore {
     } finally {
       const count = this.active.get(id)! - 1;
       if (count) this.active.set(id, count); else this.active.delete(id);
+      const deferred = !count ? this.deferredDiscard.get(id) : undefined;
+      if (deferred) {
+        this.deferredDiscard.delete(id);
+        await this.discardUnreferenced([deferred]).catch(() => {});
+      }
     }
   }
   async readSubgrid(key: TerrainRequestKey, bit: number, signal?: AbortSignal): Promise<SubgridResult> {

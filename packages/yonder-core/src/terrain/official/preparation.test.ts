@@ -5,19 +5,22 @@ import type {OfficialTerrainStore} from './store.js';
 import type {TileRecord} from './types.js';
 
 const manual = {kind: 'manual' as const, name: 'Bench', bounds: {south: 35.6, north: 35.7, west: -83.4, east: -83.3}, bufferM: 100};
+const multiTileManual = {kind: 'manual' as const, name: 'Two tiles', bounds: {south: 35.6, north: 36.1, west: -83.4, east: -83.3}, bufferM: 100};
 const record: TileRecord = {tile: 'N35W084', sha256: 'a'.repeat(64), archiveSha256: 'b'.repeat(64), bytes: 25934402, nodataSamples: 0,
   sourceUrl: 'https://terrain.ardupilot.org/SRTM1/N35W084.hgt.zip', retrievedAt: '2026-09-11T00:00:00.000Z'};
+const recordFor = (tile: string): TileRecord => ({...record, tile, sha256: tile === record.tile ? record.sha256 : 'c'.repeat(64)});
 function setup() {
   const context: PreparationContext = {generation: 'first', connected: true, armed: false,
     missionRevision: null, homeRevision: null, rallyRevision: null};
   const saveArea = vi.fn(async (_area, guard) => { guard?.(); });
   const commitObject = vi.fn(async (_record, guard) => { guard?.(); return record; });
+  const discardUnreferenced = vi.fn(async () => {});
   const records = vi.fn((): TileRecord[] => []);
-  const stub = {stagingDirectory: '/unused', status: async () => ({}), records, admit: async () => {}, saveArea, commitObject};
+  const stub = {stagingDirectory: '/unused', status: async () => ({}), records, admit: async () => {}, saveArea, commitObject, discardUnreferenced};
   const acquire = vi.fn(async () => ({...record, path: '/unused/verified.hgt'}));
   const service = new TerrainPreparationService({store: stub as unknown as OfficialTerrainStore, context: () => context,
     policy: () => ({enabled: true, provider: 'ardupilot-srtm1', quotaMiB: 2048}), acquire});
-  return {service, context, acquire, saveArea, commitObject, records};
+  return {service, context, acquire, saveArea, commitObject, discardUnreferenced, records};
 }
 describe('operator terrain preparation', () => {
   it('deduplicates repeated prepare actions and continues without a browser', async () => {
@@ -49,6 +52,34 @@ describe('operator terrain preparation', () => {
     const preview = await service.preview(manual), job = service.prepare(preview.id, 'session');
     await vi.waitFor(() => expect(acquire).toHaveBeenCalled()); await service.cancel(job.id, 'session');
     expect(service.snapshot()?.state).toBe('cancelled'); expect(saveArea).not.toHaveBeenCalled(); await service.close();
+  });
+  it('reclaims committed job objects when a later multi-tile acquisition fails', async () => {
+    const {service, acquire, commitObject, discardUnreferenced, saveArea} = setup();
+    acquire.mockImplementation(async (tile: string) => {
+      if (commitObject.mock.calls.length === 0) return {...recordFor(tile), path: '/unused/first.hgt'};
+      throw new Error('source unavailable');
+    });
+    commitObject.mockImplementation(async (candidate, guard) => { guard?.(); return candidate; });
+    const preview = await service.preview(multiTileManual); expect(preview.coverage.tiles).toHaveLength(2);
+    service.prepare(preview.id, 'session'); await service.settled();
+    expect(service.snapshot()).toMatchObject({state: 'failed', completed: 1});
+    expect(saveArea).not.toHaveBeenCalled();
+    expect(discardUnreferenced).toHaveBeenCalledOnce();
+    expect(discardUnreferenced).toHaveBeenCalledWith([{tile: preview.coverage.tiles[0], sha256: recordFor(preview.coverage.tiles[0]).sha256}]);
+    await service.close();
+  });
+  it('reclaims committed job objects when a later multi-tile acquisition is cancelled', async () => {
+    const {service, acquire, commitObject, discardUnreferenced, saveArea} = setup();
+    acquire.mockImplementation((tile: string, options: any) => {
+      if (commitObject.mock.calls.length === 0) return Promise.resolve({...recordFor(tile), path: '/unused/first.hgt'});
+      return new Promise((_resolve, reject) => options.signal.addEventListener('abort', () => reject(options.signal.reason), {once: true}));
+    });
+    commitObject.mockImplementation(async (candidate, guard) => { guard?.(); return candidate; });
+    const preview = await service.preview(multiTileManual), job = service.prepare(preview.id, 'session');
+    await vi.waitFor(() => expect(commitObject).toHaveBeenCalledOnce()); await service.cancel(job.id, 'session');
+    expect(service.snapshot()?.state).toBe('cancelled'); expect(saveArea).not.toHaveBeenCalled();
+    expect(discardUnreferenced).toHaveBeenCalledWith([{tile: preview.coverage.tiles[0], sha256: recordFor(preview.coverage.tiles[0]).sha256}]);
+    await service.close();
   });
 });
 

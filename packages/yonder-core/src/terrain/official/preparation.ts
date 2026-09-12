@@ -100,6 +100,8 @@ export class TerrainPreparationService {
     }, 200);
     timer.unref?.();
     let stagedPath: string | null = null;
+    let published = false;
+    const committed: {tile: string; sha256: string}[] = [];
     const guard = () => { abort.signal.throwIfAborted(); const reason = this.allowed(preview); if (reason) throw new Error(reason); };
     try {
       await this.save();
@@ -121,7 +123,9 @@ export class TerrainPreparationService {
           abort.signal.throwIfAborted();
           const changed = this.allowed(preview); if (changed) throw new Error(changed);
           const {path, ...metadata} = acquired;
-          record = await this.options.store.commitObject({...TileRecordSchema.parse(metadata), path}, guard);
+          const candidate = TileRecordSchema.parse(metadata);
+          committed.push({tile: candidate.tile, sha256: candidate.sha256});
+          record = await this.options.store.commitObject({...candidate, path}, guard);
           stagedPath = null;
         }
         objects.push({tile: record.tile, sha256: record.sha256});
@@ -136,6 +140,7 @@ export class TerrainPreparationService {
         revision: preview.coverage.revision, contextKey: preview.contextKey, createdAt: new Date(this.now()).toISOString(), kind: preview.input.kind,
         coverage: {bufferM: preview.input.bufferM, geometry: preview.coverage.geometry, ...(preview.input.kind === 'manual' ? {bounds: preview.input.bounds} : {})},
         objects, complete: preview.coverage.complete && validityReasons.length === 0, reasons: [...preview.coverage.reasons, ...validityReasons]}), guard);
+      published = true;
       this.job!.state = validityReasons.length ? 'partial' : 'complete'; this.job!.reason = validityReasons.length ? validityReasons.join('; ') : null; this.job!.areaId = areaId;
     } catch (error) {
       if (this.job?.state !== 'cancelled') {
@@ -145,6 +150,15 @@ export class TerrainPreparationService {
     } finally {
       clearInterval(timer);
       if (stagedPath) await unlink(stagedPath).catch(() => {});
+      if (!published && committed.length) {
+        try { await this.options.store.discardUnreferenced(committed); }
+        catch (error) {
+          if (this.job) {
+            this.job.state = 'failed';
+            this.job.reason = `Unreferenced terrain cleanup failed: ${error instanceof Error ? error.message : String(error)}`;
+          }
+        }
+      }
       await this.save().catch(error => { if (this.job) { this.job.state = 'failed'; this.job.reason = `Job persistence failed: ${String(error)}`; } });
     }
   }
