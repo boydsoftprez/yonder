@@ -25,9 +25,10 @@ const LEGACY_APPLY_JOURNAL = "/var/lib/yonder/apply.json";
 
 export async function main(): Promise<void> {
   if (process.getuid?.() !== 0) throw new Error("the admin helper must run as root");
+  const factoryImage = managedImageTarget() !== "conventional";
   // Explicit private bench images retain their separately authorized access.
   // Release finalization removes this marker and every bench credential.
-  const owner = existsSync("/etc/yonder/bench-image") ? undefined : new LinuxOwnerProjector();
+  const owner = existsSync("/etc/yonder/bench-image") ? undefined : new LinuxOwnerProjector({ enforceUnowned: factoryImage });
   const zeroTier = new ZeroTierStateAdapter();
   const legacyJournal = new Journal(LEGACY_APPLY_JOURNAL);
   const legacy = legacyJournal.read();

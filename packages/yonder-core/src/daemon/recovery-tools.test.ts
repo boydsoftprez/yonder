@@ -8,7 +8,7 @@ const restoreId = "32b8db9a-c493-4d50-b12b-e34b18189eaf";
 const generation = "2549c257-44d9-48a4-88b0-deb81af24d42";
 function fixture() {
   const client = { exportRecovery: vi.fn(async () => Buffer.from("private-archive-fixture")),
-    previewRecovery: vi.fn(async () => ({ restoreId, destinationGeneration: generation, expiresAt: 1,
+    previewRecovery: vi.fn(async () => ({ restoreId, destinationGeneration: generation, expiresAt: 1, remainingMs: 600_000,
       summary: { replacesLinuxOwner: true, replacesDeviceCredentials: true, replacesMeshIdentity: false,
         membershipCount: 0, networkInterruption: true, warnings: [], excluded: [] } })),
     commitRecovery: vi.fn(async () => ({ operationId: restoreId, generation })), cancelRecovery: vi.fn(async () => {}) };

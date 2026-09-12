@@ -62,6 +62,7 @@ describe("recovery export and transactional import", () => {
     incoming.secrets = { admin_password: "restored-private-secret" };
     const preview = await f.service.preview({ bytes: encodeRecoveryArchive(incoming, source), sessionId: session });
     expect(preview.expiresAt).toBe(now + 10 * 60_000);
+    expect(preview.remainingMs).toBe(10 * 60_000);
     expect(JSON.stringify(preview)).not.toContain("restored-private-secret");
     expect(preview.summary).toMatchObject({ replacesDeviceCredentials: true, membershipCount: 0 });
     expect(() => f.store.claim({ restoreId: preview.restoreId, sessionId: "another_session_1234",

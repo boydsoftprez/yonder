@@ -236,6 +236,110 @@ describe("durable generations and recovery", () => {
     await expect(restarted.resolveOperation(operationId, "committed")).resolves.toEqual({ generation: staged.generation });
   });
 
+  it("finalizes projector ownership only after the durable commit decision", async () => {
+    const events: string[] = [];
+    const projector: StateProjector = {
+      name: "commit-probe",
+      sections: [],
+      async apply({ context }) { events.push(`apply:${context}`); },
+      async verify() { events.push("verify"); },
+      async finalizeCommit({ operationId, previous, next }) {
+        expect(operationId).toMatch(/^[0-9a-f-]{36}$/);
+        expect(previous.config.system.hostname).toBe("yonder-old");
+        expect(next.config.system.hostname).toBe("yonder-new");
+        events.push("finalize");
+      },
+    };
+    const c = coordinator({ projectors: [projector], onBoundary: boundary => events.push(boundary) });
+    await c.recover();
+    events.length = 0;
+    const transaction = await c.begin({ id: crypto.randomUUID(), kind: "config-apply" });
+    await transaction.stage(changed(transaction.previous.state));
+    await transaction.activate();
+    expect(events).not.toContain("finalize");
+    await transaction.commit();
+
+    expect(events.indexOf("operation.committed")).toBeLessThan(events.indexOf("finalize"));
+    expect(events.indexOf("finalize")).toBeLessThan(events.indexOf("receipt.committed"));
+  });
+
+  it("retries a failed projector commit finalizer without reopening rollback", async () => {
+    let attempts = 0;
+    const projector: StateProjector = {
+      name: "commit-probe",
+      sections: [],
+      async apply() {},
+      async verify() {},
+      async finalizeCommit() {
+        attempts += 1;
+        if (attempts === 1) throw new Error("finalizer interrupted");
+      },
+    };
+    const c = coordinator({ projectors: [projector] });
+    await c.recover();
+    const transaction = await c.begin({ id: crypto.randomUUID(), kind: "config-apply" });
+    const staged = await transaction.stage(changed(transaction.previous.state));
+    await transaction.activate();
+    await expect(transaction.commit()).rejects.toMatchObject({ code: "PROJECTION_FAILED" });
+    await expect(transaction.rollback("too-late")).rejects.toMatchObject({ code: "OPERATION_OUTCOME" });
+    await expect(transaction.commit()).resolves.toEqual({ generation: staged.generation });
+    expect(attempts).toBe(2);
+  });
+
+  it("runs a pending projector commit finalizer during committed recovery", async () => {
+    let fail = true;
+    const finalized: string[] = [];
+    const projector: StateProjector = {
+      name: "commit-probe",
+      sections: [],
+      async apply() {},
+      async verify() {},
+      async finalizeCommit({ operationId }) {
+        finalized.push(operationId);
+        if (fail) throw new Error("process stopped in finalizer");
+      },
+    };
+    const first = coordinator({ projectors: [projector] });
+    await first.recover();
+    const transaction = await first.begin({ id: crypto.randomUUID(), kind: "config-apply" });
+    const staged = await transaction.stage(changed(transaction.previous.state));
+    await transaction.activate();
+    await expect(transaction.commit()).rejects.toMatchObject({ code: "PROJECTION_FAILED" });
+
+    fail = false;
+    const restarted = coordinator({ projectors: [projector] });
+    await expect(restarted.recover()).resolves.toEqual({
+      selectedGeneration: staged.generation,
+      action: "kept-committed",
+    });
+    expect(finalized).toEqual([transaction.id, transaction.id]);
+  });
+
+  it("finalizes projector ownership before publishing a restart commit receipt", async () => {
+    let finalized = false;
+    const projector: StateProjector = {
+      name: "restart-commit-probe",
+      sections: [],
+      async apply() {},
+      async verify() {},
+      async finalizeCommit() { finalized = true; },
+    };
+    let receiptSawFinalized = false;
+    const c = coordinator({
+      projectors: [projector],
+      onBoundary(boundary) {
+        if (boundary === "receipt.committed") receiptSawFinalized = finalized;
+      },
+    });
+    await c.recover();
+    const transaction = await c.begin({ id: crypto.randomUUID(), kind: "restore" });
+    await transaction.stage(changed(transaction.previous.state));
+    await transaction.activate();
+    await transaction.commitForRestart(crypto.randomUUID());
+
+    expect(receiptSawFinalized).toBe(true);
+  });
+
   it.each(["receipt.committed", "operation.cleared"] as CoordinatorBoundary[])(
     "finishes committed housekeeping when the original owner retries after %s failed",
     async (at) => {

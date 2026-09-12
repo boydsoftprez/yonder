@@ -19,7 +19,7 @@ UMask=0077
 ProtectSystem=strict
 # Native account tools update account and SSH policy files atomically in /etc.
 # Only this root helper gets these paths; the web console retains its sandbox.
-ReadWritePaths=/var/lib/yonder-state /etc /home /run/sshd -/var/lib/zerotier-one
+ReadWritePaths=/var/lib/yonder-state /var/lib/yonder /etc /home /run/sshd -/var/lib/zerotier-one
 ProtectHome=no
 PrivateTmp=yes
 NoNewPrivileges=yes

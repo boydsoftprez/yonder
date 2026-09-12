@@ -86,6 +86,12 @@ export interface StateProjector {
     operationId: string;
     expected: DurableState;
   }): Promise<void>;
+  /** Idempotent native ownership finalization after the durable commit decision. */
+  finalizeCommit?(input: {
+    operationId: string;
+    previous: DurableState;
+    next: DurableState;
+  }): Promise<void>;
 }
 
 export type StateOperationPhase =

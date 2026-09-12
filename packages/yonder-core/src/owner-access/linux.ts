@@ -13,6 +13,9 @@ const KEY_DIRECTORY = "/etc/ssh/yonder_authorized_keys";
 const SSH_POLICY = "/etc/ssh/sshd_config.d/00-yonder-owner.conf";
 const SUDO_POLICY = "/etc/sudoers.d/yonder-owner";
 const HOST_KEY = "/etc/ssh/ssh_host_ed25519_key";
+const OWNER_POLICY_MARKER = "/var/lib/yonder-state/owner-access-managed";
+const OWNER_POLICY_MARKER_CONTENTS = "managed\n";
+const OWNER_POLICY_STAGING = "/var/lib/yonder-state/owner-access-staging";
 
 export class LinuxOwnerError extends Error {
   constructor(readonly code: "DESTINATION_CONFLICT" | "NATIVE_STATE_INVALID" | "POLICY_MISMATCH") {
@@ -24,6 +27,27 @@ export class LinuxOwnerError extends Error {
 
 interface PasswdEntry { name: string; uid: number; gid: number; comment: string; home: string; shell: string }
 interface GroupEntry { name: string; gid: number; members: string[] }
+type UnitFileState = "enabled" | "disabled" | "masked";
+interface UnitState { active: boolean; unitFileState: UnitFileState }
+interface SshServiceState { service: UnitState; socket: UnitState }
+interface SshServiceControl {
+  snapshot(): Promise<SshServiceState>;
+  setEnabled(enabled: boolean): Promise<void>;
+  restore(state: SshServiceState): Promise<void>;
+}
+interface FirstOwnerStagingRecord {
+  schemaVersion: 1;
+  operationId: string;
+  username: string;
+  rootPasswordHash: string;
+  ssh: SshServiceState;
+}
+
+interface LinuxOwnerProjectorOptions {
+  serviceControl?: SshServiceControl;
+  /** Factory images must secure an ownerless state; conventional upgrades retain OS SSH until first ownership. */
+  enforceUnowned?: boolean;
+}
 
 export function ownerSshPolicy(owner: OwnerAccessRecord | null): string {
   if (owner) validateOwnerRecord(owner);
@@ -44,14 +68,16 @@ function regularRootFile(path: string): boolean {
 export class LinuxOwnerProjector implements StateProjector, OwnerNativeBackend {
   readonly name = "linux-owner";
   readonly sections = ["linuxOwner"] as const;
+  private readonly serviceControl: SshServiceControl;
+  private readonly enforceUnowned: boolean;
 
-  constructor(private readonly setSshEnabled: (enabled: boolean) => Promise<void> = async enabled => {
-    // Socket activation must not reopen SSH after the owner disables it.
-    await runSensitiveProcess({ command: "/usr/bin/systemctl",
-      args: ["mask", "--now", "ssh.socket"], timeoutMs: 30_000 });
-    await runSensitiveProcess({ command: "/usr/bin/systemctl",
-      args: [enabled ? "enable" : "disable", "--now", "ssh.service"], timeoutMs: 30_000 });
-  }) {
+  constructor(options: LinuxOwnerProjectorOptions = {}) {
+    this.enforceUnowned = options.enforceUnowned ?? true;
+    this.serviceControl = options.serviceControl ?? {
+      snapshot: () => this.sshServiceState(),
+      setEnabled: enabled => this.setSshEnabled(enabled),
+      restore: state => this.restoreSshServiceState(state),
+    };
     if (process.platform !== "linux" || process.getuid?.() !== 0) {
       throw new LinuxOwnerError("NATIVE_STATE_INVALID");
     }
@@ -81,20 +107,39 @@ export class LinuxOwnerProjector implements StateProjector, OwnerNativeBackend {
     if (!/^[0-9a-f-]{36}$/.test(input.operationId)) throw new LinuxOwnerError("NATIVE_STATE_INVALID");
     await this.verifyPublicKeys(next?.authorizedKeys ?? []);
     if (next) await this.assertCompatibleAccount(next);
+    let ownsPolicy = this.ownsOwnerPolicy();
+    if (!previous && !next && !ownsPolicy) return;
+    if (previous && !next && !ownsPolicy) {
+      if (existsSync(OWNER_POLICY_STAGING)) {
+        await this.rollbackUnmanagedFirstOwner(input.operationId, previous);
+        return;
+      }
+      // Recovery of a merely staged first owner has no native record to undo.
+      // Activation from a durable existing owner is a pre-marker migration.
+      if (input.context !== "activation") return;
+      await this.adoptCommittedOwner(input.operationId, input.previous);
+      ownsPolicy = true;
+    } else if (previous && !ownsPolicy && !existsSync(OWNER_POLICY_STAGING)) {
+      await this.adoptCommittedOwner(input.operationId, input.previous);
+      ownsPolicy = true;
+    }
+    const initialConventionalOwner = !ownsPolicy && !previous && next !== null;
+    if (initialConventionalOwner) await this.beginUnmanagedFirstOwner(input.operationId, next);
     if (JSON.stringify(previous) === JSON.stringify(next)) {
       try {
         await this.verify({ operationId: input.operationId, expected: input.next });
-        await this.setSshEnabled(next?.sshEnabled ?? false);
+        await this.serviceControl.setEnabled(next?.sshEnabled ?? false);
         return;
       } catch { /* Cold boot may need to recreate the owner in volatile /etc. */ }
     }
-    // Disable the listener while projecting account files; a failed projection
-    // remains reachable through Yonder's AP/console and the coordinator restores it.
-    await this.setSshEnabled(false);
+    // A conventional installation can have an OS-managed SSH listener before
+    // its first Yonder owner. Keep it running until the Yonder policy itself
+    // has verified; the staged marker lets rollback remove only files this
+    // projection created if an account or policy step fails first.
+    if (!initialConventionalOwner) await this.serviceControl.setEnabled(false);
     if (next) await this.projectAccount(next, input.operationId);
     if (previous && (!next || previous.username !== next.username))
       await this.removeManaged(previous.username, input.context === "rollback" || input.context === "recovery");
-    await runSensitiveProcess({ command: "/usr/bin/passwd", args: ["--lock", "root"] });
     this.directory("/etc/ssh/sshd_config.d", 0o755);
     this.directory(KEY_DIRECTORY, 0o755);
     this.directory("/etc/sudoers.d", 0o750);
@@ -109,11 +154,20 @@ export class LinuxOwnerProjector implements StateProjector, OwnerNativeBackend {
     } else { unlinkDurable(SUDO_POLICY); }
     await this.ensureHostKey();
     await this.verifyPolicies(next);
-    await this.setSshEnabled(next?.sshEnabled ?? false);
+    await runSensitiveProcess({ command: "/usr/bin/passwd", args: ["--lock", "root"] });
+    await this.serviceControl.setEnabled(next?.sshEnabled ?? false);
+  }
+
+  async finalizeCommit(input: { operationId: string; previous: DurableState; next: DurableState }): Promise<void> {
+    if (this.enforceUnowned || !existsSync(OWNER_POLICY_STAGING)) return;
+    const next = input.next.linuxOwner && validateOwnerRecord(input.next.linuxOwner);
+    if (!next) throw new LinuxOwnerError("NATIVE_STATE_INVALID");
+    this.claimOwnerPolicy(input.operationId, next.username);
   }
 
   async verify(input: { operationId: string; expected: DurableState }): Promise<void> {
     const owner = input.expected.linuxOwner && validateOwnerRecord(input.expected.linuxOwner);
+    if (!owner && !this.ownsOwnerPolicy()) return;
     if (owner) {
       const user = (await this.users()).find(entry => entry.name === owner.username);
       if (!user || !this.managed(user)) throw new LinuxOwnerError("NATIVE_STATE_INVALID");
@@ -161,6 +215,166 @@ export class LinuxOwnerProjector implements StateProjector, OwnerNativeBackend {
     try { await runSensitiveProcess({ command: "/usr/sbin/chpasswd", args: ["--encrypted"], stdin: passwordInput }); }
     finally { passwordInput.fill(0); }
     await runSensitiveProcess({ command: "/usr/sbin/usermod", args: ["--append", "--groups", "sudo", owner.username] });
+  }
+
+  /** A durable Yonder marker, never an arbitrary sshd fragment, says policy ownership began. */
+  private ownsOwnerPolicy(): boolean {
+    if (this.enforceUnowned) return true;
+    if (!existsSync(OWNER_POLICY_MARKER)) return false;
+    if (!regularRootFile(OWNER_POLICY_MARKER)
+      || (lstatSync(OWNER_POLICY_MARKER).mode & 0o777) !== 0o600
+      || readFileSync(OWNER_POLICY_MARKER, "utf8") !== OWNER_POLICY_MARKER_CONTENTS) {
+      throw new LinuxOwnerError("NATIVE_STATE_INVALID");
+    }
+    return true;
+  }
+
+  /** Record that an initially conventional host has passed validation and native mutation can begin. */
+  private async beginUnmanagedFirstOwner(operationId: string, owner: OwnerAccessRecord): Promise<void> {
+    if (existsSync(OWNER_POLICY_STAGING)) {
+      this.readStagedOwnerPolicy(operationId, owner.username);
+      return;
+    }
+    // These exact files become ours only after this record is promoted. An
+    // unmarked conventional host carrying one is ambiguous, so refuse it
+    // rather than overwrite or later remove somebody else's policy.
+    if (existsSync(SSH_POLICY) || existsSync(SUDO_POLICY)
+      || existsSync(join(KEY_DIRECTORY, owner.username))) {
+      throw new LinuxOwnerError("NATIVE_STATE_INVALID");
+    }
+    this.directory("/var/lib/yonder-state", 0o700);
+    const record: FirstOwnerStagingRecord = {
+      schemaVersion: 1,
+      operationId,
+      username: owner.username,
+      rootPasswordHash: await this.rootPasswordHash(),
+      ssh: await this.serviceControl.snapshot(),
+    };
+    writeFileDurable(OWNER_POLICY_STAGING, `${JSON.stringify(record)}\n`, 0o600);
+    this.readStagedOwnerPolicy(operationId, owner.username);
+  }
+
+  /** Promote a verified native policy from the first-owner staging record. */
+  private claimOwnerPolicy(stagedOperation?: string, username?: string): void {
+    if (stagedOperation !== undefined) this.readStagedOwnerPolicy(stagedOperation, username);
+    if (!existsSync(OWNER_POLICY_MARKER)) {
+      writeFileDurable(OWNER_POLICY_MARKER, OWNER_POLICY_MARKER_CONTENTS, 0o600);
+    }
+    if (!regularRootFile(OWNER_POLICY_MARKER)
+      || (lstatSync(OWNER_POLICY_MARKER).mode & 0o777) !== 0o600
+      || readFileSync(OWNER_POLICY_MARKER, "utf8") !== OWNER_POLICY_MARKER_CONTENTS) {
+      throw new LinuxOwnerError("NATIVE_STATE_INVALID");
+    }
+    if (stagedOperation !== undefined) {
+      unlinkDurable(OWNER_POLICY_STAGING);
+    }
+  }
+
+  /** Undo only a conventionally staged first owner; a committed policy marker never takes this path. */
+  private async rollbackUnmanagedFirstOwner(operationId: string, owner: OwnerAccessRecord): Promise<void> {
+    if (!existsSync(OWNER_POLICY_STAGING)) return;
+    const staged = this.readStagedOwnerPolicy(operationId, owner.username);
+    await this.removeManaged(owner.username, true);
+    unlinkDurable(join(KEY_DIRECTORY, owner.username));
+    unlinkDurable(SUDO_POLICY);
+    unlinkDurable(SSH_POLICY);
+    await this.restoreRootPassword(staged.rootPasswordHash);
+    await this.serviceControl.restore(staged.ssh);
+    unlinkDurable(OWNER_POLICY_STAGING);
+  }
+
+  private readStagedOwnerPolicy(operationId: string, username?: string): FirstOwnerStagingRecord {
+    if (!regularRootFile(OWNER_POLICY_STAGING)
+      || (lstatSync(OWNER_POLICY_STAGING).mode & 0o777) !== 0o600) {
+      throw new LinuxOwnerError("NATIVE_STATE_INVALID");
+    }
+    try {
+      const value = JSON.parse(readFileSync(OWNER_POLICY_STAGING, "utf8")) as Partial<FirstOwnerStagingRecord>;
+      const validUnit = (unit: unknown): unit is UnitState => {
+        const candidate = unit as Partial<UnitState> | null;
+        return candidate !== null && typeof candidate === "object" && typeof candidate.active === "boolean"
+          && (["enabled", "disabled", "masked"] as unknown[]).includes(candidate.unitFileState)
+          && !(candidate.active && candidate.unitFileState === "masked")
+          && Object.keys(candidate).length === 2;
+      };
+      if (value.schemaVersion !== 1 || value.operationId !== operationId
+        || typeof value.username !== "string" || (username !== undefined && value.username !== username)
+        || typeof value.rootPasswordHash !== "string" || value.rootPasswordHash.length > 4096
+        || /[:\r\n\0]/.test(value.rootPasswordHash)
+        || !value.ssh || !validUnit(value.ssh.service) || !validUnit(value.ssh.socket)
+        || Object.keys(value.ssh).length !== 2 || Object.keys(value).length !== 5) {
+        throw new Error("invalid");
+      }
+      return value as FirstOwnerStagingRecord;
+    } catch { throw new LinuxOwnerError("NATIVE_STATE_INVALID"); }
+  }
+
+  private async adoptCommittedOwner(operationId: string, expected: DurableState): Promise<void> {
+    await this.verify({ operationId, expected });
+    this.claimOwnerPolicy();
+  }
+
+  private async rootPasswordHash(): Promise<string> {
+    const fields = (await this.output("/usr/bin/getent", ["shadow", "root"])).trimEnd().split(":");
+    const hash = fields[1];
+    if (fields.length !== 9 || hash === undefined || hash.length > 4096 || /[\r\n\0]/.test(hash)) {
+      throw new LinuxOwnerError("NATIVE_STATE_INVALID");
+    }
+    return hash;
+  }
+
+  private async restoreRootPassword(hash: string): Promise<void> {
+    const passwordInput = Buffer.from(`root:${hash}\n`);
+    try {
+      await runSensitiveProcess({ command: "/usr/sbin/chpasswd", args: ["--encrypted"], stdin: passwordInput });
+    } finally { passwordInput.fill(0); }
+    if (await this.rootPasswordHash() !== hash) throw new LinuxOwnerError("NATIVE_STATE_INVALID");
+  }
+
+  private async sshServiceState(): Promise<SshServiceState> {
+    const unit = async (name: "ssh.service" | "ssh.socket"): Promise<UnitState> => {
+      const active = (await this.output("/usr/bin/systemctl", ["show", name, "--property=ActiveState", "--value"])).trim();
+      const unitFileState = (await this.output("/usr/bin/systemctl", ["show", name, "--property=UnitFileState", "--value"])).trim();
+      if (!(active === "active" || active === "inactive")
+        || !(unitFileState === "enabled" || unitFileState === "disabled" || unitFileState === "masked")
+        || (active === "active" && unitFileState === "masked")) {
+        throw new LinuxOwnerError("NATIVE_STATE_INVALID");
+      }
+      return { active: active === "active", unitFileState };
+    };
+    return { service: await unit("ssh.service"), socket: await unit("ssh.socket") };
+  }
+
+  private async setSshEnabled(enabled: boolean): Promise<void> {
+    // Socket activation must not reopen SSH after the owner disables it.
+    await runSensitiveProcess({ command: "/usr/bin/systemctl",
+      args: ["mask", "--now", "ssh.socket"], timeoutMs: 30_000 });
+    await runSensitiveProcess({ command: "/usr/bin/systemctl",
+      args: [enabled ? "enable" : "disable", "--now", "ssh.service"], timeoutMs: 30_000 });
+    const observed = await this.sshServiceState();
+    if (observed.socket.active || observed.socket.unitFileState !== "masked"
+      || observed.service.active !== enabled
+      || observed.service.unitFileState !== (enabled ? "enabled" : "disabled")) {
+      throw new LinuxOwnerError("NATIVE_STATE_INVALID");
+    }
+  }
+
+  private async restoreSshServiceState(state: SshServiceState): Promise<void> {
+    const restore = async (name: "ssh.service" | "ssh.socket", wanted: UnitState): Promise<void> => {
+      if (wanted.unitFileState === "masked") {
+        await runSensitiveProcess({ command: "/usr/bin/systemctl", args: ["mask", "--now", name], timeoutMs: 30_000 });
+      } else {
+        await runSensitiveProcess({ command: "/usr/bin/systemctl", args: ["unmask", name], timeoutMs: 30_000 });
+        await runSensitiveProcess({ command: "/usr/bin/systemctl",
+          args: [wanted.unitFileState === "enabled" ? "enable" : "disable", name], timeoutMs: 30_000 });
+        await runSensitiveProcess({ command: "/usr/bin/systemctl",
+          args: [wanted.active ? "start" : "stop", name], timeoutMs: 30_000 });
+      }
+    };
+    await restore("ssh.service", state.service);
+    await restore("ssh.socket", state.socket);
+    const observed = await this.sshServiceState();
+    if (JSON.stringify(observed) !== JSON.stringify(state)) throw new LinuxOwnerError("NATIVE_STATE_INVALID");
   }
 
   private async assertCompatibleAccount(owner: OwnerAccessRecord): Promise<void> {

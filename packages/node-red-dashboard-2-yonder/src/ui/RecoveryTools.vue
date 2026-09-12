@@ -31,7 +31,7 @@
 
     <div v-else-if="mode === 'preview' && restorePreview" class="y-recovery__preview">
       <h4>Review this restore</h4>
-      <p>Preview expires <time :datetime="new Date(restorePreview.expiresAt).toISOString()">{{ formatExpiry(restorePreview.expiresAt) }}</time>.</p>
+      <p>Preview expires <time :datetime="new Date(previewDisplayExpiry).toISOString()">{{ formatExpiry(previewDisplayExpiry) }}</time>.</p>
       <ul aria-label="Restore consequences">
         <li>{{ restorePreview.summary.replacesLinuxOwner ? 'Linux owner login and credentials will be replaced.' : 'Linux owner login will stay the same.' }}</li>
         <li>{{ restorePreview.summary.replacesDeviceCredentials ? 'Saved device passwords and keys will be replaced.' : 'Saved device credentials will stay the same.' }}</li>
@@ -91,7 +91,7 @@ interface CompatibilitySummary {
   unavailableNetworkInterfaces: number; apFallbackReachable: true;
 }
 interface RestorePreview {
-  restoreId: string; destinationGeneration: string; expiresAt: number;
+  restoreId: string; destinationGeneration: string; expiresAt: number; remainingMs: number;
   summary: {
     replacesLinuxOwner: boolean; replacesDeviceCredentials: boolean; replacesMeshIdentity: boolean;
     membershipCount: number; networkInterruption: boolean; warnings: string[]; excluded: string[];
@@ -123,7 +123,8 @@ function checkedPreview(value: unknown): RestorePreview {
   const counts = [summary?.membershipCount, compatibility?.unavailableCameras, compatibility?.unavailableUarts,
     compatibility?.unavailableNetworkInterfaces];
   if (!preview || !UUID.test(preview.restoreId) || !UUID.test(preview.destinationGeneration)
-    || !Number.isFinite(preview.expiresAt) || preview.expiresAt <= Date.now()
+    || !Number.isSafeInteger(preview.expiresAt)
+    || !Number.isSafeInteger(preview.remainingMs) || preview.remainingMs <= 0 || preview.remainingMs > 600_000
     || !summary || typeof summary.replacesLinuxOwner !== 'boolean' || typeof summary.replacesDeviceCredentials !== 'boolean'
     || typeof summary.replacesMeshIdentity !== 'boolean' || typeof summary.networkInterruption !== 'boolean'
     || counts.some(count => !Number.isSafeInteger(count) || (count as number) < 0 || (count as number) > 1024)
@@ -142,6 +143,7 @@ function checkedPreview(value: unknown): RestorePreview {
     restoreId: preview.restoreId,
     destinationGeneration: preview.destinationGeneration,
     expiresAt: preview.expiresAt,
+    remainingMs: preview.remainingMs,
     summary: {
       replacesLinuxOwner: summary.replacesLinuxOwner,
       replacesDeviceCredentials: summary.replacesDeviceCredentials,
@@ -170,7 +172,8 @@ export default defineComponent({
   name: 'RecoveryTools', props: { preview: Boolean },
   data() { return { mode: 'idle' as 'idle' | 'backup' | 'restore' | 'preview', busy: false, currentPassword: '',
     archiveBase64: '', selectedName: '', restorePreview: null as RestorePreview | null, confirmed: false,
-    error: '', message: '', archiveSelection: 0, expiryTimer: undefined as ReturnType<typeof setTimeout> | undefined }; },
+    error: '', message: '', archiveSelection: 0, previewDeadline: 0, previewDisplayExpiry: 0,
+    expiryTimer: undefined as ReturnType<typeof setTimeout> | undefined }; },
   computed: {
     exclusionLabels(): string[] { return this.restorePreview?.summary.excluded.map(item => EXCLUSIONS[item]!) ?? []; },
   },
@@ -193,6 +196,7 @@ export default defineComponent({
       if (this.expiryTimer) clearTimeout(this.expiryTimer);
       this.expiryTimer = undefined; this.currentPassword = ''; this.clearFile();
       this.restorePreview = null; this.confirmed = false;
+      this.previewDeadline = 0; this.previewDisplayExpiry = 0;
     },
     reset() { this.clearLocal(); this.mode = 'idle'; this.error = ''; },
     async readArchive(event: Event) {
@@ -232,12 +236,19 @@ export default defineComponent({
     async previewBackup() {
       if (this.busy || this.preview || !this.archiveBase64) return;
       this.busy = true; this.error = ''; this.message = '';
+      const requestStarted = performance.now();
       try {
         const value = await maintenanceRequest('recovery/preview', {
           currentPassword: this.currentPassword, archiveBase64: this.archiveBase64,
         });
-        this.restorePreview = checkedPreview(value); this.mode = 'preview';
-        const delay = Math.min(0x7fffffff, Math.max(1, this.restorePreview.expiresAt - Date.now()));
+        this.restorePreview = checkedPreview(value);
+        // Conservatively subtract the entire request round trip. The board
+        // remains authoritative at commit; wall-clock corrections on either
+        // machine cannot extend the browser's local confirmation window.
+        this.previewDeadline = requestStarted + this.restorePreview.remainingMs;
+        const delay = this.previewDeadline - performance.now();
+        if (delay <= 0) { await this.expirePreview(); return; }
+        this.previewDisplayExpiry = Date.now() + delay; this.mode = 'preview';
         this.expiryTimer = setTimeout(() => { void this.expirePreview(); }, delay);
       } catch (error) { this.error = safeRequestError(error, 'The recovery backup could not be previewed.'); }
       finally { this.currentPassword = ''; this.clearFile(); this.busy = false; }
@@ -258,7 +269,7 @@ export default defineComponent({
     },
     async commitRestore() {
       if (this.busy || !this.restorePreview || !this.confirmed || this.preview) return;
-      if (Date.now() >= this.restorePreview.expiresAt) { await this.expirePreview(); return; }
+      if (performance.now() >= this.previewDeadline) { await this.expirePreview(); return; }
       const request = { currentPassword: this.currentPassword, restoreId: this.restorePreview.restoreId,
         destinationGeneration: this.restorePreview.destinationGeneration, confirm: true };
       this.busy = true; this.error = ''; this.message = '';

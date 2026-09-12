@@ -312,7 +312,7 @@ const adminFixture = adminFixturePath === undefined ? undefined : (() => {
       async previewRecovery(input) {
         if (!Buffer.from(input.bytes).equals(archive)) throw new Error('fixture archive mismatch');
         previews.set(restoreId, input.sessionId); called('recovery.preview');
-        return { restoreId, destinationGeneration, expiresAt: Date.now() + 10 * 60_000,
+        return { restoreId, destinationGeneration, expiresAt: Date.now() + 10 * 60_000, remainingMs: 10 * 60_000,
           summary: { replacesLinuxOwner: true, replacesDeviceCredentials: true, replacesMeshIdentity: true,
             membershipCount: 2, networkInterruption: true,
             warnings: ['Restoring may disconnect current network and administrator sessions.',

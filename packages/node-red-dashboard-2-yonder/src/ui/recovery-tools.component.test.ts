@@ -7,6 +7,7 @@ import YonderSettings from './YonderSettings.vue';
 const wrappers: ReturnType<typeof mount>[] = [];
 afterEach(() => {
   wrappers.splice(0).forEach(wrapper => wrapper.unmount());
+  vi.restoreAllMocks();
   vi.unstubAllGlobals();
   vi.useRealTimers();
 });
@@ -19,6 +20,7 @@ const preview = {
   restoreId: '11111111-1111-4111-8111-111111111111',
   destinationGeneration: '22222222-2222-4222-8222-222222222222',
   expiresAt: Date.now() + 600_000,
+  remainingMs: 600_000,
   summary: {
     replacesLinuxOwner: true,
     replacesDeviceCredentials: true,
@@ -169,7 +171,7 @@ it('refuses oversized files locally and cancels server previews on explicit canc
 
 it('expires a preview, clears local state, and asks the device to discard it', async () => {
   vi.useFakeTimers(); vi.setSystemTime(new Date('2026-09-11T12:00:00Z'));
-  const expiring = { ...preview, expiresAt: Date.now() + 100 };
+  const expiring = { ...preview, expiresAt: Date.now() + 100, remainingMs: 100 };
   const fetcher = vi.fn((url: string) => url.endsWith('/preview') ? response(expiring) : response({ ok: true }));
   vi.stubGlobal('fetch', fetcher);
   const wrapper = mount(RecoveryTools); wrappers.push(wrapper);
@@ -203,4 +205,64 @@ it('composes recovery beside the existing owner controls without exposing action
   expect(wrapper.find('[aria-label="Recovery backup and restore"]').exists()).toBe(true);
   await wrapper.get('button[data-action="backup"]').trigger('click');
   expect(wrapper.text()).toContain('Gallery preview'); expect(fetch).not.toHaveBeenCalled();
+});
+
+
+it.each([-86_400_000, 86_400_000])('allows a valid restore when the board clock differs by %i ms', async offset => {
+  vi.useFakeTimers(); vi.setSystemTime(new Date('2026-09-12T12:00:00Z'));
+  vi.spyOn(performance, 'now').mockReturnValue(100);
+  const localExpiry = Date.now() + 600_000;
+  const skewed = { ...preview, expiresAt: Date.now() + offset + 600_000 };
+  const fetcher = vi.fn((url: string) => url.endsWith('/preview') ? response(skewed)
+    : url.endsWith('/commit') ? response({ signInAgain: true }) : response({ ok: true }));
+  vi.stubGlobal('fetch', fetcher);
+  const wrapper = mount(RecoveryTools); wrappers.push(wrapper);
+  await wrapper.get('button[data-action="restore"]').trigger('click'); await selectArchive(wrapper);
+  await wrapper.get('form input[type="password"]').setValue('password');
+  await wrapper.get('form').trigger('submit'); await flushPromises();
+  expect(wrapper.text()).toContain('Review this restore');
+  expect(wrapper.get('time').attributes('datetime')).toBe(new Date(localExpiry).toISOString());
+  // A browser wall-clock correction after preview must not expire the lease.
+  vi.setSystemTime(new Date('2030-01-01T00:00:00Z'));
+  const commit = wrapper.get('form[aria-label="Confirm recovery restore"]');
+  await commit.get('input[type="checkbox"]').setValue(true);
+  await commit.get('input[type="password"]').setValue('password');
+  await commit.trigger('submit'); await flushPromises();
+  expect(fetcher.mock.calls.filter(call => call[0].endsWith('/commit'))).toHaveLength(1);
+});
+
+it('subtracts request time and rejects a reply whose lifetime elapsed in transit', async () => {
+  let monotonic = 100;
+  vi.spyOn(performance, 'now').mockImplementation(() => monotonic);
+  const fetcher = vi.fn((url: string) => {
+    if (!url.endsWith('/preview')) return response({ ok: true });
+    monotonic += 601_000;
+    return response(preview);
+  });
+  vi.stubGlobal('fetch', fetcher);
+  const wrapper = mount(RecoveryTools); wrappers.push(wrapper);
+  await wrapper.get('button[data-action="restore"]').trigger('click'); await selectArchive(wrapper);
+  await wrapper.get('form input[type="password"]').setValue('password');
+  await wrapper.get('form').trigger('submit'); await flushPromises();
+  expect(wrapper.text()).toContain('preview expired');
+  expect(wrapper.vm.restorePreview).toBeNull();
+  expect(fetcher.mock.calls.some(call => call[0].endsWith('/commit'))).toBe(false);
+});
+
+it('checks the monotonic deadline at commit even when an expiry timer has not run', async () => {
+  let monotonic = 100;
+  vi.spyOn(performance, 'now').mockImplementation(() => monotonic);
+  const fetcher = vi.fn((url: string) => url.endsWith('/preview') ? response(preview) : response({ ok: true }));
+  vi.stubGlobal('fetch', fetcher);
+  const wrapper = mount(RecoveryTools); wrappers.push(wrapper);
+  await wrapper.get('button[data-action="restore"]').trigger('click'); await selectArchive(wrapper);
+  await wrapper.get('form input[type="password"]').setValue('password');
+  await wrapper.get('form').trigger('submit'); await flushPromises();
+  const commit = wrapper.get('form[aria-label="Confirm recovery restore"]');
+  await commit.get('input[type="checkbox"]').setValue(true);
+  await commit.get('input[type="password"]').setValue('password');
+  monotonic += 600_000;
+  await commit.trigger('submit'); await flushPromises();
+  expect(wrapper.text()).toContain('preview expired');
+  expect(fetcher.mock.calls.some(call => call[0].endsWith('/commit'))).toBe(false);
 });

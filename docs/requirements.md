@@ -297,7 +297,7 @@ Parameter writes are vehicle commands. R-CMD applies to every requirement here.
 | ID | Requirement | P |
 |---|---|---|
 | R-SEC-01 | Ship no shared default credential **that protects the vehicle or its configuration**. The setup access point may carry a published default passphrase, documented and never presented as a secret; every other credential is per device. See [ADR-0007](adr/0007-credential-boundary.md) | 1 |
-| R-SEC-02 | Disable remote root login. SSH starts disabled; the Linux owner may explicitly enable public-key and/or password authentication | 1 |
+| R-SEC-02 | Disable remote root login. A freshly flashed image starts with SSH disabled; the Linux owner may explicitly enable public-key and/or password authentication. A conventional-install upgrade preserves its existing OS SSH setup until a first Linux owner operation durably commits. A failed or interrupted first-owner operation restores the pre-operation root-login and SSH service state. After the first owner commits, durable owner state remains the explicit SSH policy, including after owner removal. | 1 |
 | R-SEC-03 | Run the control plane as a dedicated unprivileged user, using narrowly scoped helpers for privileged operations | 2 |
 | R-SEC-04 | Expose no unauthenticated write path to configuration or to the vehicle from a non-loopback interface by default | 1 |
 | R-SEC-05 | Gate any code-execution surface behind a password set during setup, and expose it on no public-facing interface by default | 1 |

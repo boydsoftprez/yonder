@@ -154,6 +154,11 @@ else
 fi
 assert_unit_exec "$yc_admin_service" "$YONDER_NODE_LINK"
 assert_unit_accounts "$yc_admin_service"
+# A conventional upgrade can carry the pre-generation rollback journal at
+# /var/lib/yonder/apply.json. yonder-admin consumes and clears it after the
+# imported state is durable; under ProtectSystem=strict that exact legacy
+# directory must be writable or every activation retries on EROFS.
+assert_daemon_can_write "$yc_admin_service" /var/lib/yonder/apply.json
 run cp "$YONDER_SRC/systemd/yonder-owner-setup.service" /etc/systemd/system/yonder-owner-setup.service
 ensure_dir /etc/systemd/system/getty@tty1.service.d 0755
 run cp "$YONDER_SRC/systemd/yonder-owner-getty.conf" /etc/systemd/system/getty@tty1.service.d/70-yonder-owner.conf

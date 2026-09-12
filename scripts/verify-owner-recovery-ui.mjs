@@ -196,6 +196,14 @@ try {
   const download = await downloadPromise; const archivePath = join(root, 'downloaded-recovery.json'); await download.saveAs(archivePath);
   assert(readFileSync(archivePath, 'utf8').includes('owner-recovery-ui'));
 
+  // A newly flashed offline board may report yesterday's date. The real
+  // response lifetime must still permit reviewing and committing the restore.
+  await page.route('**/maintenance/api/recovery/preview', async route => {
+    const response = await route.fetch();
+    const body = await response.json();
+    assert.equal(body.remainingMs, 600_000);
+    await route.fulfill({ response, json: { ...body, expiresAt: Date.now() - 86_400_000 } });
+  });
   await recovery.getByRole('button', { name: 'Restore backup' }).click();
   await recovery.locator('input[type="file"]').setInputFiles(archivePath);
   await recovery.locator('form[aria-label="Preview recovery backup"]').getByLabel('Current console password').fill(password);

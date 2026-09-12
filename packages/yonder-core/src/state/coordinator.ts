@@ -460,6 +460,7 @@ export class DurableStateCoordinator implements StateCoordinator {
         this.journal.writeActiveGeneration(record.nextGeneration);
         await this.project(record.id, previous, next, "recovery");
         await this.verify(record.id, next);
+        await this.finalizeCommit(record.id, previous, next);
         if (record.runtimeHandoff) {
           const existingReceipt = this.journal.readReceipt(record.id);
           if (existingReceipt && (existingReceipt.outcome !== "committed"
@@ -666,6 +667,7 @@ export class DurableStateCoordinator implements StateCoordinator {
     this.journal.writeOperation(record);
     active.record = record;
     this.journal.boundary("operation.committed");
+    await this.finalizeCommit(id, active.previous.state, active.next.state);
     const receiptValue = this.receipt(record, "committed", active.next.generation);
     this.journal.writeReceipt(receiptValue);
     this.journal.boundary("receipt.committed");
@@ -760,6 +762,7 @@ export class DurableStateCoordinator implements StateCoordinator {
       active.record = record;
       this.journal.boundary("operation.committed");
     }
+    await this.finalizeCommit(id, active.previous.state, active.next.state);
     const receiptValue = this.receipt(record, "committed", active.next.generation);
     this.journal.writeReceipt(receiptValue);
     this.journal.boundary("receipt.committed");
@@ -879,6 +882,20 @@ export class DurableStateCoordinator implements StateCoordinator {
       }
     } catch {
       throw new StateCoordinatorError("PROJECTION_FAILED", "a fixed durable-state projection could not be verified");
+    }
+  }
+
+  private async finalizeCommit(operationId: string, previous: DurableState, next: DurableState): Promise<void> {
+    try {
+      for (const projector of this.projectors) {
+        await projector.finalizeCommit?.({
+          operationId,
+          previous: cloneState(previous),
+          next: cloneState(next),
+        });
+      }
+    } catch {
+      throw new StateCoordinatorError("PROJECTION_FAILED", "a fixed durable-state projection could not be committed");
     }
   }
 

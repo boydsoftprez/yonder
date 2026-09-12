@@ -63,6 +63,8 @@ export interface RestorePreview {
   restoreId: string;
   destinationGeneration: string;
   expiresAt: number;
+  /** Device-observed lifetime; clients must not compare separate wall clocks. */
+  remainingMs: number;
   summary: RestoreSummary;
 }
 
@@ -118,7 +120,7 @@ export class RecoveryImportStore {
     const summary = summarize(input.destination, input.archive.payload, input.prepared,
       input.compatibility, input.archive.source.board, input.destinationBoard);
     const preview: RestorePreview = { restoreId, destinationGeneration: input.destinationGeneration,
-      expiresAt: this.now() + this.ttlMs, summary };
+      expiresAt: this.now() + this.ttlMs, remainingMs: this.ttlMs, summary };
     this.entries.set(restoreId, { ...preview, sessionId: input.sessionId, path,
       prepared: structuredClone(input.prepared), compatibilityInput: structuredClone(input.compatibility) });
     return structuredClone(preview);

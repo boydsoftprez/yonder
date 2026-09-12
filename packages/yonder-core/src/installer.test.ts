@@ -755,6 +755,12 @@ describe("installer/roles/20-yonder-core.sh, the administration helper", () => {
       .toBeLessThan(r.out.indexOf("systemctl restart yonder-core.service"));
   });
 
+  it("proves the privileged helper can clear the legacy apply journal inside its systemd sandbox", () => {
+    const r = runRole();
+    expect(r.code, r.out).toBe(0);
+    expect(r.out).toContain("/var/lib/yonder/apply.json is inside yonder-admin.service's writable paths");
+  });
+
   it("refuses a role payload missing an administration unit", () => {
     const r = runRole(rolePayloadWithout("yonder-admin.service"));
     expect(r.code).not.toBe(0);
