@@ -235,7 +235,7 @@ prepare_mount_fixture() {
         "$root/var/lib/yonder-state" "$root/var/lib/yonder/console" "$root/var/lib/yonder/captures" \
         "$root/var/lib/NetworkManager" "$root/var/lib/zerotier-one" \
         "$root/var/lib/systemd" "$root/var/lib/dbus" "$root/var/log/journal" \
-        "$root/home" "$root/root" "$root/tmp" "$root/var/tmp" "$root/var/cache"
+        "$root/home" "$root/root" "$root/run" "$root/tmp" "$root/var/tmp" "$root/var/cache"
     install -m 0755 /source/image/prototype/grow-media.sh \
         "$root/usr/lib/yonder/storage-prototype/grow-media.sh"
     mkdir -p "$state_mount"
