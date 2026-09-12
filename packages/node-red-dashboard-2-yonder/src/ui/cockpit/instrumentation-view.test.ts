@@ -22,8 +22,8 @@ describe('cockpit instrument view adapter',()=>{
   expect(items.find(x=>x.id==='battery.0.voltageV')?.value).toBe(15.6);expect(items.find(x=>x.id==='battery.system.voltageV')?.label).toContain('Summary');expect(items.find(x=>x.id==='flight.airborneSeconds')?.displayValue).toContain('*');
  });
  it('formats selected distance and flight units without confusing planned ETE with autopilot capture',()=>{
-  const items=mod!.navigationItems(snapshot(),{valid:true,seq:3,distanceM:1852,eteSeconds:125,desiredTrackDeg:95},{state:'ready',estimatedAglM:91.44},{distanceUnit:'mi',speedUnit:'mph',altitudeUnit:'ft'});
-  expect(items.find(x=>x.id==='nav.distance')?.value).toBeCloseTo(1.15078,4);expect(items.find(x=>x.id==='nav.ete')?.displayValue).toBe('02:05');expect(items.find(x=>x.id==='nav.agl')?.value).toBeCloseTo(300);expect(items.find(x=>x.id==='nav.groundspeed')?.unit).toBe('MPH');
+  const items=mod!.navigationItems(snapshot(),{valid:true,seq:3,distanceM:1852,eteSeconds:125,desiredTrackDeg:95},{state:'ready',estimatedAglM:999,officialTerrain:{available:true,estimatedAglM:91.44,provider:'ardupilot-srtm1',datum:'MSL',spacingM:30}},{distanceUnit:'mi',speedUnit:'mph',altitudeUnit:'ft'});
+  expect(items.find(x=>x.id==='nav.distance')?.value).toBeCloseTo(1.15078,4);expect(items.find(x=>x.id==='nav.ete')?.displayValue).toBe('02:05');expect(items.find(x=>x.id==='nav.agl')?.value).toBeCloseTo(300);expect(items.find(x=>x.id==='nav.agl')?.source).toContain('ardupilot-srtm1');expect(items.find(x=>x.id==='nav.groundspeed')?.unit).toBe('MPH');
  });
 });
 

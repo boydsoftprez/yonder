@@ -22,6 +22,7 @@
     <nav class="cockpit-utilities" aria-label="Cockpit pages and display controls">
      <button class="utility-extra" @click="showFlightPlan">Flight plan</button>
      <button class="utility-display" aria-label="Display menu" @click="panel='display-menu'">Display</button>
+     <button class="utility-extra cockpit-terrain-entry" aria-label="Official terrain service" @click="openOfficialTerrain">Terrain<small>{{officialTerrainCompact}}</small></button>
      <button class="utility-extra" aria-label="Aircraft and command status" @click="panel='status'">Aircraft<small>{{flight.live?(telemetry.mode||'MAVLink'):'No data'}}<template v-if="connectionStats&&Number.isFinite(connectionStats.flightHz)"> · {{connectionStats.flightHz.toFixed(1)}} Hz</template></small></button>
      <button v-if="instrumentAlerts.length" class="cockpit-alert-summary" aria-label="Show aircraft notices" @click="panel='alerts'">{{instrumentAlerts.length}} !</button>
      <button class="utility-extra cockpit-fullscreen" :aria-label="fullscreen?'Exit full screen':'Enter full screen'" :title="fullscreen?'Exit full screen':'Full screen'" :aria-pressed="fullscreen" :disabled="fullscreenBusy" @click="toggleFullscreen">{{fullscreen?'↙':'⛶'}}</button>
@@ -157,7 +158,7 @@
       <button v-if="layout==='mission'" class="mission-home-summary" aria-label="Edit mission home" @click="openHome()">HOME · {{draft?'planning':'reported'}}<span>{{shownMission.home?`${fmt(shownMission.home.lat,5)}°, ${fmt(shownMission.home.lon,5)}° · ${homeElevationLabel}`:'Not set · choose a planning home'}}</span></button>
       <div v-if="layout==='mission'&&missionView==='list'" class="mission-waypoint-head"><span>WAYPOINT</span><span>ALTITUDE / AGL</span><span>DTK / DIS</span></div>
       <MissionWaypointList v-show="layout!=='mission'||missionView==='list'" :mission="shownMission" :progress="missionProgress" :profile="missionProfile" :draft="!!draft" :options="preferences.display" :follow="preferences.display.followMission" :view-key="layout+'/'+mobileInset+'/'+missionView" @select="openMission" @pause-follow="pauseMissionFollow"/>
-      <MissionPlanning :visible="layout==='mission'&&missionView==='profile'" :mission="shownMission" :provider="groundData" :enabled="onlineTerrain" :draft="!!draft" :options="preferences.display" :aircraft-datum="telemetry.altitudeDatum" @report="missionProfile=$event" @select="openMission"/>
+      <MissionPlanning :visible="layout==='mission'&&missionView==='profile'" :mission="shownMission" :official-client="officialTerrainClient" :enabled="officialTerrainEnabled" :display-provider="groundData" :display-datum="aircraftDatum" :display-enabled="onlineTerrain" :draft="!!draft" :options="preferences.display" @report="missionProfile=$event" @select="openMission"/>
       <nav><button @click="openMission(null)">Mission controls</button><button v-if="layout!=='mission'" aria-label="Open flight planning profile" @click="layout='mission';missionView='profile'">Profile</button><button v-if="!draft" aria-label="Follow active mission leg" :aria-pressed="preferences.display.followMission" @click="setOption('followMission',!preferences.display.followMission)">{{preferences.display.followMission?'Following active':'Follow active'}}</button><button
           v-if="layout==='mission'"
           @click="$refs.importFile.click()"
@@ -185,6 +186,7 @@
           @click="layout='map'"
         >↗</button></header>
       <YonderCockpitMap
+        ref="cockpitMap"
         :data-provider="groundData"
         :snapshot="agedSnapshot"
         :mission="shownMission"
@@ -219,12 +221,12 @@
       class="cockpit-forecast"
       :data-level="terrainReport.forecast.level"
       @click="panel='display'"
-    >Current-motion forecast · {{terrainReport.forecast.level}}<small
+    >Detailed display forecast · {{terrainReport.forecast.level}}<small
         v-if="terrainReport.forecast.earliestWarningSeconds!==null"
       >Warning threshold in {{fmt(terrainReport.forecast.earliestWarningSeconds)}} s</small><small
         v-else-if="terrainReport.forecast.earliestCautionSeconds!==null"
       >Caution threshold in {{fmt(terrainReport.forecast.earliestCautionSeconds)}}
-        s</small><small>{{terrainReport.forecast.coverage}} sampled coverage</small></button>
+        s</small><small>{{terrainReport.forecast.coverage}} sampled coverage · detailed display source, independent of official terrain</small></button>
     <div
       v-if="displayError"
       class="cockpit-error"
@@ -264,7 +266,7 @@
     @pick-location="pickLocation"
     @start="review({kind:'mission-start'},'Start aircraft mission')"
   />
-  <MissionHome v-if="homeOpen" :home="shownMission.home" :controller-home="snapshot.telemetry?.homePosition" :initial="homeForm" :options="preferences.display" :can-set="canCommand&&snapshot.capabilities?.homeControl?.available===true" :unavailable-reason="snapshot.capabilities?.homeControl?.reason" :external-error="homeError" :busy="sending||snapshot.busy" :operation="homeOperation" :provider="groundData" :terrain-enabled="onlineTerrain" @close="closeHome" @save="saveHome" @pick="pickHome" @review="reviewHome"/>
+  <MissionHome v-if="homeOpen" :home="shownMission.home" :controller-home="snapshot.telemetry?.homePosition" :initial="homeForm" :options="preferences.display" :can-set="canCommand&&snapshot.capabilities?.homeControl?.available===true" :unavailable-reason="snapshot.capabilities?.homeControl?.reason" :external-error="homeError" :busy="sending||snapshot.busy" :operation="homeOperation" :official-client="officialTerrainClient" :terrain-enabled="officialTerrainEnabled" @close="closeHome" @save="saveHome" @pick="pickHome" @review="reviewHome"/>
   <CockpitOverlay v-if="reviewing" @escape="cancelReview">
   <div
     class="cockpit-scrim"
@@ -394,6 +396,19 @@
           <p v-if="!(snapshot.statustext||[]).length">No aircraft messages received.</p>
         </template>
         <template v-else-if="panel==='display'">
+          <OfficialTerrainPanel
+            :status="officialTerrainStatus"
+            :status-error="officialTerrainError"
+            :preview="officialTerrainPreview"
+            :client="officialTerrainClient"
+            :map-bounds="officialTerrainMapBounds"
+            :mission-available="actualMission.items.length>0"
+            :mission-revision="snapshot.mission?.revision||null"
+            :vehicle-generation="snapshot.identity?.generation||null"
+            @status="ingestOfficialTerrainStatus"
+            @preview="officialTerrainPreview=$event"
+            @request-map-bounds="captureOfficialTerrainBounds"
+          />
           <OwnTrailSettings :options="ownTrailOptions" :status="ownTrailDisplay" @change="setOwnTrailOptions" @clear="clearOwnTrail" @restore="restoreOwnTrail" />
           <fieldset class="cockpit-data-settings"><legend>Connection & offline data</legend>
             <label>Public data connection<select v-model="sourceMode" aria-label="Public data connection">
@@ -439,13 +454,13 @@
               :key="limitation"
             >{{limitation}}</p>
           </template>
-          <p v-if="terrainReport.forecast">{{terrainReport.forecast.reason}}. Minimum ground / mapped-surface clearance:
+          <p v-if="terrainReport.forecast"><strong>Detailed display forecast.</strong> {{terrainReport.forecast.reason}}. Minimum ground / mapped-surface clearance:
             {{fmt(terrainReport.forecast.minimumGroundClearanceM)}} /
             {{fmt(terrainReport.forecast.minimumSurfaceClearanceM)}} m. Closure:
             {{fmt(terrainReport.forecast.closureMps,1)}} m/s. Checked
             {{fmt(terrainReport.forecast.evaluatedUntilSeconds)}} of {{fmt(terrainReport.forecast.lookaheadSeconds)}}
             seconds, {{terrainReport.forecast.samples}} samples. Sampled corridor ±20 m; 30 m warning / 90 m caution.
-            This extrapolates measured track, speed and climb; it does not predict autopilot turns.</p>
+            This uses the verified detailed display datum independently of official controller terrain. It extrapolates measured track, speed and climb; it does not predict autopilot turns.</p>
           <label>Camera<select v-model="cameraId">
               <option :value="null">Automatic identified / sole camera</option>
               <option
@@ -637,6 +652,10 @@ import {operationPresentation,operationProtocol} from './cockpit/operation-prese
 import {defaultTelemetryRate,telemetryRates,telemetryPollDelay,cockpitRequestId} from './cockpit/telemetry-cadence.mjs'
 import YonderCockpitMap from './cockpit/YonderCockpitMap.vue'
 import OwnTrailSettings from './cockpit/OwnTrailSettings.vue'
+import OfficialTerrainPanel from './cockpit/OfficialTerrainPanel.vue'
+import {createOfficialTerrainClient} from './cockpit/official-terrain-client.mjs'
+import {terrainStatusView} from './cockpit/official-terrain-state.mjs'
+import {officialTerrainAgl} from './cockpit/official-terrain-datum.mjs'
 import {selectOwnTrail,trailPreferences} from './cockpit/own-trail.mjs'
 import YonderPicture from './YonderPicture.vue'
 import {
@@ -702,6 +721,7 @@ export default {
     TelemetrySettings,
     YonderCockpitMap,
     OwnTrailSettings,
+    OfficialTerrainPanel,
     YonderPicture
   },
   inject: {
@@ -733,7 +753,8 @@ export default {
     dataProvider: { type: Object, default: null },
     terrainComponent: {
       default: () => TerrainVision
-    }
+    },
+    terrainServiceClient: { type: Object, default: null }
   },
   data() {
     return {
@@ -781,6 +802,8 @@ export default {
       optionsLoaded: false,
       selectedTraffic: null,
       terrainStatus: null,
+      officialTerrainClient:null,officialTerrainStatus:null,officialTerrainError:'',officialTerrainPreview:null,officialTerrainMapBounds:null,
+      officialTerrainSample:null,officialTerrainSampleAt:0,officialTerrainSamplePoint:null,officialTerrainSampleVehicle:null,officialTerrainSampleBusy:false,officialTerrainSampleGeneration:0,
       cameraRegistration: null,
       now: Date.now(),
       receivedAt: Date.now(),
@@ -902,10 +925,30 @@ export default {
       }
     },
     terrainReport() {
-      return this.terrainStatus || this.snapshot.terrain || {
+      const display=this.terrainStatus || this.snapshot.terrain || {
         state: 'unavailable',
         message: 'Terrain data unavailable · conventional horizon'
-      }
+      },official=this.officialTerrainAglReport;
+      return {...display,groundElevationM:official.available?official.groundElevationM:null,estimatedAglM:official.available?official.estimatedAglM:null,officialTerrain:official}
+    },
+    officialTerrainEnabled(){return !!(this.officialTerrainStatus?.policy||this.officialTerrainStatus?.sourcePolicy)?.enabled},
+    officialTerrainAglReport(){
+      const age=this.now-this.officialTerrainSampleAt,vehicle=this.snapshot.identity?.generation||null,point=aircraftMapPosition(this.telemetry),sampled=this.officialTerrainSamplePoint;
+      if(!this.officialTerrainEnabled)return {available:false,reason:this.officialTerrainStatus?'official-terrain-service-disabled':'official-terrain-status-unavailable',groundElevationM:null,estimatedAglM:null};
+      if(!this.officialTerrainSample||age>5000||this.officialTerrainSampleVehicle!==vehicle)return {available:false,reason:this.officialTerrainSample?'official-terrain-sample-stale':'official-terrain-sample-unavailable',groundElevationM:null,estimatedAglM:null};
+      const longitudeDelta=point&&sampled?Math.min(Math.abs(point.lon-sampled.lon),360-Math.abs(point.lon-sampled.lon)):Infinity;
+      if(!point||!sampled||Math.abs(point.lat-sampled.lat)>.0005||longitudeDelta>.0005)return {available:false,reason:'official-terrain-sample-position-stale',groundElevationM:null,estimatedAglM:null};
+      return officialTerrainAgl(this.officialTerrainSample,this.telemetry);
+    },
+    officialTerrainCompact(){
+      const view=terrainStatusView(this.officialTerrainStatus);
+      if(this.officialTerrainError&&!this.officialTerrainStatus)return 'Unavailable';
+      if(!this.officialTerrainStatus)return 'Checking';
+      if(!(this.officialTerrainStatus.policy||this.officialTerrainStatus.sourcePolicy)?.enabled)return 'Disabled';
+      if(this.officialTerrainStatus.service?.compatible===false)return view.service.tone==='warning'?'Needs refresh':'Incompatible';
+      if((this.officialTerrainStatus.service?.missing||0)>0)return `${this.officialTerrainStatus.service.missing} missing`;
+      if((this.officialTerrainStatus.service?.sent||0)>0)return `${this.officialTerrainStatus.service.sent} sent`;
+      return view.service.tone==='danger'?'Fault':'Waiting';
     },
     backgroundReady() {
       return this.background === 'terrain' ? this.terrainReport.state === 'ready' : !!this.cameraPath
@@ -1014,6 +1057,8 @@ export default {
     document.addEventListener('keydown', this.lostFocusEscape);
     if (this.report || this.props.report) this.ingest(this.report || this.props.report);
     this.source = this.api || (!this.report && !this.props.report ? createCockpitApi() : null);
+    this.officialTerrainClient=markRaw(this.terrainServiceClient||createOfficialTerrainClient());
+    this.officialTerrainClient.start(({status,error})=>{if(this.disposed)return;if(status)this.ingestOfficialTerrainStatus(status);else if(error){this.officialTerrainStatus=null;this.clearOfficialTerrainSample();this.officialTerrainError=error.message}});
     this.$el.setAttribute('data-mobile-inset', this.mobileInset);
     this.groundData.refreshOffline().then(()=>{ if(!this.disposed)this.groundStatus=this.groundData.status() }).catch(e=>{this.dataMessage='Browser storage unavailable: '+e.message});
     try {
@@ -1057,10 +1102,33 @@ export default {
     clearTimeout(this.pollTimer);
     clearTimeout(this.dataOptionTimer);
     this.source?.close?.();
+    this.officialTerrainClient?.stop?.();
     this.groundData.close()
   },
   methods: {
     formatDuration,
+    openOfficialTerrain(){this.panel='display';this.$nextTick(this.captureOfficialTerrainBounds)},
+    captureOfficialTerrainBounds(){
+      const map=this.$refs.cockpitMap?.map,bounds=map?.getBounds?.();
+      if(bounds)try{
+        const candidate={south:Number(bounds.getSouth()),north:Number(bounds.getNorth()),west:Number(bounds.getWest()),east:Number(bounds.getEast())};
+        if(Object.values(candidate).every(Number.isFinite)&&candidate.south>=-90&&candidate.north<=90&&candidate.west>=-180&&candidate.west<=180&&candidate.east>=-180&&candidate.east<=180&&candidate.south<candidate.north&&candidate.west!==candidate.east){this.officialTerrainMapBounds=candidate;return}
+      }catch{}
+      if(this.officialTerrainMapBounds)return;
+      const point=aircraftMapPosition(this.telemetry);
+      if(point)this.officialTerrainMapBounds={south:Math.max(-89.99,point.lat-.025),north:Math.min(89.99,point.lat+.025),west:Math.max(-180,point.lon-.025),east:Math.min(180,point.lon+.025)};
+    },
+    clearOfficialTerrainSample(){this.officialTerrainSampleGeneration++;this.officialTerrainSample=null;this.officialTerrainSampleAt=0;this.officialTerrainSamplePoint=null;this.officialTerrainSampleVehicle=null;this.officialTerrainSampleBusy=false},
+    ingestOfficialTerrainStatus(status){this.officialTerrainStatus=status;this.officialTerrainError='';if(!this.officialTerrainEnabled)this.clearOfficialTerrainSample();else void this.sampleOfficialOwnship()},
+    async sampleOfficialOwnship(){
+      const point=aircraftMapPosition(this.telemetry),vehicle=this.snapshot.identity?.generation||null;
+      if(!this.officialTerrainEnabled||!point){this.clearOfficialTerrainSample();return}
+      if(this.officialTerrainSampleBusy)return;const token=++this.officialTerrainSampleGeneration;
+      this.officialTerrainSampleBusy=true;
+      try{const response=await this.officialTerrainClient.samples([point]);if(!this.disposed&&this.officialTerrainEnabled&&token===this.officialTerrainSampleGeneration&&vehicle===(this.snapshot.identity?.generation||null)){this.officialTerrainSample=response?.samples?.[0]||{available:false,reason:'official-terrain-response-mismatch'};this.officialTerrainSamplePoint=point;this.officialTerrainSampleVehicle=vehicle;this.officialTerrainSampleAt=Date.now()}}
+      catch(error){if(!this.disposed&&this.officialTerrainEnabled&&token===this.officialTerrainSampleGeneration){this.officialTerrainSample={available:false,reason:error?.message||'official-terrain-sample-failed'};this.officialTerrainSamplePoint=point;this.officialTerrainSampleVehicle=vehicle;this.officialTerrainSampleAt=Date.now()}}
+      finally{if(token===this.officialTerrainSampleGeneration)this.officialTerrainSampleBusy=false}
+    },
     fullscreenChanged(){if(this.disposed)return;this.fullscreen=document.fullscreenElement===this.$el;this.$nextTick(this.fitViewport)},
     async toggleFullscreen(){
       if(this.fullscreenBusy)return;this.fullscreenBusy=true;

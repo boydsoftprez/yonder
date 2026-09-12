@@ -205,6 +205,7 @@ jobs:
           name: console-pages
           path: |
             vendor/capture/
+            vendor/terrain-pfd-check/
             docs/console/shape/
           if-no-files-found: warn
           # Storage is billed on a private repository no matter which runner

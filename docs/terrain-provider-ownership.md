@@ -1,6 +1,6 @@
 # Terrain-provider ownership with multiple ground stations
 
-Recorded: 2026-09-11. Status: **open design constraint; enforcement is not implemented**.
+Recorded: 2026-09-11. Status: **operator-managed single responder approved for this PR; exclusivity is not enforced**.
 
 Owner: the Yonder terrain-service implementation. Revisit before enabling the responder in a multi-ground-station deployment, before claiming exclusive source provenance, and before closing the protocol integration task. This supplements R-FLT-02/05/08/23/26 and the planned official-terrain requirements R-FLT-27/28.
 
@@ -12,17 +12,17 @@ This applies after ordinary message admission: it does not imply that invalid fr
 
 Consequences include duplicate bandwidth, mixed source generations and conflicting heights. Preparing the same named dataset on every station reduces some disagreement but does not provide exclusivity or prove identical content.
 
-## Proposed policy and its boundary
+## Approved policy and its boundary
 
-The proposed operational policy is one active terrain responder per aircraft, normally Yonder because it carries prepared data onboard. Other ground stations may continue their normal functions with terrain delivery disabled. This is a proposed policy, not a claim that current firmware enforces it.
+The operator selected one active terrain responder per aircraft for this PR: Yonder serves prepared data onboard, and the operator disables terrain delivery in other ground stations. Other ground-station functions remain available. The PFD must identify this as operator-managed and explicitly state that exclusivity is not enforced.
 
 Filtering inbound TERRAIN_DATA at Yonder's routing boundary could enforce ownership for traffic that traverses that boundary. It cannot cover a GCS connected directly to another FC UART, USB port or independent radio. Enforcement over every route would require supported FC-side filtering/provider selection or an explicitly controlled topology. Routing changes also need their own command, reachability and rollback review.
 
 Passive observation can reveal a competing responder but cannot prove its absence: another sender may be idle or on a route Yonder cannot observe. Do not label exclusive ownership as verified solely because no competing packets were observed. If source identity is used for filtering, distinguish an unauthenticated MAVLink ID from authenticated identity.
 
-## Decision to make before integration
+## Integration contract
 
-Choose the supported deployment contract: operator-managed single responder, enforcement on Yonder-controlled routes with explicit bypass limitations, or enforcement at the FC. Define how ownership is selected, how competing traffic is reported, what the PFD can truthfully claim, and how deliberate handover works. Do not introduce automatic provider failover or silently discard another GCS's traffic as a consequence of this note.
+The approved contract is operator-managed single responder. Observe competing TERRAIN_DATA on the existing route and report fresh competition without treating its absence as proof of exclusivity. Handover is deliberate: disable Yonder through its configuration workflow before enabling another responder. Do not introduce automatic provider failover, routing filters, or silently discard another GCS's traffic. Enforced exclusivity is outside this PR and remains a documented future decision.
 
 Independent work on source validation, storage, coverage and sampling can continue. Multi-station exclusivity and provenance claims remain open until the chosen mechanism and its boundary have been tested. Do not treat this as a reason to block unrelated telemetry or ground-station access.
 
