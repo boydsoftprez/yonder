@@ -77,7 +77,19 @@
             </div>
             <div v-if="!signInRequired && ['stopped', 'failed'].includes(cameraRunState)" class="y-pic__stopped">
                 <span class="y-pic__stopped-l">{{ videoControl.message }}</span>
-                <button type="button" class="y-pic__start" :disabled="videoRequestPending || !videoControl.action" @click="pressStart">{{ videoRequestPending ? 'Requesting…' : videoControl.label }}</button>
+                <!-- R-FLT-29: the message is a reason and stays; the button
+                     starts the device's stream and must not exist in the
+                     scene presentation, which is the flight display. See
+                     this file's own `scene` prop doc comment. -->
+                <button v-if="!scene" type="button" class="y-pic__start" :disabled="videoRequestPending || !videoControl.action" @click="pressStart">{{ videoRequestPending ? 'Requesting…' : videoControl.label }}</button>
+            </div>
+            <!-- R-UI-20 in the scene presentation: one line saying why the
+                 picture is not what was asked for, and the one control that
+                 is the operator's own browser rather than the aircraft. See
+                 the `scene` prop's own doc comment. -->
+            <div v-if="scene && ((reasonLine && noticeReason) || playbackBlocked)" class="y-pic__scene-notice">
+                <div v-if="reasonLine && noticeReason" class="y-pic__reason" role="status">{{ noticeReason }}</div>
+                <button v-if="playbackBlocked" type="button" class="y-pic__resume" @click="resumePlayback">Resume live video</button>
             </div>
         </div>
       </div>
@@ -86,7 +98,7 @@
 
         <div v-if="!scene" class="y-pic__notices">
             <button v-if="playbackBlocked" type="button" class="y-pic__resume" @click="resumePlayback">Resume live video</button>
-            <div v-if="signInRequired || reason || aimRefusal" class="y-pic__reason" role="status">{{ signInRequired ? 'Your session expired. Sign in to restore video and controls.' : aimRefusal || reason }}</div>
+            <div v-if="noticeReason" class="y-pic__reason" role="status">{{ noticeReason }}</div>
             <div v-if="flashing" class="y-pic__saved" role="status"><i class="y-pic__saved-dot" aria-hidden="true"></i>Saved · to {{ savedTo }}</div>
         </div>
 
@@ -574,8 +586,50 @@ export default {
          * host telling the component which of its two presentations to
          * draw, the same kind of fact `aimable` already is internally.
          * The Camera and Cockpit pages never set it and are unaffected.
+         *
+         * **Two things are drawn in the scene besides the frame, and only
+         * when they are true.** The operator ruled on this after the
+         * whole-branch review: one line of reason when there is one, and
+         * nothing at all when the picture is fine. The design's "no chrome
+         * in the scene" (decision 2) is about controls and readings that
+         * repeat what the PFD already says; a picture that is black for a
+         * reason the operator cannot see is R-UI-20's silent absence, which
+         * is the worse fault. So `.y-pic__reason` appears in the scene when
+         * something is wrong, and **Resume live video** appears when this
+         * browser blocked autoplay — the one case where the picture is
+         * recoverable from here, by this browser, with nothing sent to the
+         * aircraft or the device. The stopped-state *message* is likewise
+         * kept; its Start button is not, because that starts the device's
+         * stream (R-CMD-04, R-FLT-29). Nothing else: no toolbar, no badge,
+         * no strip, no capture host, no saved banner.
          */
-        scene: { type: Boolean, default: false }
+        scene: { type: Boolean, default: false },
+        /**
+         * Draw the one-line reason in the scene presentation (R-UI-20, the
+         * operator's ruling on decision 2). Off by default, and the host
+         * sets it only where the line can actually be read.
+         *
+         * **This exists because a box can be too small for a sentence.** The
+         * scene presentation serves two boxes: the whole attitude scene, and
+         * the camera window, which is a sixth of the scene's width — about
+         * 140 x 55 px on the Flight page, with roughly 40 px of usable
+         * height. "The video service is unavailable. Reconnecting
+         * automatically." is 68 px of text there however it is set, so it
+         * cannot be shown whole; the page gate measured exactly that and
+         * refused it, correctly, as content hidden from the operator
+         * (`console/theme.ts`, "content is never clipped"). Truncating it
+         * was worse: the bottom-anchored version kept the tail and dropped
+         * the words that say what is wrong.
+         *
+         * So the sentence goes where it fits — the full scene — and the
+         * window keeps what it always had: the stopped-state message, which
+         * is short, and the resume control, which is a button. **Whether the
+         * window should say more than that is the design's own open
+         * question** (the spec's window behaviour promises the reason inside
+         * it, and at this size that promise cannot be kept), and it is the
+         * operator's to settle, not this component's.
+         */
+        reasonLine: { type: Boolean, default: false }
     },
     emits: ['stale'],
     data () {
@@ -756,6 +810,14 @@ export default {
          * about it rather than guessing that a camera is stopped.
          */
         selectedCameraName () { return this.cameras.find(row => row.id === cameraFor(this.streamPath))?.name || this.props.label || '' },
+        /** The one line either presentation shows when something is wrong:
+         *  an expired session first, then a refused aim, then whatever the
+         *  delivery path last reported. Empty when the picture is fine,
+         *  which is what both `v-if`s test. */
+        noticeReason () {
+            if (this.signInRequired) return 'Your session expired. Sign in to restore video and controls.'
+            return this.aimRefusal || this.reason || ''
+        },
         cameraRunState () {
             return this.fromPayload('runState') || (this.cameraRunning === true ? 'running' : this.cameraRunning === false ? 'stopped' : 'unknown')
         },
@@ -1897,6 +1959,34 @@ export default {
     max-height: none;
 }
 .y-pic--scene .y-pic__video { object-fit: cover; }
+/* R-UI-20 in the scene: the reason, and the resume control, inside the
+   frame — there is nowhere else for them, since `.y-pic--scene` collapses
+   the grid to the one track the frame fills. Above the hatch and the
+   stopped message, at the foot of the picture where the PFD's own footer
+   is not, and only ever present when the template says something is
+   actually wrong. */
+.y-pic--scene .y-pic__scene-notice {
+    position: absolute;
+    inset: 4px;
+    z-index: 6;
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    justify-content: flex-end;
+    gap: 6px;
+    text-align: center;
+    overflow: hidden;
+    pointer-events: none;
+}
+/* No truncation here, deliberately: the host only sets `reasonLine` on the
+   box that can show the line whole (see the prop's own doc comment), so a
+   clip would mean the host got that wrong and should be visible as a gate
+   failure rather than hidden by CSS. */
+.y-pic--scene .y-pic__reason {
+    font-size: 11px;
+    padding: 3px 5px;
+}
+.y-pic--scene .y-pic__resume { pointer-events: auto; flex: none; }
 /* The hatch is the third of four signals, and the one that cannot be mistaken
    for a dark scene or a badly exposed shot. Above the video, below every
    reading drawn on top of it: it must wash over the picture, never obscure

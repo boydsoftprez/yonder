@@ -1149,8 +1149,15 @@ not been established by the synthetic browser tests.
 Choosing **Camera** as the background (Display → Map, terrain & data) puts the
 selected camera's configured preview across the whole attitude scene, screen-fixed
 instruments over it, in place of the fixed split that used to sit behind a bordered
-picture box (K-68). None of the picture's own toolbar, badges, notices or thumbnail
-strip appears inside the PFD; the Camera page keeps all of them. The attitude line
+picture box (K-68). None of the picture's own toolbar, badges, thumbnail strip or
+capture controls appears inside the PFD, and nothing there starts or stops a stream;
+the Camera page keeps all of them. What the scene does keep is **one line saying why**,
+at the foot of the picture, whenever there is a reason — a session that expired, a
+preview the console cannot deliver, a decoder reconnecting — and nothing at all when
+the picture is fine. If this browser blocked the video from playing, a **Resume live
+video** control appears with it; that is this browser, not the aircraft. The small window
+form is too narrow for a sentence, so it carries the short message and that control, and
+a longer reason is read by going to the full picture. The attitude line
 stays drawn over the picture by default — **PFD settings → Attitude & display →
 Horizon line over camera** turns it off. Height above ground and the forward-clearance
 forecast keep reporting while the camera fills the scene: [`camera-full.png`](images/cockpit/camera-full.png),
@@ -1159,7 +1166,11 @@ also shown in the day palette at [`camera-full-day.png`](images/cockpit/camera-f
 A **Camera** button sits in the top row beside full screen, reading the current state
 and what a tap does — *Full · tap for window* or *Window · tap for full* — and is
 disabled and reads *unavailable* with no camera selected. It never starts or stops a
-stream. Pressing it shrinks the picture into a small window over synthetic terrain
+stream. At narrow widths, where the top row folds away, the same control is a **Camera**
+row in the cockpit **Menu**. The button and the Background chooser move the same one
+setting: **Camera** is the full picture, **Synthetic terrain** with a camera selected is
+the window, and whichever you left it in is what the page comes back to. Pressing it
+shrinks the picture into a small window over synthetic terrain
 ([`camera-window.png`](images/cockpit/camera-window.png), and at tablet size in
 [`camera-window-tablet.png`](images/cockpit/camera-window-tablet.png)): drag the
 window's header to move it, drag its corner grip to resize it between one eighth and
@@ -1169,8 +1180,12 @@ are remembered in this browser with the other display preferences and reset from
 change whether the camera is full or windowed. The window's own maximize control, or
 the Camera button again, returns to the full picture.
 
-While the selected camera is not streaming: the full picture keeps today's message
-and its **Use synthetic terrain** switch; the window states the reason inside itself.
+With **no camera configured at all**, the scene keeps today's *Selected camera
+unavailable* notice and its **Use synthetic terrain** switch, and the Camera control is
+disabled. With a camera configured but **not streaming**, the picture is there and says
+so itself — *Video is stopped.* — in the scene and in the window alike, with no button
+beside it, because starting a stream is done on the Cameras page. One tap of the Camera
+control puts synthetic terrain back in the scene.
 Either way, a picture that goes quiet still desaturates, darkens and takes the hatch,
 and its running age appears in the PFD's footer label while full or the window's own
 header while windowed — never both, and never while the picture is live.
@@ -1179,6 +1194,9 @@ header while windowed — never both, and never while the picture is live.
 
 The illustrated guide has an executable walkthrough. With the fixture preview
 running on port 4192, run `npm run cockpit:guide -w node-red-dashboard-2-yonder`.
+**It does not currently reach the end** — earlier checks drive controls that no longer
+exist, and the run stops at the first of them ([K-69](known-issues.md#k-69)), so the four
+camera images were made off-path and say so in their manifest rows.
 It checks the visible controls and captures their current appearance, then loads
 the actual prepared terrain pack through a temporary ground-only relay and checks
 offline reuse. It refuses a `?live=1` target and blocks aircraft HTTP requests.

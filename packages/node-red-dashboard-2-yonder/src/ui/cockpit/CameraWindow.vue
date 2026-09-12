@@ -111,14 +111,48 @@ export default {
       }
     }
   },
+  mounted () {
+    this.clampToBox()
+    window.addEventListener('resize', this.clampToBox)
+  },
+  beforeUnmount () {
+    window.removeEventListener('resize', this.clampToBox)
+  },
   methods: {
     box () {
       return this.$el.closest('.cockpit-body')
+    },
+    /** The box the stored fractions actually have to fit, measured rather
+     * than guessed (I4 of the whole-branch review). `clampCameraWindow` is
+     * given no aspect at load time, because nothing has rendered and a
+     * guessed shape is wrong in both directions — it bounded the window's
+     * travel to the upper three quarters of a portrait scene, and let a
+     * stored position hang off the bottom of a wide one. So the real bound
+     * is applied here, on mount and whenever the box is resized, against
+     * the same `getBoundingClientRect()` a gesture uses. Emits only when it
+     * changes something, so a window already inside its box costs the host
+     * nothing. */
+    clampToBox () {
+      const rect = this.box()?.getBoundingClientRect()
+      if (!rect?.width || !rect?.height) return
+      const clamped = clampCameraWindow(this.geometry, (rect.width / rect.height) / (this.aspect || 1))
+      if (clamped.x !== this.geometry.x || clamped.y !== this.geometry.y || clamped.w !== this.geometry.w) {
+        this.$emit('update:geometry', clamped)
+      }
     },
     beginGesture (event, kind) {
       // One active gesture at a time — see this file's own top-of-file doc
       // comment; a fresh press simply supersedes an unfinished one.
       if (event.button !== undefined && event.button !== 0) return
+      // **A control inside the header is not a drag of the header.** The
+      // header takes pointer capture on `pointerdown`, and a captured
+      // pointer delivers its later `click` to the capturing element rather
+      // than to the button under the finger — so the maximize control never
+      // fired in a real browser, while a jsdom test that dispatches `click`
+      // on the button directly could not see it (I1 of the whole-branch
+      // review, reproduced in Chromium). Starting no gesture leaves capture
+      // where it was and the button behaves like a button.
+      if (event.target?.closest?.('button')) return
       const rect = this.box()?.getBoundingClientRect()
       if (!rect?.width || !rect?.height) return
       event.preventDefault()

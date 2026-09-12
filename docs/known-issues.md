@@ -2147,19 +2147,55 @@ wrong page restores that condition while appearing not to.
 
 **Closed on 2026-09-11** by proving the port free *before* the console is started, rather
 than asking afterwards who answered, when it is too late to tell. `assert_port_free` in
-`scripts/verify-pages.sh` binds the port with Node — which this script already depends on,
-unlike `lsof` and `ss`, neither of which is present on both platforms this runs on — and
-refuses the run with the `pgrep` line and the `vendor/verify-pages.pids` path if anything
-holds it. `wait_for_console` no longer accepts any HTTP reply either: it requires the body
-to be a Yonder console, which both the sign-in and the first-run setup page satisfy. The
-probe was checked against a free port and an occupied one and reports each correctly.
+`scripts/verify-pages.sh` asks Node — which this script already depends on, unlike `lsof`
+and `ss`, neither of which is present on both platforms this runs on — and refuses the run
+with the `pgrep` line and the `vendor/verify-pages.pids` path if anything holds it.
+`wait_for_console` no longer accepts any HTTP reply either: it requires the body to be a
+Yonder console, which both the sign-in and the first-run setup page satisfy.
 
-Verified end to end on 2026-09-11, on darwin. With the port deliberately held the gate
-refuses in under a second, before the build, naming the `pgrep` line and the pids file.
-With it free the full run reported **218 passed, 0 failed**, exit 0, no committed shape
-moved, and the `--press Night` end-to-end check still passed. The fail-fast copy of the
-check sits with the other preflight checks so a held console costs nothing rather than a
-build and a payload staging; the one at the launch is the one that has to be true.
+**The first closure's verification claim was wrong, and is corrected here (2026-09-12).**
+What that paragraph said was: *"Verified end to end on 2026-09-11, on darwin. With the
+port deliberately held the gate refuses in under a second, before the build."* What was
+actually true is that **the second half of the fix held and the first half did not.**
+
+- The probe bound `127.0.0.1:$PORT`. The console this gate starts binds `0.0.0.0`
+  (`packages/yonder-core/src/console/settings.ts`, `uiHost`). On darwin, libuv sets
+  `SO_REUSEADDR` on every TCP bind and BSD sockets then allow the narrower address, so a
+  loopback bind **succeeds** beside a wildcard listener.
+- The 2026-09-11 verification held the port with a **loopback** listener, which the probe
+  does detect. It therefore demonstrated the probe working on the one case that was never
+  the defect, and was reported as end-to-end. The defect K-57 exists for — a `HOLD=1`
+  console from an earlier run — was still undetected: on darwin that run's console would
+  have read as *free*, the new Node-RED would have failed to bind, and `wait_for_console`
+  would have accepted the stale console's sign-in page. The false green was still
+  available, on the platform the defect was filed from. On Linux CI the old probe was
+  correct, which is why nothing else caught it.
+- The rest of that paragraph stands and was not affected: the full run did report
+  **218 passed, 0 failed**, exit 0, no committed shape moved, and the `--press Night`
+  end-to-end check passed. Requiring a Yonder body in `wait_for_console` is the second
+  half of the fix and was always sound.
+
+Measured on this darwin machine on 2026-09-12, with this repository's Node, the old probe
+against a listener on each address in turn: holder on `127.0.0.1` → **in use**; holder on
+`0.0.0.0` → **free**; holder on `::` → **free**.
+
+**Re-closed on 2026-09-12** by asking two questions and requiring both to say free: bind
+the wildcard address the console itself binds, which a wildcard holder refuses; then try
+to *connect* to `127.0.0.1:$PORT`, because anything that answers there is something this
+run's capture could photograph, whatever address it bound. Only a refused connection means
+free. A connection that neither answers nor is refused is read as held — the safe answer
+for a gate whose purpose is to know whose console it is looking at.
+
+Verified on 2026-09-12 on darwin, by running the shipped `port_is_free` function itself
+against a listener on each address in turn and against nothing: **free** with no holder,
+**in use** for a holder on `0.0.0.0`, **in use** for a holder on `127.0.0.1`, **in use**
+for a holder on `::`, and **free** again once each holder exited. The full gate then ran
+to completion on a genuinely free port, which is the third reading that a free port still
+reads free — a probe that answered "in use" for everything would refuse every run.
+
+The fail-fast copy of the check sits with the other preflight checks so a held console
+costs nothing rather than a build and a payload staging; the one at the launch is the one
+that has to be true.
 
 **The fix is to make the run own the port rather than share it:** fail immediately when
 `$PORT` is already listening (naming the stale process), or bind an ephemeral port and
@@ -2560,3 +2596,49 @@ against a fixture camera (`docs/images/cockpit/`).
 then, the live preview filling the PFD, the window and control behaving as tested, stopping
 the stream showing the unavailable states, and height above ground continuing while the
 camera is full are software-verified only, not hardware-confirmed.
+
+---
+
+### K-69 · The cockpit guide cannot run to the end, so its captures are made off-path
+
+**Status:** Open · **Owner:** JJ Boyd (unassigned to a milestone; due before the next
+change that depends on a guide capture) · **Requirements:** R-FLT-10, R-UI-12 ·
+**Found:** 2026-09-12, by the whole-branch review of the camera-in-the-PFD work
+
+`npm run cockpit:guide` drives `packages/node-red-dashboard-2-yonder/cockpit/guide.mjs`
+against the production widget in the fixture harness and writes the images that become
+`docs/images/cockpit/`. Several of its checks press controls that no longer exist in
+`src/ui`:
+
+- `guide.mjs:38` presses `PFD Menu`. That accessible name appears nowhere in `src/ui`.
+- `guide.mjs:79`, `:99` and `:101` press `Display & data`. The current path is the
+  `Display menu` button, then `Map, terrain & data`.
+
+The first of these fails, so the run stops there and **no later check executes at all**,
+including the camera check this branch added.
+
+**This is not new.** Both names were already absent from `src/ui` at `ce3e449`, the commit
+this branch started from — `git grep "PFD Menu" ce3e449 -- packages/node-red-dashboard-2-yonder/src/ui`
+matches only a test file, and `Display & data` matches nothing there. The guide has been
+unable to complete since before this work began; nothing here broke it.
+
+**What it costs now.** The four camera captures committed under `docs/images/cockpit/` —
+`camera-full.png`, `camera-full-day.png`, `camera-window.png`, `camera-window-tablet.png`
+— could not be made by the guide. They were produced by running the camera check's own
+steps from a temporary harness against the same fixture server and the same browser, which
+is why their manifest rows read `source: "fixture-harness"` rather than `source: "guide"`,
+and why `docs/images/cockpit/README.md` says so. An off-path capture is still a real
+capture of the real widget, but it is not the repeatable one the guide is for: nothing
+re-runs it, and nothing notices when it goes stale.
+
+**The fix** is to bring the older checks onto the current controls — the replacement path
+is already written in the camera check itself (`Display menu` → `Map, terrain & data`) —
+and then to re-run the whole guide so every capture is guide-made again. It is deliberately
+not done in the camera branch: repairing checks for mission export, data setup and offline
+states is unrelated work, and doing it inside a branch about the flight display would mix
+two diffs that need separate reading. It is named here with an owner so it is not mistaken
+for a closed item (CLAUDE.md rule 7).
+
+**Until then**, treat any `source: "fixture-harness"` row in
+`docs/images/cockpit/manifest.json` as a capture no gate reproduces, and re-make it by hand
+when the surface it shows changes.

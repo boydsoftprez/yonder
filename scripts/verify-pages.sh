@@ -63,16 +63,46 @@ die()  { printf 'error: %s\n' "$*" >&2; exit 1; }
 command -v curl >/dev/null 2>&1 || die "curl is needed"
 command -v node >/dev/null 2>&1 || die "node is needed"
 
-# K-57. Node binds the port rather than `lsof` or `ss`, because this script
-# already depends on node and neither of those is present on both platforms
-# this runs on.
+# K-57. Node asks rather than `lsof` or `ss`, because this script already
+# depends on node and neither of those is present on both platforms this runs
+# on.
+#
+# **Two questions, both of which have to say free.** The first version asked
+# only whether `127.0.0.1:$PORT` could be bound, and that misses the console
+# this gate itself starts: it binds `uiHost 0.0.0.0`
+# (`packages/yonder-core/src/console/settings.ts`), and on darwin a loopback
+# bind succeeds beside a wildcard listener — libuv sets `SO_REUSEADDR` on
+# every TCP bind, and BSD sockets allow the narrower address. Measured on
+# darwin 25.6 with this repository's node: a holder on `127.0.0.1` read as in
+# use, a holder on `0.0.0.0` read as free, a holder on `::` read as free. So
+# the exact case K-57 exists for — a `HOLD=1` console from an earlier run —
+# passed the check it was written to fail.
+#
+# So: bind the wildcard address the console itself binds, which a wildcard
+# holder refuses; and then try to *connect* to loopback, because anything
+# answering there is something this run's capture could photograph, whatever
+# address it bound. A refused connection is the only answer that means free.
+# A connection that neither answers nor is refused is treated as held: the
+# honest reading, and the safe one for a gate whose whole purpose is to know
+# whose console it is looking at.
 port_is_free() {
     node -e '
         const net = require("net"), port = Number(process.argv[1]);
-        const probe = net.createServer();
-        probe.once("error", () => process.exit(1));
-        probe.once("listening", () => probe.close(() => process.exit(0)));
-        probe.listen(port, "127.0.0.1");
+        const answers = () => new Promise(resolve => {
+            const probe = net.connect({ port, host: "127.0.0.1" });
+            probe.setTimeout(1000);
+            const done = held => { probe.destroy(); resolve(held) };
+            probe.once("connect", () => done(true));
+            probe.once("timeout", () => done(true));
+            probe.once("error", () => done(false));
+        });
+        const bindable = () => new Promise(resolve => {
+            const probe = net.createServer();
+            probe.once("error", () => resolve(false));
+            probe.once("listening", () => probe.close(() => resolve(true)));
+            probe.listen(port, "0.0.0.0");
+        });
+        (async () => { process.exit(await bindable() && !(await answers()) ? 0 : 1) })();
     ' "$PORT"
 }
 port_in_use_advice() {

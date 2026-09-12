@@ -55,6 +55,39 @@ The renders are listed at the end.
    buttons, no badges, no notices, no thumbnail strip, no capture controls. The Camera
    page keeps all of them. The picture component gains a scene presentation that draws the
    frame alone.
+
+   **Amended 2026-09-12, by the operator, after the whole-branch review.** "No notices"
+   read literally made the scene silent about every reason except *stopped*: a browser
+   that blocked autoplay, an expired session, a 401/403/404/503 from the delivery path,
+   a decoder that stopped and is reconnecting. A picture that has never received a frame
+   is never stale, so in those cases the scene and the window showed a black rectangle
+   with no hatch, no age count and no reason, and the window had no way back to a live
+   picture. That is R-UI-20's silent absence, and it is the worse fault: this decision
+   exists to keep the flying view to one subject, not to withhold why the subject is
+   missing. So the scene shows **one line of reason when there is one, and nothing at
+   all when the picture is fine**, and the **Resume live video** control returns for the
+   autoplay-blocked case — the one reason the operator's own browser can fix, with
+   nothing sent to the device or the aircraft. The line is drawn inside the frame, at
+   its foot, not in the PFD's footer: the footer carries the background label and the
+   stale age, and a reason hidden there is a reason nobody reads. Everything else
+   decision 2 excludes stays excluded, and the *stopped* state keeps its message while
+   losing its **Start video** button, which starts the device's stream (decision 12,
+   R-CMD-04).
+
+   **The line goes in the full scene, not in the window — and the window is an open
+   question.** The window is a sixth of the scene's width: about 140 x 55 px on the
+   Flight page, with roughly 40 px of usable height. "The video service is unavailable.
+   Reconnecting automatically." is 68 px of text in that box however it is set. The page
+   gate measured exactly that and refused it as content hidden from the operator, which
+   is the right answer — truncating it kept the tail and dropped the words that say what
+   is wrong. So the sentence is drawn where it can be read whole, and the window keeps
+   the short *stopped* message and the **Resume live video** control, which both fit.
+   That leaves the window behaviour below ("the window shows the reason inside itself")
+   **unkept at the default window size**, which it also was before this change. Settling
+   it is the operator's (CLAUDE.md rule 8), and the choices are: accept a short
+   state word in the window instead of the sentence; let the window grow when it has a
+   reason, at the cost of the fixed picture shape; or leave the sentence to the full
+   picture, one tap away, which is what ships today.
 3. **The fixed blue-and-brown split goes.** Behind a camera the background container is
    the display's dark ground colour; nothing pretends to be a horizon.
 4. **The white horizon line stays drawn over the picture, on by default.** A forward
@@ -155,11 +188,19 @@ size. This keeps the control to one tap each way, which was the point.
 
 ### Unavailable and stale pictures
 
-- Camera selected but not streaming, state `full`: the existing notice *Selected camera
-  unavailable* with its *Use synthetic terrain* switch remains (F-16). The button still
-  flips to `window`.
+- **No camera configured at all** (nothing for the PFD to show, either state): the
+  existing notice *Selected camera unavailable* with its *Use synthetic terrain* switch
+  remains (F-16), and the Camera control is disabled and reads *unavailable*.
+- Camera configured but not streaming, state `full`: the picture is mounted and says so
+  itself, in its own words, on the scene — decision 2 as amended. The F-16 notice does
+  not apply, because a configured camera is not an unavailable one; the escape to terrain
+  is the Camera control, one tap, which is where the operator already looks. The button
+  still flips to `window`.
 - Camera selected but not streaming, state `window`: the window shows the reason inside
-  itself, in the picture component's own words, and nothing else.
+  itself, in the picture component's own words, and nothing else. **Not kept at the
+  default window size** — see decision 2's amendment; today the window shows the short
+  *stopped* message and the resume control, and a longer reason is read by going to
+  full.
 - Stream stalls while showing: the frame desaturates, darkens and takes the hatch, and
   the age count runs in the footer label (full) or the window header (window).
 - Reload: the state, the window's place and size and the horizon-line switch are
@@ -179,9 +220,15 @@ window's fractions apply to the larger scene.
   (R-VID-19) and the stale signals on the frame are unchanged. The component exposes the
   stale age so the host can show it. The Cockpit page and the Camera page do not use the
   scene presentation and are unaffected.
-- **Cockpit presentation state.** `cameraView` (`full` | `window`), `cameraWindow`
-  (`x`, `y`, `w` as scene fractions) and `horizonLine` (boolean) join the display
-  preferences validated by `cockpitDisplaySettings` and stored with them.
+- **Cockpit presentation state.** `background` (`terrain` | `camera` | `camera-overlay`),
+  `cameraWindow` (`x`, `y`, `w` as scene fractions) and `horizonLine` (boolean) join the
+  display preferences validated by `cockpitDisplaySettings` and stored with them.
+  `cameraView` (`full` | `window`) is **derived** from `background` and never stored
+  beside it. *Corrected 2026-09-12 after the whole-branch review:* this entry first named
+  `cameraView` as a stored value, which contradicted the Behaviour section above — and
+  two independent stored values reached exactly the third state that section forbids, as
+  the default, with the control misreporting it. The Behaviour section is what the states
+  are; this is how they are held.
 - **Top-row control.** One button in the existing header actions, next to the
   full-screen button, bound to `cameraView` and to camera availability.
 - **PFD horizon line.** An option on `PrimaryFlightDisplay` that draws the attitude

@@ -82,6 +82,95 @@ describe('YonderPicture scene presentation (R-FLT-29)', () => {
     expect(emit).not.toHaveBeenCalled()
   })
 
+  it('never renders the stream-start control in the scene, while the Camera page keeps it (C1, R-FLT-29, R-CMD-04)', async () => {
+    // `running:false` reaches `cameraRunState` through the report tier
+    // `fromPayload` falls back to, exactly as the cockpit host supplies it.
+    const stopped = { path: 'cam0', label: 'Nose', report: { path: 'cam0', running: false } }
+    const { wrapper: scene, emit } = mountScenePicture({ scene: true, props: stopped })
+    await scene.vm.$nextTick()
+    expect(scene.get('.y-pic__stopped-l').text()).toContain('Video is stopped')
+    expect(scene.find('.y-pic__start').exists()).toBe(false)
+    expect(emit).not.toHaveBeenCalled()
+
+    // The same component on the Camera page keeps it, and pressing it is
+    // exactly the stream-start path — which is what makes its presence in
+    // the flight display the defect, rather than a cosmetic one.
+    const { wrapper: page, emit: pageEmit } = mountScenePicture({ props: stopped })
+    await page.vm.$nextTick()
+    const start = page.get('.y-pic__start')
+    expect(start.text()).toContain('Start video')
+    await start.trigger('click')
+    expect(pageEmit).toHaveBeenCalledWith('widget-action', 'scene-1', expect.objectContaining({ payload: 'start' }))
+    scene.unmount(); page.unmount()
+  })
+
+  it('shows one line of reason in the scene when there is one, and nothing when the picture is fine (I6, R-UI-20)', async () => {
+    const { wrapper, emit } = mountScenePicture({ scene: true, reasonLine: true })
+    await wrapper.vm.$nextTick()
+    // A picture that has never had a frame is never stale, so with nothing
+    // wrong there is nothing to say and the scene says nothing.
+    expect(wrapper.find('.y-pic__scene-notice').exists()).toBe(false)
+    expect(wrapper.find('.y-pic__reason').exists()).toBe(false)
+    expect(wrapper.find('.y-pic__resume').exists()).toBe(false)
+
+    // A delivery failure: the reason, and only the reason.
+    wrapper.vm.reason = 'The video service is unavailable. Reconnecting automatically.'
+    await wrapper.vm.$nextTick()
+    expect(wrapper.get('.y-pic__scene-notice .y-pic__reason').text())
+      .toBe('The video service is unavailable. Reconnecting automatically.')
+    expect(wrapper.findAll('.y-pic__reason')).toHaveLength(1)
+    expect(wrapper.find('.y-pic__resume').exists()).toBe(false)
+
+    // An expired session says so in its own words, ahead of any other reason.
+    wrapper.vm.signInRequired = true
+    await wrapper.vm.$nextTick()
+    expect(wrapper.get('.y-pic__reason').text()).toContain('Your session expired')
+
+    // And the browser's own autoplay block is recoverable from here: the
+    // resume control is the operator's browser, not the aircraft.
+    wrapper.vm.signInRequired = false
+    wrapper.vm.reason = ''
+    wrapper.vm.playbackBlocked = true
+    await wrapper.vm.$nextTick()
+    expect(wrapper.find('.y-pic__reason').exists()).toBe(false)
+    expect(wrapper.get('.y-pic__resume').text()).toBe('Resume live video')
+
+    // Nothing in any of that went to the device or the aircraft.
+    expect(emit).not.toHaveBeenCalled()
+    wrapper.unmount()
+  })
+
+  it('without reasonLine — the window\'s box, too small for a sentence — keeps the resume control and drops the line', async () => {
+    // The sentence is 68px of text in the window's ~40px of usable height,
+    // which the page gate measures and refuses as hidden content. The host
+    // sets `reasonLine` only on the box that can show it whole; the window
+    // keeps the short stopped message and the button, which both fit.
+    const { wrapper, emit } = mountScenePicture({ scene: true })
+    wrapper.vm.reason = 'The video service is unavailable. Reconnecting automatically.'
+    await wrapper.vm.$nextTick()
+    expect(wrapper.find('.y-pic__reason').exists()).toBe(false)
+    expect(wrapper.find('.y-pic__scene-notice').exists()).toBe(false)
+
+    wrapper.vm.playbackBlocked = true
+    await wrapper.vm.$nextTick()
+    expect(wrapper.get('.y-pic__resume').text()).toBe('Resume live video')
+    expect(wrapper.find('.y-pic__reason').exists()).toBe(false)
+    expect(emit).not.toHaveBeenCalled()
+    wrapper.unmount()
+  })
+
+  it('keeps the scene free of everything else the notices row carries (design decision 2)', async () => {
+    const { wrapper } = mountScenePicture({ scene: true, reasonLine: true })
+    wrapper.vm.reason = 'something'
+    wrapper.vm.flashing = true
+    await wrapper.vm.$nextTick()
+    expect(wrapper.find('.y-pic__notices').exists()).toBe(false)
+    expect(wrapper.find('.y-pic__saved').exists()).toBe(false)
+    expect(wrapper.find('.y-pic__toolbar').exists()).toBe(false)
+    expect(wrapper.find('.y-pic__thumbnails').exists()).toBe(false)
+    wrapper.unmount()
+  })
+
   it('fills its parent edge to edge: the fit and frame are absolute with zero insets and no aspect ratio, the video covers, and .y-pic is a single grid row', () => {
     const { wrapper } = mountScenePicture({ scene: true })
     const root = getComputedStyle(wrapper.get('.y-pic').element)

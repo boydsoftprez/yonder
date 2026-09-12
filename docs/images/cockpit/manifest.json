@@ -136,27 +136,27 @@
     },
     {
       "file": "camera-full.png",
-      "source": "guide",
-      "sha256": "ea0dc412b5a7c8987e7808297e2f135e7ea87c14c3615444461ba022c7538b25",
-      "bytes": 232038
+      "source": "fixture-harness",
+      "sha256": "254ea35a5dd524c58ead4787289536028aaa71072084c532ff43d8e043fc13de",
+      "bytes": 233887
     },
     {
       "file": "camera-full-day.png",
-      "source": "guide",
-      "sha256": "a918459a99a227b83c8b87dfa72574b422befca0b2bc347f5096c8df9db2180c",
-      "bytes": 229877
+      "source": "fixture-harness",
+      "sha256": "b46d420e4d755bb93f4ad8178aad1da966538b30cf0a57347fc409f83c2c4c82",
+      "bytes": 233575
     },
     {
       "file": "camera-window.png",
-      "source": "guide",
-      "sha256": "fc5a5409ac961d11fe9867dcabf36ab5fc3a19e8c3f65c013cc7ebb17dfe5d64",
-      "bytes": 392754
+      "source": "fixture-harness",
+      "sha256": "3184106e738be6b89400b8bd740709951288ad62411d910191071f95decd5484",
+      "bytes": 392552
     },
     {
       "file": "camera-window-tablet.png",
-      "source": "guide",
-      "sha256": "aaff8c27d71ea28ed5dfca15a6ecc1975da1b361a8b08f404cdac55b1de3662e",
-      "bytes": 305793
+      "source": "fixture-harness",
+      "sha256": "4f3413c385178c9b7d41857e818965dcd9a2f28a0bd26e403a9681043b837368",
+      "bytes": 305792
     }
   ]
 }

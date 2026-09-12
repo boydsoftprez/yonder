@@ -3,7 +3,7 @@
 // (acceptance cases 1-3). No DOM anywhere here — see camera-view.mjs's own
 // doc comment on why `aspect` is a plain number, not a measurement.
 import { it, expect } from 'vitest'
-import { cameraWindowHome, clampCameraWindow, cameraViewSettings } from './camera-view.mjs'
+import { cameraWindowHome, clampCameraWindow, cockpitBackgroundSettings, cameraViewFor } from './camera-view.mjs'
 import { validatePfdPreferences } from './pfd-controls.mjs'
 
 it('cameraWindowHome is the approved render\'s measured geometry, with no stored height', () => {
@@ -43,28 +43,54 @@ it('clampCameraWindow returns home for null, non-numeric or malformed input', ()
   }
 })
 
-it('clampCameraWindow falls back to a harmless combined ratio for a missing or invalid aspect', () => {
-  expect(clampCameraWindow({ x: 0.2, y: 0.2, w: 0.2 })).toEqual({ x: 0.2, y: 0.2, w: 0.2 })
-  expect(clampCameraWindow({ x: 0.2, y: 0.2, w: 0.2 }, 0)).toEqual({ x: 0.2, y: 0.2, w: 0.2 })
-  expect(clampCameraWindow({ x: 0.2, y: 0.2, w: 0.2 }, -1)).toEqual({ x: 0.2, y: 0.2, w: 0.2 })
-  expect(clampCameraWindow({ x: 0.2, y: 0.2, w: 0.2 }, NaN)).toEqual({ x: 0.2, y: 0.2, w: 0.2 })
-})
-
-it('cameraViewSettings returns window only for the literal value "window", full for everything else', () => {
-  expect(cameraViewSettings('window')).toBe('window')
-  for (const input of ['full', undefined, null, '', 'Window', 'full ', 0, true]) {
-    expect(cameraViewSettings(input)).toBe('full')
+it('clampCameraWindow bounds only the horizontal extent when it is given no measured aspect (I4)', () => {
+  // No aspect means nothing has rendered yet, so there is no shape to
+  // bound `y` against and this must not guess one. It still bounds `w`
+  // and `x`, and still holds `y` in range.
+  for (const aspect of [undefined, 0, -1, NaN]) {
+    expect(clampCameraWindow({ x: 0.2, y: 0.2, w: 0.2 }, aspect)).toEqual({ x: 0.2, y: 0.2, w: 0.2 })
+    // A portrait box's real combined ratio is about a half, so y = 0.8 is
+    // legitimate there; guessing 1 used to cut it to 1 - w = 0.8... below.
+    expect(clampCameraWindow({ x: 0.1, y: 0.88, w: 0.2 }, aspect).y).toBe(0.88)
+    expect(clampCameraWindow({ x: 0.9, y: 0.5, w: 0.2 }, aspect).x).toBeCloseTo(0.8)
+    expect(clampCameraWindow({ x: 0.1, y: -2, w: 0.2 }, aspect).y).toBe(0)
+    expect(clampCameraWindow({ x: 0.1, y: 4, w: 0.2 }, aspect).y).toBe(1)
   }
 })
 
-it('validatePfdPreferences round-trips cameraView and cameraWindow, defaulting both', () => {
-  const defaults = validatePfdPreferences()
-  expect(defaults.display.cameraView).toBe('full')
-  expect(defaults.display.cameraWindow).toEqual(cameraWindowHome)
+it('clampCameraWindow applied twice with the same measured aspect changes nothing the second time (I4)', () => {
+  // The host runs a gesture's already-clamped value back through
+  // `validatePfdPreferences`; that round trip must not shrink it.
+  const once = clampCameraWindow({ x: 0.6, y: 0.9, w: 0.4 }, 0.5)
+  expect(clampCameraWindow(once, 0.5)).toEqual(once)
+  expect(clampCameraWindow(once)).toEqual(once)
+})
 
-  const stored = validatePfdPreferences({ display: { cameraView: 'window', cameraWindow: { x: 0.3, y: 0.3, w: 0.25 } } })
-  expect(stored.display.cameraView).toBe('window')
+it('cockpitBackgroundSettings keeps the three offered values and treats everything else as terrain', () => {
+  for (const input of ['camera', 'camera-overlay', 'terrain']) {
+    expect(cockpitBackgroundSettings(input)).toBe(input)
+  }
+  for (const input of [undefined, null, '', 'Camera', 'window', 'full', 0, true, {}]) {
+    expect(cockpitBackgroundSettings(input)).toBe('terrain')
+  }
+})
+
+it('cameraViewFor makes the view a function of the background, with no third state (C2)', () => {
+  expect(cameraViewFor('terrain')).toBe('window')
+  expect(cameraViewFor('camera')).toBe('full')
+  expect(cameraViewFor('camera-overlay')).toBe('full')
+})
+
+it('validatePfdPreferences round-trips the background and the window geometry, defaulting both', () => {
+  const defaults = validatePfdPreferences()
+  expect(defaults.display.background).toBe('terrain')
+  expect(defaults.display.cameraWindow).toEqual(cameraWindowHome)
+  expect('cameraView' in defaults.display).toBe(false) // one stored value, not two
+
+  const stored = validatePfdPreferences({ display: { background: 'camera', cameraWindow: { x: 0.3, y: 0.3, w: 0.25 } } })
+  expect(stored.display.background).toBe('camera')
   expect(stored.display.cameraWindow).toEqual({ x: 0.3, y: 0.3, w: 0.25 })
+  expect(validatePfdPreferences({ display: { background: 'camera-overlay' } }).display.background).toBe('camera-overlay')
 })
 
 it('validatePfdPreferences clamps a stored geometry and replaces an impossible one with home', () => {
@@ -76,6 +102,6 @@ it('validatePfdPreferences clamps a stored geometry and replaces an impossible o
     expect(validatePfdPreferences({ display: { cameraWindow } }).display.cameraWindow).toEqual(cameraWindowHome)
   }
 
-  expect(validatePfdPreferences({ display: { cameraView: 'nonsense' } }).display.cameraView).toBe('full')
-  expect(validatePfdPreferences({ display: { cameraView: 42 } }).display.cameraView).toBe('full')
+  expect(validatePfdPreferences({ display: { background: 'nonsense' } }).display.background).toBe('terrain')
+  expect(validatePfdPreferences({ display: { background: 42 } }).display.background).toBe('terrain')
 })

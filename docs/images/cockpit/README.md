@@ -23,6 +23,27 @@ configurable production instruments and layouts using demonstration readings:
 | `camera-window.png` | The camera's other form: a small window at its top-left home, synthetic terrain filling the scene behind it |
 | `camera-window-tablet.png` | The camera window at tablet size (768×1024) |
 
+The four `camera-*.png` images were **not** made by `npm run cockpit:guide`, which cannot
+run to the end ([K-69](../../known-issues.md#k-69)): checks earlier in that script drive
+controls that no longer exist, and the run stops before the camera check is reached. They
+were produced by running the camera check's own steps from a temporary harness against the
+same fixture server, in the same Chromium, at the same viewport sizes — a real capture of
+the real widget, but not one the guide reproduces. Their manifest rows say
+`source: "fixture-harness"` for that reason. Re-make them by hand when the surfaces they
+show change, until K-69 is fixed and the guide makes them again.
+
+The fixture serves no video, so the picture's own delivery path reports that it cannot get
+a preview. The line at the foot of `camera-full.png` and `camera-full-day.png` is the
+picture saying so in its own words — the scene's one line of reason (R-UI-20). With a
+stream behind it that line is absent.
+
+The window in `camera-window.png` and `camera-window-tablet.png` is empty for the same
+reason and carries no line: at a sixth of the scene's width it cannot show a sentence
+without hiding part of it, so the sentence is drawn only where it can be read whole. What
+those two images illustrate is the window itself — its home, its header with the maximize
+control, its corner grip and the scene behind it. Whether the window should say something
+shorter is an open question on the design's decision 2.
+
 These examples demonstrate local display configuration. A selected source is not
 proof that its sensor exists, and example display bands are not aircraft limits.
 The guide distinguishes the header's device **Systems ›** link from the MFD's
