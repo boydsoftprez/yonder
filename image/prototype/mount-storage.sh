@@ -130,6 +130,10 @@ else
     mount -o remount,ro "$root"
     ram_copy etc 32m 755
 fi
+# The initramfs runs before systemd establishes the normal volatile /run.
+# Mount it here so the storage-mode handoff is writable even with a protected
+# root and survives switch_root for the administrator service to observe.
+ram_copy run 8m 755
 for mapping in 'config etc/yonder' 'ssh etc/ssh' 'app var/lib/yonder' \
         'networkmanager var/lib/NetworkManager' 'zerotier var/lib/zerotier-one' \
         'systemd var/lib/systemd'; do
