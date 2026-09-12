@@ -13,4 +13,7 @@ status=$?
 set -e
 [[ $status == 1 ]]
 grep -Fxq "Yonder initramfs hook: required tool 'sgdisk' is missing." "$fixture/error"
+directory_line=$(grep -nF 'install -d -m 0755 /etc/systemd/journald.conf.d' image/prototype/install.sh | cut -d: -f1)
+write_line=$(grep -nF 'cat >/etc/systemd/journald.conf.d/70-yonder-storage-prototype.conf' image/prototype/install.sh | cut -d: -f1)
+[[ -n $directory_line && -n $write_line && $directory_line -lt $write_line ]]
 printf '%s\n' 'PASS: initramfs hook names a missing required full tool before archive generation.'

@@ -102,6 +102,7 @@ for unit in apt-daily.service apt-daily.timer apt-daily-upgrade.service apt-dail
 done
 # RAM-only swap is left off for the first 2 GiB ZERO3W experiment. Pi memory
 # qualification is a separate gate; no SD-backed swap file is created.
+install -d -m 0755 /etc/systemd/journald.conf.d
 cat >/etc/systemd/journald.conf.d/70-yonder-storage-prototype.conf <<'EOF'
 [Journal]
 Storage=persistent
@@ -112,6 +113,7 @@ RuntimeMaxUse=8M
 SyncIntervalSec=10s
 MaxLevelStore=info
 EOF
+chmod 0644 /etc/systemd/journald.conf.d/70-yonder-storage-prototype.conf
 if [ "$install_mode" = prototype ]; then
     sed -i 's/^writable_root=true$/writable_root=false/;s/^protected_storage=false$/protected_storage=prototype/' /etc/yonder/bench-image
     printf '%s\n' 'owner_recovery_implemented=false' >>/etc/yonder/bench-image
