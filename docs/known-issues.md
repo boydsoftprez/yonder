@@ -2487,3 +2487,31 @@ The reusable [`rockchip-rtsp-restarts.py`](../scripts/spikes/rockchip-rtsp-resta
 runs the actual pipeline argv, checks concurrent RTSP delivery and can enforce measured
 frame rates. Hardware evidence and remaining acceptance work are recorded in
 [`rockchip-video-shipped.md`](hardware/rockchip-video-shipped.md).
+
+### K-68 · The PFD's camera background is the Camera page's picture box, not the scene — OPEN
+
+**Status:** Open · **Requirements:** R-FLT-09, R-FLT-01, R-FLT-29 · **Found:** 2026-09-11, by the
+operator on a deployed console with a streaming camera
+
+Choosing **Camera** as the flight display's background mounts the Camera page's picture
+component whole into the PFD's background slot. The picture keeps its own shape inside a
+nearly square scene, so it appears as a bordered box in the middle of the display; its
+toolbar, preview-mode buttons, badges and notices render inside the attitude area under the
+pitch ladder; and around the box the background container paints a fixed blue-and-brown
+split that reads as a horizon and never moves, while the real attitude horizon is switched
+off as soon as a camera is chosen. The operator's description: the video inset shows on top
+of the horizon indicator.
+
+The third background, **Camera + registered terrain**, can never become ready: the daemon
+reports every camera with no calibration and no frame timing, so the setting only ever shows
+an unavailable notice. That is by design under R-FLT-09, but nothing told the operator that
+the option was a seam awaiting board work.
+
+Both were reproduced in the fixture harness with a synthetic frame
+(`docs/console/design/instrument-library/flight.camera.today.night.png`). The camera
+background was never captured with a picture in it by any gate or guide; the only test on
+this path exercises the camera-unavailable fallback (F-16).
+
+**Design:** [the camera in the flight display](superpowers/specs/2026-09-11-flight-camera-in-pfd-design.md).
+Closes when the camera fills the scene as that design specifies and a person has seen it on
+the Radxa with the SeekerHD streaming.
