@@ -35,6 +35,7 @@ jobs:
           node-version: "24"
           cache: npm
       - run: npm ci
+      - run: node --test image/release/workflow.test.mjs
       - run: npm run version:check
       - run: npm run lint
       # Several jobs share each host. Bound test workers so parallel runs

@@ -8,7 +8,8 @@ cd "$repo"
 
 node --test image/build.test.mjs image/build-cancellation.test.mjs \
     image/bench/build.test.mjs \
-    image/lib/*.test.mjs image/release/*.test.mjs
+    image/lib/*.test.mjs image/release/draft.test.mjs \
+    image/release/input-bundles.test.mjs
 python3 -m unittest image/test_inspect_base.py
 bash image/capture-inputs.test.sh
 bash image/inputs/application-bundle-test.sh

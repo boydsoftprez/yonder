@@ -48,7 +48,9 @@ for index in {0..31}; do
     [[ -e /dev/loop$index ]] || mknod "/dev/loop$index" b 7 "$index"
 done
 boot_loop=$(losetup --find --show --offset $((2048 * 512)) --sizelimit $((131072 * 512)) "$disk")
-root_loop=$(losetup --find --show --offset $((133120 * 512)) --sizelimit $((260096 * 512)) "$disk")
+root_loop=$(losetup --find --show --offset $((133120 * 512)) --sizelimit $((391168 * 512)) "$disk")
+boot_loop_diskseq=$(<"/sys/class/block/${boot_loop##*/}/diskseq")
+root_loop_diskseq=$(<"/sys/class/block/${root_loop##*/}/diskseq")
 unmount_layout_path() {
     local path=$1 attempt
     for attempt in {1..20}; do
@@ -86,13 +88,13 @@ sync
     sleep 0.2
 ) &
 layout_holder=$!
-cleanup_layout
+unmount_layout_path /mnt/layout/boot
+unmount_layout_path /mnt/layout/root
 wait "$layout_holder"
 if mountpoint -q /mnt/layout/boot || mountpoint -q /mnt/layout/root; then
     printf '%s\n' 'FAIL: Pi layout cleanup accepted a busy mount and left it behind' >&2
     exit 1
 fi
-trap - EXIT
 boot_hash=$(dd if="$disk" bs=512 skip=2048 count=131072 status=none | sha256sum | cut -d' ' -f1)
 
 /tmp/yonder-pi/layout.sh "$disk" 268435456 0x1234abcd \
@@ -109,9 +111,12 @@ for item in p: print(item["start"], item["size"], item["type"])
 [[ ${partition_facts[1]} == '133120 391168 83' ]]
 [[ $(dd if="$disk" bs=512 skip=2048 count=131072 status=none | sha256sum | cut -d' ' -f1) == "$boot_hash" ]]
 
-boot_loop=$(losetup --find --show --offset $((2048 * 512)) --sizelimit $((131072 * 512)) "$disk")
-root_loop=$(losetup --find --show --offset $((133120 * 512)) --sizelimit $((391168 * 512)) "$disk")
-trap cleanup_layout EXIT
+if [[ $(<"/sys/class/block/${boot_loop##*/}/diskseq") != "$boot_loop_diskseq" \
+    || $(<"/sys/class/block/${root_loop##*/}/diskseq") != "$root_loop_diskseq" ]]; then
+    printf '%s\n' 'FAIL: Pi layout test recycled lazy-detached loop devices between phases' >&2
+    exit 1
+fi
+losetup -c "$root_loop"
 e2fsck -fy "$root_loop" >/dev/null 2>&1
 resize2fs "$root_loop" >/dev/null 2>&1
 mount "$boot_loop" /mnt/layout/boot
