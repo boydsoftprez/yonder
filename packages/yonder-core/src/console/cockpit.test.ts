@@ -171,3 +171,23 @@ it("uses the real console session and rejects a revoked cookie", async () => {
   expect((await fetch(url, request)).status).toBe(401);
   expect(calls).toHaveLength(1);
 });
+
+describe('official terrain authenticated proxy', () => {
+  it('protects all terrain operations and replaces caller-supplied session provenance', async () => {
+    const denied = await harness(null);
+    expect((await fetch(denied.url + '/cockpit/api/terrain-service')).status).toBe(401);
+    for (const action of ['preview','prepare','cancel','pin','remove','refresh-controller','samples','policy/apply','policy/confirm','policy/revert']) {
+      expect((await fetch(denied.url + '/cockpit/api/terrain-service/' + action, post({}))).status).toBe(401);
+    }
+    expect((await fetch(denied.url + '/cockpit/api/terrain-service/policy')).status).toBe(401);
+    expect(denied.calls).toHaveLength(0);
+    const admitted = await harness();
+    const request = post({sessionId: 'forged', previewId: 'one'});
+    expect((await fetch(admitted.url + '/cockpit/api/terrain-service/prepare', {
+      ...request, headers: {...request.headers, origin: 'https://foreign.example'},
+    })).status).toBe(403);
+    expect(admitted.calls).toHaveLength(0);
+    expect((await fetch(admitted.url + '/cockpit/api/terrain-service/prepare', request)).status).toBe(202);
+    expect(admitted.calls[0].body).toMatchObject({sessionId: 'server-session', previewId: 'one'});
+  });
+});

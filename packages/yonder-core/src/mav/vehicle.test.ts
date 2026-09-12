@@ -29,6 +29,27 @@ const sample = (): MissionItem[] => [
   { seq: 1, command: 16, frame: 3, params: [0, 0, 0, null], x: 35.1234567, y: -83.1234567, z: 100, current: false, autocontinue: true },
 ];
 
+describe('lightweight aircraft context (R-FLT-28)',()=>{
+  it('reports fresh identity and transaction admission without exposing mutable identity',()=>{
+    const r=rig();
+    expect(r.service.context()).toEqual({identity:null,connected:false,busy:false});
+    r.heartbeat();
+    const first=r.service.context();
+    expect(first).toMatchObject({identity:{system:1,component:1},connected:true,busy:false});
+    first.identity!.system=99;
+    expect(r.service.context().identity!.system).toBe(1);
+    expect(r.request({kind:'mission-download'}).accepted).toBe(true);
+    expect(r.service.context().busy).toBe(true);
+    r.clock.advance(3001);
+    expect(r.service.context()).toMatchObject({connected:false,busy:false});
+    r.heartbeat();
+    expect(r.service.context()).toMatchObject({connected:true,busy:false});
+    expect(r.service.context().identity!.generation).not.toBe(first.identity!.generation);
+    r.service.close();
+    expect(r.service.context()).toMatchObject({connected:false,busy:false});
+  });
+});
+
 describe('explicit controller home',()=>{
  const home={lat:35.9612345,lon:-83.3654321,alt:333.25};
  const homeMessage=(value=home)=>Object.assign(new common.HomePosition(),{latitude:Math.round(value.lat*1e7),longitude:Math.round(value.lon*1e7),altitude:Math.round(value.alt*1000)});

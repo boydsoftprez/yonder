@@ -13,6 +13,13 @@ describe('persistent flight controls',()=>{
  it('shows firmware reason for unavailable guided commands',async()=>{const w=controls();await w.setProps({snapshot:{...snapshot,capabilities:{...snapshot.capabilities,flightControl:[{kind:'heading',available:false,reason:'Firmware version unsupported'}]}}});await w.get('[aria-label="Heading"]').trigger('click');expect(w.text()).toContain('Firmware version unsupported');expect(w.get('[type="submit"]').attributes('disabled')).toBeDefined();w.unmount()});
 });
 it('changes mission action in the local draft and exposes signed loiter controls',async()=>{const item={...createMissionItem(16,{lat:35,lon:-84,alt:120,frame:6}),seq:1,params:[12,30,40,50]};const w=mount(MissionTouch,{props:{mission:{items:[item]},selection:{seq:1},sitl:{}}});await w.get('[aria-label="Change mission action"]').trigger('click');await w.get('[aria-label="Change to Loiter Unlim"]').trigger('click');expect(w.get('[aria-label="Loiter radius metres"]').exists()).toBe(true);expect(w.text()).not.toContain('Dir 1=CW');await w.get('[aria-label="Loiter radius metres"]').setValue('250');await w.get('[aria-label="Loiter direction"]').setValue('ccw');expect(w.emitted('command')).toBeUndefined();await w.get('form').trigger('submit');expect(w.emitted('edit')?.[0]?.[0]).toMatchObject({kind:'replace',seq:1,item:{seq:1,command:17,frame:6,lat:35,lon:-84,alt:120,params:[0,0,-250,0]}});w.unmount()});
+it('refuses an immediate aircraft target for a terrain-relative mission item',()=>{
+ const item={...createMissionItem(16,{lat:35,lon:-84,alt:120,frame:10}),seq:1};
+ const w=mount(MissionTouch,{props:{mission:{items:[item]},selection:{seq:1},sitl:{connected:true}}});
+ expect(w.get('button.mission-execute').attributes('disabled')).toBeDefined();
+ expect(w.text()).toContain('Fly-to requires a fixed geographic position and an MSL or home-relative altitude.');
+ w.unmount();
+});
 it('requires reopening an editor after the aircraft changes',async()=>{const w=controls();await w.get('[aria-label="Heading"]').trigger('click');await w.setProps({snapshot:{...snapshot,identity:{generation:'another-aircraft'}}});expect(w.text()).toContain('aircraft changed');await w.get('form').trigger('submit');expect(w.emitted('request')).toBeUndefined();w.unmount()});
 it('defaults altitude to the tested maximum-rate request',async()=>{const w=controls();await w.get('[aria-label="Altitude / Speed"]').trigger('click');expect(w.get('[aria-label="Requested vertical rate"]').element.value).toBe('0');w.unmount()});
 it('requires an explicit MSL altitude for a changed Set Home action',async()=>{

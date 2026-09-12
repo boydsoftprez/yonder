@@ -8,6 +8,18 @@ export interface CockpitProxyOptions {
 }
 const MAX_BODY = 512 * 1024;
 const routes: Record<string, { method: string; path: string }> = {
+  "/cockpit/api/terrain-service/policy": {method:"GET",path:"/cockpit/terrain-service/policy"},
+  "/cockpit/api/terrain-service/policy/apply": {method:"POST",path:"/cockpit/terrain-service/policy/apply"},
+  "/cockpit/api/terrain-service/policy/confirm": {method:"POST",path:"/cockpit/terrain-service/policy/confirm"},
+  "/cockpit/api/terrain-service/policy/revert": {method:"POST",path:"/cockpit/terrain-service/policy/revert"},
+  "/cockpit/api/terrain-service": {method: "GET", path: "/cockpit/terrain-service"},
+  "/cockpit/api/terrain-service/preview": {method: "POST", path: "/cockpit/terrain-service/preview"},
+  "/cockpit/api/terrain-service/prepare": {method: "POST", path: "/cockpit/terrain-service/prepare"},
+  "/cockpit/api/terrain-service/cancel": {method: "POST", path: "/cockpit/terrain-service/cancel"},
+  "/cockpit/api/terrain-service/pin": {method: "POST", path: "/cockpit/terrain-service/pin"},
+  "/cockpit/api/terrain-service/remove": {method: "POST", path: "/cockpit/terrain-service/remove"},
+  "/cockpit/api/terrain-service/refresh-controller": {method: "POST", path: "/cockpit/terrain-service/refresh-controller"},
+  "/cockpit/api/terrain-service/samples": {method: "POST", path: "/cockpit/terrain-service/samples"},
   "/cockpit/api/flight": { method: "GET", path: "/cockpit/flight" },
   "/cockpit/api/instruments": { method: "GET", path: "/cockpit/instruments" },
   "/cockpit/api/details": { method: "GET", path: "/cockpit/details" },

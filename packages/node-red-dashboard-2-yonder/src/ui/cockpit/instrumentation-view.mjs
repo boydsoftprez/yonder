@@ -52,13 +52,13 @@ export function navigationItems(snapshot={},guidance={},terrain={},options={},el
  const distanceUnit=['nm','mi','km'].includes(options.distanceUnit)?options.distanceUnit:'nm',factor={nm:1/1852,mi:1/1609.344,km:1/1000}[distanceUnit],du=distanceUnit.toUpperCase();
  const nav=online&&guidance.valid===true,seq=nav?(guidance.targetName?.replace(/^WP(\d+)$/,(_,n)=>'WP'+n.padStart(2,'0')))||(guidance.seq!==null&&guidance.seq!==undefined?`WP${String(guidance.seq).padStart(2,'0')}`:null):null;
  const ete=nav&&finite(guidance.eteSeconds)&&guidance.eteSeconds>=0?guidance.eteSeconds:null;
- const agl=online&&t.ready&&terrain.state==='ready'&&finite(terrain.estimatedAglM)?toDisplay(terrain.estimatedAglM,u.altitudeUnit):null;
+ const official=terrain.officialTerrain,agl=online&&t.ready&&official?.available===true&&finite(official.estimatedAglM)?toDisplay(official.estimatedAglM,u.altitudeUnit):null;
  const remaining=remainingPlanDistance(snapshot,guidance),trail=snapshot.ownTrail,recorded=online&&finite(trail?.tail?.[4])?trail.tail[4]:null;
  const output=[
   item('nav.activeWaypoint','Waypoint',seq,'',{kind:'status',shortLabel:'WPT',source:'Reported active mission / target',quality:'reported',reason:nav?'':guidance.reason||'Current guidance unavailable'}),
   item('nav.distance','Waypoint distance',nav&&finite(guidance.distanceM)?guidance.distanceM*factor:null,du,{shortLabel:'DIST',source:guidance.guidanceSource||'Position and active target'}),
   item('nav.ete','Waypoint ETE',ete,'s',{shortLabel:'ETE',kind:'timer',displayValue:formatDuration(ete),reason:ete===null?'Current progress unavailable':'Estimate from present motion; not turn anticipation or autopilot intent'}),
-  item('nav.agl','Estimated terrain AGL',agl,unitLabels[u.altitudeUnit],{shortLabel:'AGL',reason:agl===null?'Fresh compatible terrain and altitude required':'Estimated clearance over sampled terrain'}),
+  item('nav.agl','Estimated terrain AGL',agl,unitLabels[u.altitudeUnit],{shortLabel:'AGL',source:agl===null?'Official terrain service':`${official.provider} · ${official.datum} · ${official.spacingM} m`,reason:agl===null?(official?.reason||'Fresh official terrain and GLOBAL_POSITION_INT MSL altitude required'):'Estimated from authenticated official MSL terrain at the aircraft coordinate'}),
   item('nav.groundspeed','Ground speed',online&&finite(t.groundspeedKt)?toDisplay(t.groundspeedKt*1852/3600,u.speedUnit):null,unitLabels[u.speedUnit],{shortLabel:'GS',source:'VFR_HUD',quality:'reported'}),
   item('nav.desiredTrack','Desired track',nav&&finite(guidance.desiredTrackDeg)?guidance.desiredTrackDeg:null,'°T',{shortLabel:'DTK',kind:'bearing',source:'Verified active leg geometry'}),
   item('nav.crossTrack','Lateral deviation',nav&&finite(guidance.crossTrackM)?toDisplay(guidance.crossTrackM,u.altitudeUnit):null,unitLabels[u.altitudeUnit],{shortLabel:'XTK',source:'NAV_CONTROLLER_OUTPUT',quality:'reported'}),

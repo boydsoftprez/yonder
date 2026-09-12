@@ -1,5 +1,6 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 import { z } from "zod";
+import { TerrainPolicySchema } from "../terrain/official/types.js";
 import {
   RTSP_PORT, SRT_PORT, WEBRTC_LOCAL_UDP_PORT, WEBRTC_PORT,
 } from "../media/ports.js";
@@ -823,6 +824,7 @@ export const ConfigSchema = z.object({
   apply: Apply.default({}),
   system: System.default({}),
   storage: Storage.default({}),
+  terrain: TerrainPolicySchema.default({}),
   remote: Remote.default({}),
   cameras: z.array(Camera).max(8).default([]),
   mavlink: Mavlink.default({}),

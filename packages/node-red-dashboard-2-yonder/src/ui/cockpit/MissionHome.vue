@@ -15,7 +15,7 @@
     </div>
     <div class="mission-action-grid">
      <button type="button" :disabled="loading" @click="$emit('pick',editing())">Choose home on map</button>
-     <button type="button" :disabled="loading||!terrainEnabled" @click="terrainElevation">Use terrain elevation<small>Selected prepared EGM96 source · review estimate</small></button>
+     <button type="button" :disabled="loading||!terrainEnabled" @click="terrainElevation">Use official terrain elevation<small>Prepared ArduPilot MSL source · review estimate</small></button>
     </div>
     <p v-if="note" class="mission-touch-note" role="status">{{note}}</p>
     <p v-if="error||externalError" class="mission-touch-error" role="alert">{{error||externalError}}</p>
@@ -42,7 +42,7 @@ import {unitText} from './flight-units.mjs';
 import {planningHome,homeDifference} from './mission-home.mjs';
 import {operationPresentation} from './operation-presentation.mjs';
 import {loadMissionTerrain} from './mission-terrain.mjs';
-const props=defineProps({home:Object,controllerHome:Object,initial:Object,options:Object,canSet:Boolean,busy:Boolean,operation:Object,unavailableReason:String,externalError:String,provider:Object,terrainEnabled:Boolean});
+const props=defineProps({home:Object,controllerHome:Object,initial:Object,options:Object,canSet:Boolean,busy:Boolean,operation:Object,unavailableReason:String,externalError:String,officialClient:Object,terrainEnabled:Boolean});
 const emit=defineEmits(['close','save','pick','review']);
 const initial=props.initial||props.home||{};
 const form=reactive({lat:initial.lat??'',lon:initial.lon??'',alt:initial.alt??''});
@@ -56,11 +56,11 @@ function review(){try{error.value='';emit('review',planningHome(form),editing())
 async function terrainElevation(){
  try{
   const point=planningHome({...form,alt:0});loading.value=true;error.value='';note.value='Reading the selected terrain source…';controller=new AbortController();
-  const report=await loadMissionTerrain({route:{points:[{...point,seq:0,frame:0}],legs:[],totalM:0,limitations:[]},home:null,datum:'EGM96',provider:props.provider,signal:controller.signal});
+  const report=await loadMissionTerrain({route:{points:[{...point,seq:0,frame:0}],legs:[],totalM:0,limitations:[]},home:null,client:props.officialClient,signal:controller.signal});
   if(controller.signal.aborted)return;
   const elevation=report.waypoints?.[0]?.groundM;
   if(!Number.isFinite(elevation))throw new Error(report.reason||'No matching terrain elevation at this location. Enter a known MSL elevation.');
-  form.alt=elevation;note.value=`Estimated ground elevation · ${report.manifest.title} · EGM96. Review before saving or sending.`;
+  form.alt=elevation;note.value=`Estimated ground elevation · ${report.source.provider} · ${report.source.datum}. ${report.source.datumEvidence} Review before saving or sending.`;
  }catch(e){if(e.name!=='AbortError'){error.value=e.message;note.value=''}}finally{loading.value=false}
 }
 function keyboard(event){

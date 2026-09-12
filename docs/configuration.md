@@ -140,6 +140,11 @@ system:
 storage:
   reserve_mb: 1024              # recording stops before it takes the card below this; 0 means none
 
+terrain:
+  enabled: false                # official controller terrain replies are operator-enabled
+  provider: ardupilot-srtm1     # fixed official ArduPilot ALOS-derived SRTM1 source
+  quotaMiB: 2048                # persistent terrain limit, 128-32768 MiB
+
 mavlink:
   serial:
     device: auto                # auto | /dev/ttyAMA0 (Pi) | /dev/ttyS2 (Rockchip, Armbian) | /dev/ttyACM0 (USB)
@@ -654,6 +659,39 @@ the same floor, and whichever reaches it first ends. It defaults to 1024 MB — 
 the writes a running board makes that nothing else bounds, the apply journal among them,
 since a card with no space left is a device that cannot roll back. `0` means no reserve, for
 an operator who means to fill the card.
+
+**`terrain.enabled`** defaults to `false`. Enabling it authorizes Yonder to answer valid
+ArduPilot terrain requests from prepared storage; it does not download an area, change an
+aircraft parameter, configure terrain following or send any other flight command. The
+cockpit applies this terrain-only policy through the same revision check and, when required,
+confirmation/revert workflow as the full configuration. Opening the panel and its periodic
+status reads send nothing to the aircraft.
+
+**`terrain.provider`** is fixed at `ardupilot-srtm1`, the official ArduPilot
+ALOS-derived SRTM1 source used for the 30 m controller grid. No other value is accepted.
+This setting does not select the cockpit's detailed terrain renderer: its surveyed
+ground/surface packs and optional display sources have separate coverage, resolution,
+provenance and browser storage.
+
+**`terrain.quotaMiB`** is the persistent official-terrain budget, from 128 to 32768 MiB,
+and defaults to 2048 MiB. Preparation admits source objects, staging and metadata only when
+both this quota and the device-wide `storage.reserve_mb` floor can be preserved. The shared
+reserve is not reduced for terrain and is not converted into terrain capacity. Completed
+objects are immutable; partial staging is not served. Source nodata remains missing data,
+so a prepared area can be partial and an affected controller request is withheld rather
+than filled with zero. Each retained degree tile uses 25,934,402 bytes (about 24.7 MiB);
+areas share identical objects. Preparation also budgets up to 64 MiB of compressed staging
+for the active tile, its raw output, and bounded metadata. The ZIP is removed after
+verification. A 1 MiB application headroom file supports atomic metadata replacement
+without spending the shared reserve.
+
+Use **Refresh controller terrain** explicitly to read controller capability, terrain
+parameters and rally points. It is an authenticated, bounded read-only transaction and
+does not write those values. Preview and Prepare are also explicit and require a freshly observed, disarmed selected
+controller. Preparation refuses writes when persistent disk space or quota is insufficient.
+The current Radxa bench state partition is smaller than the default shared reserve, so it
+must refuse preparation. Suitable persistent storage and hardware acceptance are still
+required; changing either storage number does not by itself establish flight readiness.
 
 **`system.hostname`** is the device's name, and since M1b-2 it is applied rather than merely
 recorded: the daemon sets the system hostname from it, and `avahi-daemon` publishes it over

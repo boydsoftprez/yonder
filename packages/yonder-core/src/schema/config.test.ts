@@ -831,3 +831,13 @@ describe("cameras[].codec", () => {
     if (!bad.success) expect(bad.error.issues[0].path).toEqual(["cameras", 0, "codec"]);
   });
 });
+
+describe('official terrain policy (R-FLT-27/28)', () => {
+  it('defaults disabled for earlier configurations and bounds the fixed-provider quota', () => {
+    const {terrain: _, ...old} = DEFAULT_CONFIG;
+    expect(ConfigSchema.parse(old).terrain).toEqual({enabled:false,provider:'ardupilot-srtm1',quotaMiB:2048});
+    for (const terrain of [{enabled:true,provider:'other',quotaMiB:2048},{enabled:true,quotaMiB:127},{enabled:true,quotaMiB:32769},{enabled:true,quotaMiB:2048,path:'/tmp'}]) {
+      expect(ConfigSchema.safeParse({...old,terrain}).success).toBe(false);
+    }
+  });
+});
