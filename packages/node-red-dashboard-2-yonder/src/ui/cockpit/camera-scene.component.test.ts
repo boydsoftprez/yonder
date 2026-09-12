@@ -159,6 +159,70 @@ describe('YonderPicture scene presentation (R-FLT-29)', () => {
     wrapper.unmount()
   })
 
+  it('marks the window unavailable the way the cockpit marks an instrument with no reading (R-UI-20, 2026-09-12 ruling)', async () => {
+    // A delivery failure, no frame ever received: the cross and one line.
+    const { wrapper, emit } = mountScenePicture({ scene: true, unavailableMark: true })
+    await wrapper.vm.$nextTick()
+    expect(wrapper.find('.y-pic__unavailable').exists()).toBe(false) // nothing wrong yet
+
+    wrapper.vm.reason = 'The video service is unavailable. Reconnecting automatically.'
+    await wrapper.vm.$nextTick()
+    expect(wrapper.find('.y-pic__unavailable').exists()).toBe(true)
+    expect(wrapper.get('.y-pic__missing-l').text()).toBe('DATA UNAVAILABLE')
+    // The same two strokes and the same colour the gauges use.
+    const cross = wrapper.get('.y-pic__missing path')
+    expect(cross.attributes('d')).toBe('M0 0L100 100M100 0L0 100')
+    // #ef5a53 — InstrumentGauge.vue's own `.missing-cross`, verbatim.
+    expect(getComputedStyle(cross.element).stroke).toBe('rgb(239, 90, 83)')
+    // And no sentence: this box could not show one whole.
+    expect(wrapper.find('.y-pic__reason').exists()).toBe(false)
+
+    // The operator-stopped state: the cross too, with its own shorter truth,
+    // and the old message steps aside so there is one label and not two.
+    wrapper.vm.reason = ''
+    await wrapper.setProps({ props: { path: 'cam0', report: { path: 'cam0', running: false } } })
+    await wrapper.vm.$nextTick()
+    expect(wrapper.find('.y-pic__unavailable').exists()).toBe(true)
+    expect(wrapper.get('.y-pic__missing-l').text()).toBe('VIDEO STOPPED')
+    expect(wrapper.find('.y-pic__stopped').exists()).toBe(false)
+    expect(wrapper.find('.y-pic__start').exists()).toBe(false)
+
+    expect(emit).not.toHaveBeenCalled()
+    wrapper.unmount()
+  })
+
+  it('never draws the cross over a picture that has had media, however stale (R-VID-03)', async () => {
+    const { wrapper } = mountScenePicture({ scene: true, unavailableMark: true })
+    // `frameNow` is the performance clock `staleFor` measures against.
+    wrapper.vm.lastFrameAt = 1000
+    wrapper.vm.frameNow = 121000
+    wrapper.vm.reason = 'The video service is unavailable. Reconnecting automatically.'
+    await wrapper.vm.$nextTick()
+    // A held frame is the one thing still worth having: it desaturates,
+    // darkens and hatches instead, and its age goes in the window header.
+    expect(wrapper.find('.y-pic__unavailable').exists()).toBe(false)
+    expect(wrapper.find('.y-pic__hatch').exists()).toBe(true)
+    wrapper.unmount()
+  })
+
+  it('leaves the autoplay-blocked case to its Resume control, with no cross over it', async () => {
+    const { wrapper } = mountScenePicture({ scene: true, unavailableMark: true })
+    wrapper.vm.playbackBlocked = true
+    await wrapper.vm.$nextTick()
+    expect(wrapper.get('.y-pic__resume').text()).toBe('Resume live video')
+    expect(wrapper.find('.y-pic__unavailable').exists()).toBe(false)
+    wrapper.unmount()
+  })
+
+  it('draws no cross in the full scene, which shows the reason instead (the ruling is the window only)', async () => {
+    const { wrapper } = mountScenePicture({ scene: true, reasonLine: true })
+    wrapper.vm.reason = 'The video service is unavailable. Reconnecting automatically.'
+    await wrapper.vm.$nextTick()
+    expect(wrapper.find('.y-pic__unavailable').exists()).toBe(false)
+    expect(wrapper.get('.y-pic__reason').text()).toBe('The video service is unavailable. Reconnecting automatically.')
+    wrapper.unmount()
+  })
+
   it('keeps the scene free of everything else the notices row carries (design decision 2)', async () => {
     const { wrapper } = mountScenePicture({ scene: true, reasonLine: true })
     wrapper.vm.reason = 'something'

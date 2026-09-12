@@ -37,12 +37,12 @@ a preview. The line at the foot of `camera-full.png` and `camera-full-day.png` i
 picture saying so in its own words — the scene's one line of reason (R-UI-20). With a
 stream behind it that line is absent.
 
-The window in `camera-window.png` and `camera-window-tablet.png` is empty for the same
-reason and carries no line: at a sixth of the scene's width it cannot show a sentence
-without hiding part of it, so the sentence is drawn only where it can be read whole. What
-those two images illustrate is the window itself — its home, its header with the maximize
-control, its corner grip and the scene behind it. Whether the window should say something
-shorter is an open question on the design's decision 2.
+The window in `camera-window.png` and `camera-window-tablet.png` shows the same fact in
+the cockpit's own way: at a sixth of the scene's width it cannot show a sentence without
+hiding part of it, so a window with no picture is crossed out in red with one line under
+it, exactly as an instrument with no reading is. Those two images therefore illustrate
+both the window itself — its home, its header with the maximize control, its corner grip
+and the scene behind it — and the unavailable mark.
 
 These examples demonstrate local display configuration. A selected source is not
 proof that its sensor exists, and example display bands are not aircraft limits.

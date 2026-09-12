@@ -75,7 +75,15 @@
             <div v-if="mode === 'off'" class="y-pic__off">
                 Preview is off in this browser.
             </div>
-            <div v-if="!signInRequired && ['stopped', 'failed'].includes(cameraRunState)" class="y-pic__stopped">
+            <!-- The cockpit's own unavailable convention, in the window
+                 (R-UI-20; JJ's ruling of 2026-09-12). See `unavailableMark`. -->
+            <div v-if="showUnavailableMark" class="y-pic__unavailable" role="status">
+                <svg class="y-pic__missing" viewBox="0 0 100 100" preserveAspectRatio="none" aria-hidden="true">
+                    <path d="M0 0L100 100M100 0L0 100" />
+                </svg>
+                <span class="y-pic__stopped-l y-pic__missing-l">{{ unavailableLabel }}</span>
+            </div>
+            <div v-if="!signInRequired && !showUnavailableMark && ['stopped', 'failed'].includes(cameraRunState)" class="y-pic__stopped">
                 <span class="y-pic__stopped-l">{{ videoControl.message }}</span>
                 <!-- R-FLT-29: the message is a reason and stays; the button
                      starts the device's stream and must not exist in the
@@ -629,7 +637,29 @@ export default {
          * it, and at this size that promise cannot be kept), and it is the
          * operator's to settle, not this component's.
          */
-        reasonLine: { type: Boolean, default: false }
+        reasonLine: { type: Boolean, default: false },
+        /**
+         * Mark this picture the way the cockpit marks an instrument with no
+         * reading: the red cross and a one-line label (R-UI-20, the
+         * operator's ruling of 2026-09-12). Off by default; the host sets it
+         * on the camera window.
+         *
+         * **Why a cross and not a sentence.** The window is about 140 x 55 px
+         * and cannot show a delivery-failure sentence without hiding part of
+         * it — the page gate measured 68 px of text in 40 px and refused it.
+         * The choice was then a blank black box, a shorter word, or the
+         * convention the rest of the cockpit already uses for "no data". The
+         * operator chose the convention: a window with no picture reads as
+         * one more instrument with nothing behind it, rather than as a
+         * different idea the operator has to learn.
+         *
+         * **It never covers a frame.** `lastFrameAt === null` is the whole
+         * condition, so a picture that has had media and then went quiet keeps
+         * that media, desaturated, darkened and hatched, with its age in the
+         * window's header — this file's own account of why going black is
+         * rejected applies exactly as much to a red cross.
+         */
+        unavailableMark: { type: Boolean, default: false }
     },
     emits: ['stale'],
     data () {
@@ -817,6 +847,30 @@ export default {
         noticeReason () {
             if (this.signInRequired) return 'Your session expired. Sign in to restore video and controls.'
             return this.aimRefusal || this.reason || ''
+        },
+        /** Nothing has ever arrived to show, and something says why — the
+         *  states the cockpit marks unavailable. Autoplay-blocked is
+         *  deliberately not one of them: that case keeps **Resume live
+         *  video**, which is the thing to press, and a cross over a button
+         *  is two answers to one question. `mode: 'off'` has its own panel,
+         *  and a still that is showing is a picture. */
+        showUnavailableMark () {
+            if (!this.scene || !this.unavailableMark) return false
+            if (this.mode === 'off') return false
+            if (this.mode === 'stills' && this.stillSrc) return false
+            if (this.lastFrameAt !== null) return false
+            return this.signInRequired || !!this.reason ||
+                ['stopped', 'failed'].includes(this.cameraRunState)
+        },
+        /** One line, and the same words the gauges use unless a shorter true
+         *  one exists for the state. `DATA UNAVAILABLE` is what an operator
+         *  reads under every other crossed-out instrument; the stopped and
+         *  sign-in states get their own shorter truth, because "unavailable"
+         *  would misdescribe a camera somebody deliberately stopped. */
+        unavailableLabel () {
+            if (this.signInRequired) return 'SIGN IN REQUIRED'
+            if (this.cameraRunState === 'stopped') return 'VIDEO STOPPED'
+            return 'DATA UNAVAILABLE'
         },
         cameraRunState () {
             return this.fromPayload('runState') || (this.cameraRunning === true ? 'running' : this.cameraRunning === false ? 'stopped' : 'unknown')
@@ -1978,6 +2032,72 @@ export default {
     overflow: hidden;
     pointer-events: none;
 }
+/* The cockpit's own unavailable convention, reused rather than reinvented
+   (R-UI-20, the operator's ruling of 2026-09-12). The source is
+   `cockpit/instruments/InstrumentGauge.vue`: when a reading is not valid it
+   marks its root `instrument-unavailable`, draws `.missing-cross` — a two-
+   stroke X in `#ef5a53`, `stroke-width: 2.5`, no fill — corner to corner
+   across the gauge face, and puts `DATA UNAVAILABLE` beneath it in
+   `#c3d4dd`. That style block is `scoped`, so the values are restated here
+   rather than shared: **if the gauge's cross changes colour, this must move
+   with it.**
+
+   `preserveAspectRatio="none"` with `vector-effect: non-scaling-stroke` is
+   what makes one square path draw a true corner-to-corner cross in a 16:9
+   box without the stroke going oval with it. The label sits at the foot,
+   clear of the cross, exactly where the gauge puts its own detail line. */
+.y-pic--scene .y-pic__unavailable {
+    position: absolute;
+    inset: 0;
+    /* `inset: 0` plus padding overflows the frame without this. */
+    box-sizing: border-box;
+    z-index: 4;
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    padding: 5px;
+    gap: 2px;
+    pointer-events: none;
+}
+/* **The cross takes its height from the flex line, never from its own
+   intrinsic ratio.** An `<svg>` carrying a viewBox is a replaced element with
+   an intrinsic 1:1 ratio, so any sizing that leaves one axis indefinite draws
+   it square: `inset` alone made it 186px tall in a 76px frame here, and a
+   percentage height that did not resolve on the Flight page made it 131px
+   tall in a 48px one. A zero flex basis with `flex-grow` gives the height
+   outright, so there is no axis left for the ratio to fill in, and the cross
+   simply gets shorter as the window does. `preserveAspectRatio="none"` plus
+   `vector-effect: non-scaling-stroke` is what keeps one square path drawing a
+   true corner-to-corner X of even thickness in a 16:9 box. */
+.y-pic--scene .y-pic__missing {
+    flex: 1 1 0;
+    min-height: 0;
+    width: 100%;
+    align-self: stretch;
+}
+.y-pic--scene .y-pic__missing path {
+    stroke: #ef5a53;
+    stroke-width: 2.5;
+    fill: none;
+    vector-effect: non-scaling-stroke;
+}
+/* Beneath the cross, where the gauge puts its own detail line — not over it.
+   The type is `.y-pic__stopped-l`, this component's existing label on this
+   exact surface, because `--yonder-display` is cream in the day palette and
+   the gauge's own `#c3d4dd` is for a face that never goes light. It may wrap
+   rather than overflow at a hand-shrunk window size; at every size that ships
+   it is the one line the ruling asked for. */
+.y-pic--scene .y-pic__missing-l {
+    flex: none;
+    max-width: 100%;
+    font-size: 9px;
+    letter-spacing: 0.1em;
+    line-height: 1.2;
+    background: var(--yonder-display, #04060a);
+    padding: 0 3px;
+    border-radius: 2px;
+}
+
 /* No truncation here, deliberately: the host only sets `reasonLine` on the
    box that can show the line whole (see the prop's own doc comment), so a
    clip would mean the host got that wrong and should be visible as a gate

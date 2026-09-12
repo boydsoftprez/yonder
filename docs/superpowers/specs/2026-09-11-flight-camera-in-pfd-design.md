@@ -74,20 +74,31 @@ The renders are listed at the end.
    losing its **Start video** button, which starts the device's stream (decision 12,
    R-CMD-04).
 
-   **The line goes in the full scene, not in the window — and the window is an open
-   question.** The window is a sixth of the scene's width: about 140 x 55 px on the
-   Flight page, with roughly 40 px of usable height. "The video service is unavailable.
-   Reconnecting automatically." is 68 px of text in that box however it is set. The page
-   gate measured exactly that and refused it as content hidden from the operator, which
-   is the right answer — truncating it kept the tail and dropped the words that say what
-   is wrong. So the sentence is drawn where it can be read whole, and the window keeps
-   the short *stopped* message and the **Resume live video** control, which both fit.
-   That leaves the window behaviour below ("the window shows the reason inside itself")
-   **unkept at the default window size**, which it also was before this change. Settling
-   it is the operator's (CLAUDE.md rule 8), and the choices are: accept a short
-   state word in the window instead of the sentence; let the window grow when it has a
-   reason, at the cost of the fixed picture shape; or leave the sentence to the full
-   picture, one tap away, which is what ships today.
+   **The line goes in the full scene; the window is marked unavailable instead.** The
+   window is a sixth of the scene's width: about 140 x 55 px on the Flight page, with
+   roughly 40 px of usable height. "The video service is unavailable. Reconnecting
+   automatically." is 68 px of text in that box however it is set. The page gate measured
+   exactly that and refused it as content hidden from the operator, which is the right
+   answer — truncating it kept the tail and dropped the words that say what is wrong.
+
+   **Settled by the operator on 2026-09-12:** a window with no picture shows **the red
+   cross the cockpit already draws over an instrument with no reading**, with one line
+   beneath it, rather than a blank box, a grown window, or a sentence that cannot fit.
+   The treatment is not a new one — it is `InstrumentGauge.vue`'s own `.missing-cross`,
+   the same two strokes in the same `#ef5a53` with the same `DATA UNAVAILABLE` beneath —
+   so a window with nothing behind it reads as one more instrument with no data instead
+   of as an idea the operator has to learn. It applies to every state with no live
+   picture: the delivery failures, an expired session, a decoder reconnecting, and a
+   camera the operator stopped. Two states say something shorter and truer than
+   *DATA UNAVAILABLE* — `VIDEO STOPPED` for a camera somebody deliberately stopped, and
+   `SIGN IN REQUIRED` — because "unavailable" would misdescribe both.
+
+   Three things the cross does not do. It never covers a frame: a picture that has had
+   media and then went quiet keeps it, desaturated, darkened and hatched, with its age in
+   the window's header, because the held frame is the one thing still worth having
+   (decision 11, R-VID-03). It does not appear when this browser blocked autoplay, where
+   **Resume live video** stays and is the thing to press — a cross over a button is two
+   answers to one question. And it is not drawn in the full scene, which shows the line.
 3. **The fixed blue-and-brown split goes.** Behind a camera the background container is
    the display's dark ground colour; nothing pretends to be a horizon.
 4. **The white horizon line stays drawn over the picture, on by default.** A forward
@@ -196,11 +207,11 @@ size. This keeps the control to one tap each way, which was the point.
   not apply, because a configured camera is not an unavailable one; the escape to terrain
   is the Camera control, one tap, which is where the operator already looks. The button
   still flips to `window`.
-- Camera selected but not streaming, state `window`: the window shows the reason inside
-  itself, in the picture component's own words, and nothing else. **Not kept at the
-  default window size** — see decision 2's amendment; today the window shows the short
-  *stopped* message and the resume control, and a longer reason is read by going to
-  full.
+- Camera selected but not streaming, state `window`: the window is marked the way the
+  cockpit marks an instrument with no reading — the red cross and one line beneath it
+  (*VIDEO STOPPED*, *SIGN IN REQUIRED*, or *DATA UNAVAILABLE*), and nothing else. The
+  sentence form of the reason is read by going to full, where it fits. See decision 2's
+  amendment, settled 2026-09-12.
 - Stream stalls while showing: the frame desaturates, darkens and takes the hatch, and
   the age count runs in the footer label (full) or the window header (window).
 - Reload: the state, the window's place and size and the horizon-line switch are

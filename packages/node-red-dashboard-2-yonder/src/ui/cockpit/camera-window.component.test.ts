@@ -107,6 +107,7 @@ describe('the Camera window and control (R-FLT-29, K-68)', () => {
     expect(w.find('.camera-window').exists()).toBe(false)
     expect(w.findComponent({ name: 'YonderPicture' }).props('scene')).toBe(true)
     expect(w.findComponent({ name: 'YonderPicture' }).props('reasonLine')).toBe(true)
+    expect(w.findComponent({ name: 'YonderPicture' }).props('unavailableMark')).toBe(false)
     expect(w.find('.cockpit-camera').exists()).toBe(true)
 
     const cameraButton = w.get('button[aria-label="Camera view"]')
@@ -117,7 +118,9 @@ describe('the Camera window and control (R-FLT-29, K-68)', () => {
     expect(w.vm.preferences.display.cameraWindow).toEqual(cameraWindowHome)
     // The window's picture is not asked for the reason line: its box is too
     // small to show a sentence whole (YonderPicture's `reasonLine` comment).
+    // It is asked for the cockpit's unavailable mark instead.
     expect(w.findComponent({ name: 'YonderPicture' }).props('reasonLine')).toBe(false)
+    expect(w.findComponent({ name: 'YonderPicture' }).props('unavailableMark')).toBe(true)
     expect(w.find('.cockpit-camera').exists()).toBe(false)
     expect(w.findComponent(RecordingTerrain).props('draw')).toBe(true)
     expect(cameraButton.attributes('aria-pressed')).toBe('true')
@@ -283,9 +286,12 @@ describe('the Camera window and control (R-FLT-29, K-68)', () => {
     expect(w.find('.cockpit-camera-fallback').exists()).toBe(false)
     expect(w.find('.cockpit-empty-background').exists()).toBe(false)
 
-    // And not in the window either: "the window shows the reason inside
-    // itself ... and nothing else".
-    expect(w.get('.camera-window .y-pic__stopped-l').text()).toContain('Video is stopped')
+    // And the window carries the cockpit's own unavailable mark instead of a
+    // message it has no room for (the operator's ruling of 2026-09-12): the
+    // red cross and one line, with no control of any kind under it.
+    expect(w.find('.camera-window .y-pic__unavailable').exists()).toBe(true)
+    expect(w.get('.camera-window .y-pic__missing-l').text()).toBe('VIDEO STOPPED')
+    expect(w.find('.camera-window .y-pic__stopped').exists()).toBe(false)
     expect(w.find('.y-pic__start').exists()).toBe(false)
 
     expect(command).not.toHaveBeenCalled()

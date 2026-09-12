@@ -137,8 +137,8 @@
     {
       "file": "camera-full.png",
       "source": "fixture-harness",
-      "sha256": "254ea35a5dd524c58ead4787289536028aaa71072084c532ff43d8e043fc13de",
-      "bytes": 233887
+      "sha256": "db531f67335ac5c9719d2af720c8fe35630a747be385d029621e2b1a17d8391e",
+      "bytes": 233890
     },
     {
       "file": "camera-full-day.png",
@@ -149,14 +149,14 @@
     {
       "file": "camera-window.png",
       "source": "fixture-harness",
-      "sha256": "3184106e738be6b89400b8bd740709951288ad62411d910191071f95decd5484",
-      "bytes": 392552
+      "sha256": "c23f3bbb7313a5f56c86afbd112a0dedb1a1511f0167a948dbb44938a4298653",
+      "bytes": 397215
     },
     {
       "file": "camera-window-tablet.png",
       "source": "fixture-harness",
-      "sha256": "4f3413c385178c9b7d41857e818965dcd9a2f28a0bd26e403a9681043b837368",
-      "bytes": 305792
+      "sha256": "5186b24a917f0993f227a0d25a3346495799f944eadd436a59e00248e2151728",
+      "bytes": 308115
     }
   ]
 }

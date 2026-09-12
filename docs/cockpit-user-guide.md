@@ -1156,8 +1156,11 @@ at the foot of the picture, whenever there is a reason — a session that expire
 preview the console cannot deliver, a decoder reconnecting — and nothing at all when
 the picture is fine. If this browser blocked the video from playing, a **Resume live
 video** control appears with it; that is this browser, not the aircraft. The small window
-form is too narrow for a sentence, so it carries the short message and that control, and
-a longer reason is read by going to the full picture. The attitude line
+form is too narrow for a sentence, so a window with no picture is crossed out in red with
+one line under it — *VIDEO STOPPED*, *SIGN IN REQUIRED* or *DATA UNAVAILABLE* — the same
+mark the cockpit draws over any instrument with no reading. A longer reason is read by
+going to the full picture. A window whose picture merely went quiet is never crossed out:
+it keeps the last frame, desaturated and hatched, with its age in the window's header. The attitude line
 stays drawn over the picture by default — **PFD settings → Attitude & display →
 Horizon line over camera** turns it off. Height above ground and the forward-clearance
 forecast keep reporting while the camera fills the scene: [`camera-full.png`](images/cockpit/camera-full.png),

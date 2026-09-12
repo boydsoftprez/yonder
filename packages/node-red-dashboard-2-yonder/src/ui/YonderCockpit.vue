@@ -247,10 +247,15 @@
       @update:geometry="value=>setOption('cameraWindow',value)"
       @maximize="showCameraFull"
     >
+      <!-- `unavailable-mark`, not `reason-line`: this box is too small for a
+           sentence, so a window with no picture reads as one more instrument
+           with no data (the operator's ruling of 2026-09-12). See
+           `YonderPicture`'s own `unavailableMark` doc comment. -->
       <YonderPicture
         :id="id+'-camera'"
         :props="cameraProps"
         :scene="true"
+        :unavailable-mark="true"
         @stale="pictureStale=$event"
       />
     </CameraWindow>
