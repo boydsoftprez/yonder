@@ -4,7 +4,7 @@ import { ardupilotmega, common, minimal, standard, MavLinkProtocolV2, type MavLi
 import { decodeDatagram, type DecodedFrame } from "./protocol.js";
 import { decodeMissionItem, encodeMissionItem, MAX_MISSION_ITEMS, missionFrame, missionRevision, validateCommandParameters, validateMission, verifyMission } from "./mission.js";
 import { isPlane, PLANE_MODES, VehicleTelemetry } from "./vehicle-telemetry.js";
-import type { MissionItem, MissionSnapshot, OperatorRequest, OperationAdmission, VehicleAction, VehicleIdentity, VehicleOperation, VehicleServiceOptions, VehicleSnapshot } from "./types.js";
+import type { MissionItem, MissionSnapshot, OperatorRequest, OperationAdmission, VehicleAction, VehicleContext, VehicleIdentity, VehicleOperation, VehicleServiceOptions, VehicleSnapshot } from "./types.js";
 import { AircraftInstrumentation } from './instrumentation.js';
 import type { InstrumentationSnapshot } from './instrumentation-types.js';
 import { OwnTrail } from './own-trail.js';
@@ -140,6 +140,13 @@ export class VehicleService {
   instrumentation(): InstrumentationSnapshot {
     this.tick();
     return this.instruments.snapshot(this.now(), this.connected(), this.identity);
+  }
+  /** R-FLT-28: terrain checks these fields on every packet and before each write.
+   * Keep them fresh without building, hashing and cloning an entire PFD report.
+   */
+  context(): VehicleContext {
+    this.tick();
+    return { identity: this.identity ? { ...this.identity } : null, connected: this.connected(), busy: this.active !== null };
   }
   snapshot(options: { details?: boolean } = {}): VehicleSnapshot {
     this.tick();

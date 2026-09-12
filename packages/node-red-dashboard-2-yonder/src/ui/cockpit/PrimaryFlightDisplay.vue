@@ -340,8 +340,8 @@ export default {
     const cdiOffset = computed(() => (cdiDeflection(props.guidance, props.cdiScale) ?? 0) * 48);
     const bearingValid = computed(() => !navValid.value && !radialValid.value && props.guidance.valid && Number
       .isFinite(props.guidance.bearingDeg) && props.flight.heading !== null);
-    const estimatedAgl = computed(() => terrainReady.value && props.flight.live && Number.isFinite(terrainStatus.value
-      .estimatedAglM) ? terrainStatus.value.estimatedAglM / .3048 : null);
+    const estimatedAgl = computed(() => props.flight.live && terrainStatus.value.officialTerrain?.available === true && Number.isFinite(terrainStatus.value
+      .officialTerrain.estimatedAglM) ? terrainStatus.value.officialTerrain.estimatedAglM / .3048 : null);
     return {
       selectedUnits,unitLabels,shown,altitudeScale,reading,
       canvas,

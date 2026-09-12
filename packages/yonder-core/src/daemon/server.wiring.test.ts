@@ -1815,7 +1815,7 @@ describe("buildRenderers", () => {
     // and unconditionally, behind telemetry, because a pipeline is composed
     // from what the renderers above it have already settled.
     expect(built.renderers.map((r) => r.name))
-      .toEqual(["hostname", "network", "remote", "console", "mavlink", "video", "camera-autostart"]);
+      .toEqual(["hostname", "network", "remote", "console", "mavlink", "terrain", "video", "camera-autostart"]);
     expect(built.mavlinkRenderer).toBeDefined();
   });
 

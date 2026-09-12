@@ -1,4 +1,5 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
+import {createHash} from "node:crypto";
 import { createServer, type Server } from "node:http";
 import { unlinkSync, existsSync, mkdirSync, chmodSync, accessSync, constants } from "node:fs";
 import { dirname, join } from "node:path";
@@ -7,6 +8,7 @@ import { ApplyEngine } from "../apply/engine.js";
 import { warn, note, trace } from "../log.js";
 import { VehicleService } from "../mav/vehicle.js";
 import { TerrainPackService } from "../terrain/service.js";
+import { TerrainRuntime, type TerrainRuntimeOptions } from "../terrain/official/runtime.js";
 import { CockpitData } from "../cockpit/data.js";
 import type { HostInstrumentOptions } from '../cockpit/host-instruments.js';
 import type { OwnerToolsClient } from "./owner-tools.js";
@@ -142,6 +144,8 @@ export interface ServerOptions {
   restartAfterRestore?: () => Promise<void>;
   /** Root-owned durable state authority. Production supplies AdminClient. */
   stateCoordinator?: StateCoordinator;
+  /** Test-only terrain filesystem/acquisition injection; production uses persistent state. */
+  terrain?: Pick<TerrainRuntimeOptions, "root" | "probe" | "acquire">;
   isp?: import('../video/isp.js').IspControls;
   /** Observation dependencies for isolated integration tests. Not configuration. */
   rtspObservation?: Pick<RtspFeedbackOptions, 'sessions' | 'tcp' | 'localAddresses'>;
@@ -254,6 +258,7 @@ export interface CameraLayer {
 }
 
 export interface BuildRenderersOptions {
+  terrain?: Pick<TerrainRuntimeOptions, "root" | "probe" | "acquire">;
   accessory?: AccessorySources;
   cameraLayer?: CameraLayer;
   secretsPath: string;
@@ -418,6 +423,7 @@ export function buildRenderers(opts: BuildRenderersOptions): {
    */
   mavlinkListener?: LoopbackListener;
   vehicle?: VehicleService;
+  officialTerrain?: TerrainRuntime;
   generated: string[];
 } {
   const log = opts.log ?? note;
@@ -527,6 +533,7 @@ export function buildRenderers(opts: BuildRenderersOptions): {
   let mavlinkRenderer: MavlinkRenderer | undefined;
   let mavlinkListener: LoopbackListener | undefined;
   let vehicle: VehicleService | undefined;
+  let officialTerrain: TerrainRuntime | undefined;
   if (opts.mavlink !== undefined) {
     const tracker = new LinkTracker({ clock: opts.clock ?? systemClock });
     mavlinkRenderer = new MavlinkRenderer({
@@ -540,12 +547,15 @@ export function buildRenderers(opts: BuildRenderersOptions): {
     });
     vehicle = new VehicleService({clock: opts.clock ?? systemClock, log, send: bytes => mavlinkListener!.send(bytes)});
     mavlinkListener = new LoopbackListener({
-      onDatagram: bytes => vehicle!.receive(bytes),
+      onDatagram: bytes => { vehicle!.receive(bytes); officialTerrain?.receive(bytes); },
       now: () => (opts.clock ?? systemClock).now(),
       tracker,
       log,
       ...(opts.mavlink.loopbackPort === undefined ? {} : { port: opts.mavlink.loopbackPort }),
     });
+    officialTerrain = new TerrainRuntime({vehicle, send: bytes => mavlinkListener!.send(bytes),
+      routerGeneration: () => mavlinkListener!.routeGeneration, serialBaud: () => tracker.state().baud ?? 0,
+      clock: opts.clock ?? systemClock, ...opts.terrain});
   }
 
   // First, and deliberately.
@@ -621,6 +631,7 @@ export function buildRenderers(opts: BuildRenderersOptions): {
   if (consoleRenderer !== undefined) renderers.push(consoleRenderer);
   if (mediaRenderer !== undefined) renderers.push(mediaRenderer);
   if (mavlinkRenderer !== undefined) renderers.push(mavlinkRenderer);
+  if (officialTerrain !== undefined) renderers.push(officialTerrain);
   if (opts.accessory) renderers.push({ name: 'accessory', render: async config => { opts.accessory!.resume(config.cameras); } });
   renderers.push(pipelineRenderer, cameraAutostart);
 
@@ -642,6 +653,7 @@ export function buildRenderers(opts: BuildRenderersOptions): {
     ...(mavlinkRenderer === undefined ? {} : { mavlinkRenderer }),
     ...(mavlinkListener === undefined ? {} : { mavlinkListener }),
     ...(vehicle === undefined ? {} : { vehicle }),
+    ...(officialTerrain === undefined ? {} : { officialTerrain }),
     generated,
   };
 }
@@ -928,6 +940,7 @@ export async function startServer(opts: ServerOptions): Promise<{ close(): Promi
   try {
     built = buildRenderers({
       accessory,
+      terrain: opts.terrain,
       secretsPath: opts.secretsPath ?? "/etc/yonder/secrets.yaml",
       seedSecrets: opts.stateCoordinator === undefined,
       runner: opts.runner,
@@ -1484,6 +1497,8 @@ export async function startServer(opts: ServerOptions): Promise<{ close(): Promi
   let terrainPack: TerrainPackService | undefined;
   try { terrainPack = await TerrainPackService.open(fileURLToPath(new URL("../terrain/assets/cove", import.meta.url))); }
   catch { note("cockpit: prepared terrain pack unavailable; regional terrain remains optional"); }
+  let terrainPolicyApplyId: string | null = null;
+  const terrainConfigRevision = (config: Config) => createHash("sha256").update(JSON.stringify(config)).digest("hex");
   const route = createRouter({
     ownerTools: opts.ownerTools,
     recoveryTools: opts.recoveryTools,
@@ -1509,7 +1524,17 @@ export async function startServer(opts: ServerOptions): Promise<{ close(): Promi
       if (result.code !== 0) throw new Error("Could not schedule system reboot");
     },
     accessory,
-    cockpit: {vehicle: built?.vehicle, data: cockpitData, terrain: terrainPack},
+    cockpit: {vehicle: built?.vehicle, data: cockpitData, terrain: terrainPack, officialTerrain: built?.officialTerrain,
+      terrainPolicy: {
+        get: () => { const config = loadConfig(opts.configPath), apply = engine.status(); return {policy:config.terrain,revision:terrainConfigRevision(config),apply,pendingId:apply.state === "pending" && apply.id === terrainPolicyApplyId ? terrainPolicyApplyId : null}; },
+        apply: async (policy, expectedRevision) => {
+          const config = loadConfig(opts.configPath);
+          if (terrainConfigRevision(config) !== expectedRevision) throw new Error("Configuration changed; reload terrain policy before applying");
+          const result = await engine.apply({...config,terrain:policy}); terrainPolicyApplyId = result.id; return result;
+        },
+        confirm: id => { if (id !== terrainPolicyApplyId) throw new Error("Unknown terrain policy apply"); engine.confirm(id); return engine.status(); },
+        revert: async id => { if (id !== terrainPolicyApplyId) throw new Error("Unknown terrain policy apply"); await engine.revertNow(id); return engine.status(); },
+      }},
     hostInstruments: {
       now: () => clock.now(),
       readFile: opts.hostInstruments?.readFile ?? systemReader,
@@ -1802,7 +1827,7 @@ export async function startServer(opts: ServerOptions): Promise<{ close(): Promi
         built?.mavlinkListener?.close();
         server.close(() => {
           if (existsSync(opts.socketPath)) unlinkSync(opts.socketPath);
-          void (accessory?.close() ?? Promise.resolve()).catch(error => warn(`accessory cleanup: ${String(error)}`)).finally(resolve);
+          void Promise.all([accessory?.close(), built?.officialTerrain?.close()]).catch(error => warn(`accessory cleanup: ${String(error)}`)).finally(resolve);
         });
       }),
   };

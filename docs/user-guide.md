@@ -148,6 +148,11 @@ Use **Cameras** to discover attached hardware. Configure a detected camera,
 choose its name, and open **Camera**. A remembered camera that is unplugged is
 shown as absent; forgetting its configuration is a separate action.
 
+Before the first scan, the list says it is waiting. A failed, missing, or
+invalid scan report is shown explicitly; it is not evidence that no camera is
+attached. Read the reported reason and choose **Refresh cameras** to try again.
+**No cameras found** means a successful scan returned an empty camera list.
+
 **Start video**, **Stop video**, and **Retry** follow the observed lifecycle.
 Wait for a running state and a decoded browser picture. The camera controls
 remain on one page: image/capture controls followed by stream, picture, and

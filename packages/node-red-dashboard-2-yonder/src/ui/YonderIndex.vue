@@ -8,7 +8,7 @@
         <p v-if="signInRequired" role="status"><a :href="signInHref">Sign in</a> to manage cameras.</p>
         <div class="y-idx__display">
             <YonderColumn legend="Cameras">
-                <template v-if="cameras.length">
+                <template v-if="reportState === 'ready' && cameras.length">
                     <div
                         v-for="cam in cameras"
                         :key="cam.id || cam.bus"
@@ -52,10 +52,10 @@
                         </span>
                     </div>
                 </template>
-                <p v-else class="y-idx__none">No cameras found. Connect a camera, then choose Refresh cameras.</p>
+                <p v-else class="y-idx__none" role="status">{{ scanMessage }}</p>
             </YonderColumn>
 
-            <YonderColumn v-if="rejected.length" legend="Seen, and not usable" qualifier="why">
+            <YonderColumn v-if="reportState === 'ready' && rejected.length" legend="Seen, and not usable" qualifier="why">
                 <div v-for="r in rejected" :key="r.device" class="y-idx__rej">
                     <span class="y-idx__dev">{{ r.device }}</span>
                     <span class="y-idx__why">{{ r.reason }}</span>
@@ -179,19 +179,26 @@ import { summarise } from 'yonder-core/presentation'
  *   the master plan's Task 28 test stub, "draws the Cameras page from
  *   index, budget, softkeys"), not this node's own concern.
  *
- * **Report-null and report-empty read identically: both draw "No camera."**
- * Step 1 names one empty behaviour, not `YonderAim`'s own separate
- * "waiting for a report at all" wording — that panel's three-way split
- * answers a four-state capability machine this page has no equivalent of.
- * Collapsing the two here is deliberate: an operator still sees a concrete,
- * drawn sentence rather than blank space either way, which is the actual
- * guarantee coordinator resolution 4 asks for.
+ * **An empty result is not a missing result.** A report whose two lists are
+ * present and empty says the probe ran and found no cameras. Before the first
+ * report, a malformed report, and a read failure each say something else, so
+ * each has its own stated sentence. In particular, an existing live message
+ * is authoritative even when its payload is null: falling back to a gallery
+ * or configured report there would turn a failed scan back into old camera
+ * rows, which is worse than an empty pane because it tells a positive lie.
  */
 const TONE_CLASS = {
     good: 'tone-good',
     waiting: 'tone-waiting',
     bad: 'tone-bad',
     neutral: 'tone-neutral'
+}
+
+/** The adapter's complete R-CAM-12 report. Partial objects are not an empty
+ * scan: a missing list means this widget cannot honestly state its count. */
+function isIndexReport (value) {
+    return Boolean(value) && typeof value === 'object'
+        && Array.isArray(value.cameras) && Array.isArray(value.rejected)
 }
 
 export default {
@@ -205,19 +212,61 @@ export default {
         state: { type: Object, default: () => ({}) }
     },
     computed: {
-        /** The whole report, live in preference to configured — the same
-         * rule `YonderDeck` and `YonderAim` each state for their own payload.
-         * `props.report` is a convenience for the gallery and a test, not a
-         * promise that a real page shows anything before the first message. */
+        /** Dashboard adds message keys after this widget first renders, so
+         * the bracket read is intentional: Vue tracks it and re-runs this
+         * computed when this widget's first key arrives. A delivered `null`
+         * payload is still a message, not permission to revive `props.report`
+         * as if it were current data. */
+        liveMessage () {
+            const messages = this.$store?.state?.data?.messages
+            return messages ? messages[this.id] : undefined
+        },
+        hasLiveMessage () {
+            return this.liveMessage !== undefined
+        },
+        liveStatus () {
+            const status = this.liveMessage?.yonder
+            return status && typeof status === 'object' ? status : null
+        },
+        /** The whole report, live in preference to configured — but only
+         * before Dashboard has delivered a message at all. `props.report` is
+         * a gallery/test convenience, never a replacement for a failed live
+         * scan. */
         report () {
-            const live = this.$store && this.$store.state && this.$store.state.data
-                ? (this.$store.state.data.messages && this.$store.state.data.messages[this.id]
-                    ? this.$store.state.data.messages[this.id].payload
-                    : undefined)
-                : undefined
-            if (live && typeof live === 'object') return live
-            const fallback = this.props.report
-            return fallback && typeof fallback === 'object' ? fallback : null
+            if (this.hasLiveMessage) {
+                return isIndexReport(this.liveMessage?.payload) ? this.liveMessage.payload : null
+            }
+            return isIndexReport(this.props.report) ? this.props.report : null
+        },
+        /** Four non-ready states deliberately do not borrow the valid-empty
+         * wording. `readFailure()` is a rejected CommandStatus, whose message
+         * is already safe operator wording; Vue still renders it as text. */
+        reportState () {
+            if (this.report) return 'ready'
+            if (!this.hasLiveMessage) {
+                return this.props.report === undefined ? 'loading' : 'invalid'
+            }
+            if (this.liveStatus?.state === 'rejected') return 'failed'
+            return this.liveMessage?.payload == null ? 'missing' : 'invalid'
+        },
+        failureReason () {
+            const message = this.liveStatus?.message
+            return typeof message === 'string' ? message.trim() : ''
+        },
+        scanMessage () {
+            if (this.reportState === 'ready') {
+                return 'No cameras found. Connect a camera, then choose Refresh cameras.'
+            }
+            if (this.reportState === 'loading') return 'Waiting for a camera scan.'
+            if (this.reportState === 'missing') {
+                return 'Camera scan did not return a report. Refresh cameras to try again.'
+            }
+            if (this.reportState === 'invalid') {
+                return 'Camera scan returned an invalid report. Refresh cameras to try again.'
+            }
+            return this.failureReason
+                ? `Camera scan failed: ${this.failureReason}`
+                : 'Camera scan failed. Refresh cameras to try again.'
         },
         cameras () {
             return this.report && Array.isArray(this.report.cameras) ? this.report.cameras : []
@@ -226,6 +275,10 @@ export default {
             return this.report && Array.isArray(this.report.rejected) ? this.report.rejected : []
         },
         summaryText () {
+            if (this.reportState === 'loading') return 'Waiting for scan'
+            if (this.reportState === 'missing') return 'No report'
+            if (this.reportState === 'invalid') return 'Invalid report'
+            if (this.reportState === 'failed') return 'Scan failed'
             return `${this.cameras.length} found · ${this.rejected.length} rejected`
         }
     },

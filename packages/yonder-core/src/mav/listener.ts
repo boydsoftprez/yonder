@@ -15,7 +15,7 @@ import { LOOPBACK_PORT } from "./router/config.js";
  * than settings.
  *
  * The cockpit also relays explicit operator transactions through this socket
- * (R-FLT-02). Receiving traffic never sends anything. The router remains the
+ * (R-FLT-02). Receiving traffic may answer admitted terrain requests when the operator enabled the terrain service (R-FLT-28). The router remains the
  * owner of the vehicle link and the only peer to which replies are sent.
  *
  * **It is not in the ground stations' path.** R-MAV-06: raw MAVLink reaches
@@ -72,6 +72,11 @@ export class LoopbackListener {
   private socket: Socket | undefined;
   private peer: {address: string; port: number} | undefined;
   private peerHeartbeatAt = -Infinity;
+  private peerEpoch = 0;
+  get routeGeneration(): string | null {
+    return this.socket && this.boundTo && this.peer && this.now() - this.peerHeartbeatAt < 10000
+      ? `${this.peer.port}:${this.peerEpoch}` : null;
+  }
   private readonly now: () => number;
   private readonly onDatagram: ((bytes: Uint8Array) => void) | undefined;
   private boundTo: { address: string; port: number } | null = null;
@@ -153,6 +158,7 @@ export class LoopbackListener {
         if (!samePeer) {
           if (!heartbeat || (this.peer && this.now() - this.peerHeartbeatAt < 10000)) return;
           this.peer = {address: peer.address, port: peer.port};
+          this.peerEpoch++;
         }
         if (heartbeat) this.peerHeartbeatAt = this.now();
         this.receive(datagram);
@@ -202,7 +208,7 @@ export class LoopbackListener {
     }
   }
 
-  /** Send only an explicitly admitted transaction to the observed router peer. */
+  /** Send an explicitly admitted operator transaction or enabled terrain reply to the observed router peer. */
   async send(bytes: Uint8Array): Promise<void> {
     const socket = this.socket;
     const peer = this.peer;

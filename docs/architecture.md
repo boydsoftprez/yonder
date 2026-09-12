@@ -1,6 +1,6 @@
 # Yonder architecture
 
-Status: **pre-alpha implementation** · Overview updated: 2026-09-10
+Status: **pre-alpha implementation** · Overview updated: 2026-09-11
 
 Yonder is a Linux companion-computer stack alongside an ArduPilot flight
 controller. It carries telemetry, video and explicit operator commands over
@@ -149,6 +149,31 @@ MAVLink ingest binds **loopback only** unless an operator explicitly opts in, an
 opt-in is logged. An open UDP server on a routable address is an unauthenticated command
 path to the vehicle.
 
+#### Official controller terrain
+
+`yonder-core` also owns the optional ArduPilot terrain responder. It prepares the fixed
+official ArduPilot ALOS-derived SRTM1 source as validated, immutable raw HGT objects on the
+persistent data volume, then derives the requested 30 m controller grid from bounded disk
+reads. Source nodata remains unavailable: the responder withholds an incomplete subgrid
+rather than inventing an elevation, and an aircraft cache miss never starts a download.
+This source and store are separate from the higher-detail ground/surface packs used by the
+cockpit renderer.
+
+The responder sends `TERRAIN_DATA` through the existing mavlink-router connection; the
+router remains the only owner of the flight-controller serial port. Enablement is a
+persistent operator policy, disabled by default. Area preview and preparation are explicit,
+authenticated actions, and preparation requires a freshly observed, disarmed selected
+controller. The separate controller refresh is an explicit authenticated read-only MAVLink
+transaction. Opening or polling the page sends no aircraft command, and the service never
+changes controller parameters automatically.
+
+The operator is responsible for keeping one terrain responder active per aircraft. Yonder
+does not enforce exclusivity. Ground stations connected through a direct FC UART, USB port
+or independent radio can bypass Yonder's route and observation, so absence of observed
+competition does not prove sole-provider ownership. Coverage and nodata state, replies sent
+by Yonder, and the controller's reported pending/loaded counts remain separate facts; none
+is presented as a flight-readiness result.
+
 ### 3.2 Video
 
 One pipeline per camera, with a `tee`. This is the important departure.
@@ -264,6 +289,12 @@ pipeline parameters — is **generated** from it.
 version: 1
 vehicle:
   autopilot: ardupilot
+storage:
+  reserve_mb: 1024
+terrain:
+  enabled: false
+  provider: ardupilot-srtm1
+  quotaMiB: 2048
 mavlink:
   serial: { device: auto, baud: auto }
   endpoints:
@@ -293,6 +324,13 @@ Two properties matter more than the schema:
 - **Nothing is authoritative except this file.** If you edit a NetworkManager keyfile by
   hand, the next apply overwrites it. That is intentional — a single writer is what makes
   rollback possible.
+
+Official terrain content does not live in `config.yaml`. The file records only the
+enablement, fixed provider and quota; validated source objects live under
+`/var/lib/yonder/terrain` on writable persistent storage. New preparation must satisfy both
+the terrain quota and the device-wide `storage.reserve_mb` floor. The current bench state
+partition cannot satisfy the default reserve, so hardware persistence and flight acceptance
+remain pending; the software evidence does not establish flight readiness.
 
 ### 4.2 Rollback, and why the device cannot brick
 

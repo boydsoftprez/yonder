@@ -1,0 +1,600 @@
+{
+  "dataset": {
+    "archive": {
+      "byteLength": 10817094,
+      "member": "N35W084.hgt",
+      "memberByteLength": 25934402,
+      "memberSha256": "526db36d5d3d01027732ff93a3b9d09a22636d429a7b7311bea0d3fc036f4a2c",
+      "name": "N35W084.hgt.zip",
+      "sha256": "8f25d774b59272e69fd52e6fb3b782c73eee581431f48574d8bbf1c83900d628"
+    },
+    "dimensionSamples": [
+      3601,
+      3601
+    ],
+    "encoding": "signed int16, big-endian, row-major north-to-south",
+    "identity": "N35W084",
+    "nodata": -32768,
+    "provider": "ardupilot-srtm1",
+    "tileSouthWestDegrees": {
+      "lat": 35,
+      "lon": -84
+    }
+  },
+  "expected": {
+    "overlap": {
+      "bit": 55,
+      "description": "north/east boundary shared with bit 0 of block (109, 70)",
+      "neighborBit": 0,
+      "neighborGridIndexEast": 70,
+      "neighborGridIndexNorth": 109
+    },
+    "requestOriginPoint": {
+      "available": true,
+      "contributors": [
+        {
+          "corner": "southWest",
+          "heightM": 784,
+          "originalColumn": 2298,
+          "originalRow": 1086
+        },
+        {
+          "corner": "southEast",
+          "heightM": 784,
+          "originalColumn": 2299,
+          "originalRow": 1086
+        },
+        {
+          "corner": "northWest",
+          "heightM": 779,
+          "originalColumn": 2298,
+          "originalRow": 1085
+        },
+        {
+          "corner": "northEast",
+          "heightM": 779,
+          "originalColumn": 2299,
+          "originalRow": 1085
+        }
+      ],
+      "interpolatedHeightM": 780.3880000000881,
+      "locationE7": {
+        "lat": 356985340,
+        "lon": -833616470
+      },
+      "pixel": {
+        "x": 2298.070800000033,
+        "xFraction": 0.07080000003315945,
+        "xInteger": 2298,
+        "yFraction": 0.7223999999823718,
+        "yFromSouth": 2514.7223999999824,
+        "yIntegerFromSouth": 2514
+      }
+    },
+    "subgrids": [
+      {
+        "available": true,
+        "bit": 0,
+        "dataOrder": "north-major: data[northIndex * 4 + eastIndex]",
+        "heightsM": [
+          780,
+          776,
+          767,
+          771,
+          776,
+          772,
+          761,
+          766,
+          772,
+          767,
+          756,
+          761,
+          766,
+          762,
+          749,
+          752
+        ],
+        "points": [
+          {
+            "eastIndex": 0,
+            "heightM": 780,
+            "locationE7": {
+              "lat": 356985339,
+              "lon": -833616470
+            },
+            "northIndex": 0
+          },
+          {
+            "eastIndex": 1,
+            "heightM": 776,
+            "locationE7": {
+              "lat": 356985339,
+              "lon": -833613166
+            },
+            "northIndex": 0
+          },
+          {
+            "eastIndex": 2,
+            "heightM": 767,
+            "locationE7": {
+              "lat": 356985339,
+              "lon": -833609862
+            },
+            "northIndex": 0
+          },
+          {
+            "eastIndex": 3,
+            "heightM": 771,
+            "locationE7": {
+              "lat": 356985339,
+              "lon": -833606558
+            },
+            "northIndex": 0
+          },
+          {
+            "eastIndex": 0,
+            "heightM": 776,
+            "locationE7": {
+              "lat": 356988034,
+              "lon": -833616459
+            },
+            "northIndex": 1
+          },
+          {
+            "eastIndex": 1,
+            "heightM": 772,
+            "locationE7": {
+              "lat": 356988034,
+              "lon": -833613155
+            },
+            "northIndex": 1
+          },
+          {
+            "eastIndex": 2,
+            "heightM": 761,
+            "locationE7": {
+              "lat": 356988034,
+              "lon": -833609851
+            },
+            "northIndex": 1
+          },
+          {
+            "eastIndex": 3,
+            "heightM": 766,
+            "locationE7": {
+              "lat": 356988034,
+              "lon": -833606547
+            },
+            "northIndex": 1
+          },
+          {
+            "eastIndex": 0,
+            "heightM": 772,
+            "locationE7": {
+              "lat": 356990729,
+              "lon": -833616449
+            },
+            "northIndex": 2
+          },
+          {
+            "eastIndex": 1,
+            "heightM": 767,
+            "locationE7": {
+              "lat": 356990729,
+              "lon": -833613145
+            },
+            "northIndex": 2
+          },
+          {
+            "eastIndex": 2,
+            "heightM": 756,
+            "locationE7": {
+              "lat": 356990729,
+              "lon": -833609841
+            },
+            "northIndex": 2
+          },
+          {
+            "eastIndex": 3,
+            "heightM": 761,
+            "locationE7": {
+              "lat": 356990729,
+              "lon": -833606537
+            },
+            "northIndex": 2
+          },
+          {
+            "eastIndex": 0,
+            "heightM": 766,
+            "locationE7": {
+              "lat": 356993424,
+              "lon": -833616438
+            },
+            "northIndex": 3
+          },
+          {
+            "eastIndex": 1,
+            "heightM": 762,
+            "locationE7": {
+              "lat": 356993424,
+              "lon": -833613134
+            },
+            "northIndex": 3
+          },
+          {
+            "eastIndex": 2,
+            "heightM": 749,
+            "locationE7": {
+              "lat": 356993424,
+              "lon": -833609830
+            },
+            "northIndex": 3
+          },
+          {
+            "eastIndex": 3,
+            "heightM": 752,
+            "locationE7": {
+              "lat": 356993424,
+              "lon": -833606526
+            },
+            "northIndex": 3
+          }
+        ]
+      },
+      {
+        "available": true,
+        "bit": 55,
+        "dataOrder": "north-major: data[northIndex * 4 + eastIndex]",
+        "heightsM": [
+          761,
+          768,
+          768,
+          768,
+          772,
+          778,
+          780,
+          780,
+          788,
+          792,
+          797,
+          798,
+          806,
+          808,
+          808,
+          808
+        ],
+        "points": [
+          {
+            "eastIndex": 0,
+            "heightM": 761,
+            "locationE7": {
+              "lat": 357050019,
+              "lon": -833523696
+            },
+            "northIndex": 0
+          },
+          {
+            "eastIndex": 1,
+            "heightM": 768,
+            "locationE7": {
+              "lat": 357050019,
+              "lon": -833520391
+            },
+            "northIndex": 0
+          },
+          {
+            "eastIndex": 2,
+            "heightM": 768,
+            "locationE7": {
+              "lat": 357050019,
+              "lon": -833517087
+            },
+            "northIndex": 0
+          },
+          {
+            "eastIndex": 3,
+            "heightM": 768,
+            "locationE7": {
+              "lat": 357050019,
+              "lon": -833513783
+            },
+            "northIndex": 0
+          },
+          {
+            "eastIndex": 0,
+            "heightM": 772,
+            "locationE7": {
+              "lat": 357052713,
+              "lon": -833523685
+            },
+            "northIndex": 1
+          },
+          {
+            "eastIndex": 1,
+            "heightM": 778,
+            "locationE7": {
+              "lat": 357052713,
+              "lon": -833520381
+            },
+            "northIndex": 1
+          },
+          {
+            "eastIndex": 2,
+            "heightM": 780,
+            "locationE7": {
+              "lat": 357052713,
+              "lon": -833517077
+            },
+            "northIndex": 1
+          },
+          {
+            "eastIndex": 3,
+            "heightM": 780,
+            "locationE7": {
+              "lat": 357052713,
+              "lon": -833513772
+            },
+            "northIndex": 1
+          },
+          {
+            "eastIndex": 0,
+            "heightM": 788,
+            "locationE7": {
+              "lat": 357055408,
+              "lon": -833523674
+            },
+            "northIndex": 2
+          },
+          {
+            "eastIndex": 1,
+            "heightM": 792,
+            "locationE7": {
+              "lat": 357055408,
+              "lon": -833520370
+            },
+            "northIndex": 2
+          },
+          {
+            "eastIndex": 2,
+            "heightM": 797,
+            "locationE7": {
+              "lat": 357055408,
+              "lon": -833517066
+            },
+            "northIndex": 2
+          },
+          {
+            "eastIndex": 3,
+            "heightM": 798,
+            "locationE7": {
+              "lat": 357055408,
+              "lon": -833513762
+            },
+            "northIndex": 2
+          },
+          {
+            "eastIndex": 0,
+            "heightM": 806,
+            "locationE7": {
+              "lat": 357058103,
+              "lon": -833523663
+            },
+            "northIndex": 3
+          },
+          {
+            "eastIndex": 1,
+            "heightM": 808,
+            "locationE7": {
+              "lat": 357058103,
+              "lon": -833520359
+            },
+            "northIndex": 3
+          },
+          {
+            "eastIndex": 2,
+            "heightM": 808,
+            "locationE7": {
+              "lat": 357058103,
+              "lon": -833517055
+            },
+            "northIndex": 3
+          },
+          {
+            "eastIndex": 3,
+            "heightM": 808,
+            "locationE7": {
+              "lat": 357058103,
+              "lon": -833513751
+            },
+            "northIndex": 3
+          }
+        ]
+      }
+    ]
+  },
+  "provenance": {
+    "ardupilot": {
+      "commit": "dbe792162d06cab66c3475fd5556bf7a120f119e",
+      "mappingSources": [
+        "libraries/AP_Terrain/TerrainUtil.cpp",
+        "libraries/AP_Terrain/TerrainGCS.cpp"
+      ],
+      "repository": "https://github.com/ArduPilot/ardupilot"
+    },
+    "generator": "scripts/terrain/official-fixtures.py",
+    "generatorSha256": "849726a02929958399403e3dc1f65065567d81990e68f79a1b08302b4fcd268c",
+    "rounding": {
+      "coordinates": "pinned terraingen float32 constants and truncation toward zero",
+      "gridHeights": "pinned GridBlock.fill int() truncation toward zero",
+      "pointHeight": "unrounded bilinear metres"
+    },
+    "terraingen": {
+      "commit": "bd0639f9b80d4b4cfb45c3cdc4eee964d40a463b",
+      "coordinateHelper": "terrain_gen.py format 4.1",
+      "repository": "https://github.com/ArduPilot/terraingen",
+      "sourceReader": "srtm.py SRTMTile"
+    }
+  },
+  "realWindows": [
+    {
+      "byteLength": 50,
+      "columns": 5,
+      "coversSubgridBit": 0,
+      "encoding": "signed int16, big-endian, row-major north-to-south",
+      "file": "N35W084-bit0-source-window.hgt",
+      "originalColumnEndInclusive": 2302,
+      "originalColumnStart": 2298,
+      "originalRowEndInclusive": 1086,
+      "originalRowStart": 1082,
+      "rowStrideBytes": 10,
+      "rows": 5,
+      "sha256": "0c44db429fcdffa792b8fbe9cd699583e27b325fd078cd8aaa7839a32b6c2980",
+      "synthetic": false
+    },
+    {
+      "byteLength": 48,
+      "columns": 6,
+      "coversSubgridBit": 55,
+      "encoding": "signed int16, big-endian, row-major north-to-south",
+      "file": "N35W084-bit55-source-window.hgt",
+      "originalColumnEndInclusive": 2336,
+      "originalColumnStart": 2331,
+      "originalRowEndInclusive": 1062,
+      "originalRowStart": 1059,
+      "rowStrideBytes": 12,
+      "rows": 4,
+      "sha256": "efc7726ef561cc07e0231e63115a526a850082cce1476a97e614b7d4fb67f423",
+      "synthetic": false
+    }
+  ],
+  "request": {
+    "blockShapeSamples": [
+      28,
+      32
+    ],
+    "blockStrideSamples": [
+      24,
+      28
+    ],
+    "controllerCornerToleranceCm": 2,
+    "degreeTile": {
+      "lat": 35,
+      "lon": -84
+    },
+    "gridIndexEast": 69,
+    "gridIndexNorth": 108,
+    "originDegrees": {
+      "lat": 35.698533999999995,
+      "lon": -83.36164699999999
+    },
+    "originE7": {
+      "lat": 356985340,
+      "lon": -833616470
+    },
+    "sourceGridOriginE7": {
+      "lat": 356985339,
+      "lon": -833616470
+    },
+    "sourceToRequestDeltaE7": {
+      "lat": 1,
+      "lon": 0
+    },
+    "spacingM": 30,
+    "subgridBitMapping": "bit = eastSubgrid + 8 * northSubgrid"
+  },
+  "schemaVersion": 1,
+  "synthetic": {
+    "interpolationCases": {
+      "byteLength": 32,
+      "cases": [
+        {
+          "available": false,
+          "columns": [
+            0,
+            1
+          ],
+          "id": "nodata-withheld",
+          "ifIncorrectlyReplacedWithMinusOneM": 74.75,
+          "interpolatedHeightM": null,
+          "reason": "a contributing HGT sample is -32768",
+          "sampleAt": {
+            "xFraction": 0.5,
+            "yFraction": 0.5
+          }
+        },
+        {
+          "available": true,
+          "columns": [
+            2,
+            3
+          ],
+          "id": "valid-minus-one",
+          "interpolatedHeightM": -1.0,
+          "sampleAt": {
+            "xFraction": 0.5,
+            "yFraction": 0.5
+          }
+        },
+        {
+          "available": true,
+          "columns": [
+            4,
+            5
+          ],
+          "id": "valid-negative",
+          "interpolatedHeightM": -12.0,
+          "sampleAt": {
+            "xFraction": 0.5,
+            "yFraction": 0.5
+          }
+        },
+        {
+          "available": true,
+          "columns": [
+            6,
+            7
+          ],
+          "id": "valid-zero",
+          "interpolatedHeightM": 0.0,
+          "sampleAt": {
+            "xFraction": 0.5,
+            "yFraction": 0.5
+          }
+        }
+      ],
+      "encoding": "signed int16, big-endian, row-major north-to-south",
+      "file": "synthetic-interpolation-cases.hgt",
+      "sha256": "42d3fdf7863edc958485b7ce3fa7c7c125d65a317f49e061d1c50e7e08baf0e5",
+      "shape": [
+        2,
+        8
+      ]
+    },
+    "label": "synthetic; not measurements from the official source tile",
+    "nodataSubgrid": {
+      "available": false,
+      "bit": 0,
+      "byteLength": 50,
+      "derivedFrom": "N35W084-bit0-source-window.hgt",
+      "encoding": "signed int16, big-endian, row-major north-to-south",
+      "file": "N35W084-bit0-nodata-synthetic.hgt",
+      "heightsM": null,
+      "mutation": {
+        "originalColumn": 2298,
+        "originalHeightM": 784,
+        "originalRow": 1086,
+        "replacement": -32768
+      },
+      "originalWindow": {
+        "columnStart": 2298,
+        "rowStart": 1082
+      },
+      "reason": "withhold the complete 4x4 subgrid because one contributing sample is nodata",
+      "sha256": "4b1de151818e307e5d5d22c3c9660c72e4ddc66cb9720a43588b3effc8b0a0e7",
+      "shape": [
+        5,
+        5
+      ]
+    }
+  }
+}

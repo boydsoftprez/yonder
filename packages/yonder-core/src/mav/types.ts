@@ -5,6 +5,8 @@ export type AltitudeDatum = "msl" | "home" | "terrain";
 export interface GeoTarget { lat: number; lon: number; altitudeM: number; datum: AltitudeDatum }
 export interface HomeReference { lat: number; lon: number; alt: number }
 export interface VehicleIdentity { system: number; component: number; autopilot: number; vehicleType: number; generation: string }
+/** Fresh admission state for packet consumers; no telemetry or display composition (R-FLT-28). */
+export interface VehicleContext { identity: VehicleIdentity | null; connected: boolean; busy: boolean }
 export interface FieldValidity { source: string; receivedAt: number | null; ageMs: number | null; valid: boolean; reason?: string }
 /** ArduPlane's reported horizontal estimate. WIND carries no estimator confidence flag. */
 export interface WindEstimate { directionFromDeg: number; speedKt: number; ageMs: number; source: "WIND" }
