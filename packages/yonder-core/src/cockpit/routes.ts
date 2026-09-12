@@ -1,4 +1,6 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
+import { officialTerrainRoute, type TerrainPolicyControl } from "../terrain/official/routes.js";
+import type { TerrainRuntime } from "../terrain/official/runtime.js";
 import type { TerrainPackService } from "../terrain/service.js";
 import type { VehicleService } from "../mav/vehicle.js";
 import type { OperatorRequest } from "../mav/types.js";
@@ -8,6 +10,8 @@ import { packFlight } from './flight-wire.js';
 import { packInstruments } from './instrumentation-wire.js';
 import type { CockpitInstruments } from './host-instruments.js';
 export interface CockpitServices {
+  officialTerrain?: TerrainRuntime;
+  terrainPolicy?: TerrainPolicyControl;
   instruments?: Pick<CockpitInstruments, 'snapshot'>;
   vehicle?: VehicleService;
   data?: CockpitData;
@@ -22,6 +26,8 @@ export async function cockpitRoute(
   body: unknown,
 ): Promise<{ status: number; body: unknown } | null> {
   if (!path.startsWith("/cockpit/")) return null;
+  const official = await officialTerrainRoute(services.officialTerrain, method, path, body, services.terrainPolicy);
+  if (official) return official;
   if (path === '/cockpit/instruments' && method === 'GET') return services.instruments
     ? { status: 200, body: packInstruments(await services.instruments.snapshot()) }
     : { status: 503, body: { error: 'Instrumentation service unavailable' } };

@@ -1028,6 +1028,15 @@ say "R-UI-12: capture every page, in both palettes, and look at them"
 # machine — so a missing playwright is a loud skip rather than a failure, and
 # CI installs it so that there it is neither.
 if node -e 'import("playwright")' >/dev/null 2>&1; then
+    # R-FLT-27/28: actual authenticated PFD controls with explicit terrain API
+    # fixtures. Real backend/router behavior is covered by daemon integration.
+    if node "$REPO/scripts/terrain/check-pfd.mjs" \
+        --base-url "http://127.0.0.1:$PORT" --password "$PASSWORD" \
+        --artifacts "$REPO/vendor/terrain-pfd-check"; then
+        ok "official terrain PFD: preparation, refusal, stale state and both palettes"
+    else
+        bad "official terrain PFD: see browser scenario failure above"
+    fi
     # The gate's own rules, before the console is asked anything.
     #
     # Everything below this line proves the rules against the pages this

@@ -1,0 +1,85 @@
+{
+  "schemaVersion": 1,
+  "provenance": {
+    "terraingenCommit": "bd0639f9b80d4b4cfb45c3cdc4eee964d40a463b",
+    "ardupilotCommit": "dbe792162d06cab66c3475fd5556bf7a120f119e",
+    "coordinateSource": "terrain_gen.py format 4.1 add_offset",
+    "requestSource": "AP_Common/Location.cpp offset_latlng and AP_Terrain/TerrainUtil.cpp calculate_grid_info"
+  },
+  "pointSample": {
+    "location": {"latE7": 357000000, "lonE7": -833600000},
+    "rawHgtSampleM": 741,
+    "gridLocations": [
+      {"latE7": 356998814, "lonE7": -833603200},
+      {"latE7": 357001509, "lonE7": -833603189},
+      {"latE7": 356998814, "lonE7": -833599896},
+      {"latE7": 357001509, "lonE7": -833599885}
+    ],
+    "generatedIntegerHeightsM": [730, 718, 744, 737],
+    "controllerReportedHeightM": 740.3853149414062
+  },
+  "cases": [
+    {
+      "id": "interior-positive-west",
+      "requestOrigin": {"latE7": 356985340, "lonE7": -833616470},
+      "degreeOrigin": {"lat": 35, "lon": -84},
+      "gridIndexNorth": 108,
+      "gridIndexEast": 69,
+      "canonicalOrigin": {"latE7": 356985339, "lonE7": -833616470}
+    },
+    {
+      "id": "southern-western-crossing",
+      "requestOrigin": {"latE7": -350039423, "lonE7": -830082118},
+      "degreeOrigin": {"lat": -36, "lon": -84},
+      "gridIndexNorth": 154,
+      "gridIndexEast": 107,
+      "canonicalOrigin": {"latE7": -350039423, "lonE7": -830082118},
+      "bit": 55,
+      "points": [
+        {"latE7": -349974744, "lonE7": -829989830},
+        {"latE7": -349974744, "lonE7": -829986520},
+        {"latE7": -349974744, "lonE7": -829983210},
+        {"latE7": -349974744, "lonE7": -829979900},
+        {"latE7": -349972049, "lonE7": -829989846},
+        {"latE7": -349972049, "lonE7": -829986536},
+        {"latE7": -349972049, "lonE7": -829983226},
+        {"latE7": -349972049, "lonE7": -829979916},
+        {"latE7": -349969354, "lonE7": -829989864},
+        {"latE7": -349969354, "lonE7": -829986554},
+        {"latE7": -349969354, "lonE7": -829983244},
+        {"latE7": -349969354, "lonE7": -829979933},
+        {"latE7": -349966659, "lonE7": -829989880},
+        {"latE7": -349966659, "lonE7": -829986570},
+        {"latE7": -349966659, "lonE7": -829983260},
+        {"latE7": -349966659, "lonE7": -829979949}
+      ]
+    },
+    {
+      "id": "antimeridian-crossing",
+      "requestOrigin": {"latE7": 0, "lonE7": 1799960577},
+      "degreeOrigin": {"lat": 0, "lon": 179},
+      "gridIndexNorth": 0,
+      "gridIndexEast": 132,
+      "canonicalOrigin": {"latE7": 0, "lonE7": 1799960577},
+      "bit": 55,
+      "points": [
+        {"latE7": 64679, "lonE7": -1799963964},
+        {"latE7": 64679, "lonE7": -1799961269},
+        {"latE7": 64679, "lonE7": -1799958574},
+        {"latE7": 64679, "lonE7": -1799955879},
+        {"latE7": 67374, "lonE7": -1799963964},
+        {"latE7": 67374, "lonE7": -1799961269},
+        {"latE7": 67374, "lonE7": -1799958574},
+        {"latE7": 67374, "lonE7": -1799955879},
+        {"latE7": 70068, "lonE7": -1799963964},
+        {"latE7": 70068, "lonE7": -1799961269},
+        {"latE7": 70068, "lonE7": -1799958574},
+        {"latE7": 70068, "lonE7": -1799955879},
+        {"latE7": 72763, "lonE7": -1799963964},
+        {"latE7": 72763, "lonE7": -1799961269},
+        {"latE7": 72763, "lonE7": -1799958574},
+        {"latE7": 72763, "lonE7": -1799955879}
+      ]
+    }
+  ]
+}

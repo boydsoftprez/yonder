@@ -127,10 +127,11 @@ opens the editor.
    you tap the location and returns to the form with your entered elevation kept.
    Review that elevation for the new location. **Cancel home selection** returns
    to the previous values.
-2. Optionally press **Use terrain elevation**. This samples the selected prepared
-   EGM96 terrain package and labels the estimate and source. A missing package,
-   incompatible datum or coverage gap leaves elevation for manual entry. The
-   button does not sample public elevation tiles outside a prepared package.
+2. Optionally press **Use official terrain elevation**. This samples prepared
+   official ArduPilot MSL terrain at the entered coordinates and labels its provider,
+   generation and datum evidence. An unavailable or unverified sample, including a
+   source gap, leaves elevation for manual entry. The button never substitutes a Cove
+   ground/surface pack, public elevation tile, barometric height or ellipsoid height.
 3. **Save planning home** changes the local draft, its terrain profile and exported
    waypoint file. **Undo edit** in Mission controls restores the prior draft.
    Waypoint altitude values, order and jump targets are preserved. For example,
@@ -277,7 +278,7 @@ explains magenta guidance, the cyan references, measured VSI and unavailable dat
 ![Expanded waypoint list showing the active leg bracket, next waypoint and separate altitude cells](images/cockpit/mission-list.png)
 
 *Fixture AUTO leg WP08 → WP09, followed by WP10. Unavailable waypoint AGL stays
-as a dash until compatible terrain is loaded.*
+as a dash until matching prepared official terrain is available.*
 
 ![Mission editor for an unlimited loiter with radius, direction and altitude](images/cockpit/mission-loiter.png)
 
@@ -358,20 +359,23 @@ restarting item 01 can request another climb above the current takeoff reference
 
 ### 7. Inspect terrain below the plan
 
-Enable terrain and configure a ground source as in step 8. Press **Profile**
-beneath the mission inset, or its **Profile** tab when expanded. Move **Inspect
-along route** to read estimated AGL and height above mapped surface. Choose a
-waypoint in **Inspect waypoint** and use **Edit waypoint altitude** to change it.
+Enable the official terrain service and prepare the route coverage as in step 8.
+Press **Profile** beneath the mission inset, or its **Profile** tab when expanded.
+Move **Inspect along route** to read estimated AGL against official MSL ground.
+Choose a waypoint in **Inspect waypoint** and use **Edit waypoint altitude** to
+change it.
 
-![Terrain profile with planned altitude, ground and mapped surface plus a distance inspector](images/cockpit/terrain-profile.png)
+![Terrain-profile design specimen with planned altitude, ground and mapped surface](images/cockpit/terrain-profile.png)
 
-*Synthetic flight plan over the actual USGS 2016 Cove pack. Magenta is planned
-altitude, green is ground and amber is mapped surface. This samples the route
-centreline; it does not model climb capability, turns or every obstacle.*
+*Design specimen from the earlier Cove-backed profile. The current profile uses
+official ArduPilot MSL ground for the green line and retains a separately sourced
+amber detailed mapped-surface overlay when its datum is verified and compatible.
+It samples the route centreline and does not model climb capability or turns.*
 
-**Plan MSL datum** must agree with the source. Unknown or incompatible references
-remove the clearance calculation. Read ground and mapped-surface coverage
-separately; a gap does not mean clear terrain. See [profile details](#flight-planning-profile).
+The profile accepts only authenticated official samples carrying the fixed provider,
+30 m spacing, generation and MSL datum evidence. Unknown, malformed and missing
+samples stay as gaps and remove the affected AGL result. Detailed display terrain is
+not substituted. See [profile details](#flight-planning-profile).
 
 ### 8. Set up terrain, satellite imagery and traffic
 
@@ -391,6 +395,9 @@ Open **Display → Map, terrain & data**, then **Connection & offline data**:
    saved-package result, select **Offline browser packs**, and enable terrain again.
    Prepared terrain validation requires HTTPS or localhost. After reloading,
    reselect **Offline browser packs**; a newly opened cockpit starts in Ground mode.
+5. To prepare the separate official source used by the flight controller, remain
+   disarmed and use **Official controller terrain** as described under
+   [Prepare official terrain for the controller](#prepare-official-terrain-for-the-controller).
 
 ![Connection and offline data controls in Display and data](images/cockpit/data-connection.png)
 
@@ -431,8 +438,9 @@ recorder or send a flight command.*
 | Heading, altitude, speed or radius unavailable | Those extended GUIDED controls require a fresh supported ArduPlane 4.7.1 identity. Opening Modes does not prove every optional feature is available. |
 | Accepted, but no HDG/ALT capture announcement | Acceptance is an ACK. These controls have no verified capture annunciation; inspect actual mode, measured motion and Aircraft status. |
 | Request times out or says unknown | Inspect actual aircraft state before deciding to repeat it. The browser does not retry a flight command automatically. |
-| Terrain is flat or EST AGL is a dash | Check terrain enabled, source/pack coverage, fresh position and verified compatible height datum. The conventional horizon is still useful without terrain. |
-| Waypoint AGL or profile clearance is a dash | Load compatible prepared terrain. Above-home altitude alone does not establish remote AGL; surface coverage can be missing while ground is present. |
+| Detailed terrain is flat | Check the display terrain switch, selected display source and its browser-pack coverage. This layer is independent of official controller terrain and the official ownship, waypoint, profile and home elevation paths. The conventional horizon remains useful without it. |
+| EST AGL is a dash | Check that official terrain serving is enabled, the current position is inside prepared official coverage, and fresh `GLOBAL_POSITION_INT` MSL altitude and position are available. Unknown provenance, stale samples and source nodata fail closed; barometric or ellipsoid altitude is not substituted. |
+| Waypoint or profile AGL is a dash | Prepare official terrain for that coordinate and use **Refresh official terrain**. Above-home altitude alone does not establish remote AGL. Missing, malformed or unverified official samples remain gaps; the Cove ground/surface display cannot fill them. |
 | Map shows the world or no nearby traffic | Check the map's GPS message. Fresh telemetry alone does not establish a position: a controller can report `0,0` with no GPS fix. Ownship, motion projection and nearby traffic wait for a fresh fix and coordinates. They resume automatically when those arrive. The map can still be panned and mission geometry remains visible. |
 | Traffic is enabled but empty | Read the traffic-status message and selected range. A browser-access error may require **Display → Map, terrain & data → ADS-B relay origin → Apply ADS-B relay**; this changes only traffic sourcing. HTTP 429 waits for cooldown. No targets does not establish clear airspace. |
 | Traffic appears only on the map | Geometric height/geoid conversion, ownship datum or forward field of view may be missing. Import the EGM96 grid through Traffic data setup when applicable. |
@@ -507,7 +515,7 @@ layouts, including keyboard navigation. Graphical gauges scale their titles,
 faces and secondary readings together to fill their allocated instrument space.
 
 The default top fields are active waypoint, waypoint distance, ETE, estimated
-terrain AGL, ground speed and observed airborne total. The default bank shows battery 1
+official terrain AGL, ground speed and observed airborne total. The default bank shows battery 1
 current, remaining charge, charge used, cellular signal, Yonder CPU utilisation
 and flight telemetry age. **Fields** and **Instruments** configure these selections;
 **Display → Layout & units → Instrument panel** chooses placement. Expand the mission pane to see
@@ -556,8 +564,10 @@ terrain**. **Save draft item** changes the local plan; **Mission controls → Up
 draft to aircraft** still requires review and confirmation. Mission speed-command
 fields also use the selected speed units. Other mission parameters retain their
 explicit catalog units. A missing altitude reads **— FT** or **— M**; it is never
-filled with zero. The smaller **AGL** value is estimated from the terrain pack
-at that waypoint, separate from the authored altitude datum.
+filled with zero. The smaller **AGL** value uses an authenticated official ArduPilot
+MSL sample at that waypoint, separate from the authored altitude datum. Missing
+coverage or incomplete provider, generation, spacing or datum evidence leaves a dash;
+the detailed display layer does not fill it.
 
 During a GUIDED heading request, ArduPlane continues transmitting its previous
 geographic target. The cockpit suppresses that target's bearing, distance, ETE
@@ -579,12 +589,12 @@ missing sources. The catalog is bounded and reports when readings are omitted.
 
 | Category | Readings and required sources |
 | --- | --- |
-| Navigation | Active waypoint, distance/ETE, desired track and lateral deviation; reported IAS/ground speed and height above home; calculated home distance/bearing/relative direction, remaining planned distance and recorded ground-track distance. These require fresh flight telemetry and, where applicable, verified mission geometry, reported home, retained trail or compatible terrain. |
+| Navigation | Active waypoint, distance/ETE, desired track and lateral deviation; reported IAS/ground speed and height above home; calculated home distance/bearing/relative direction, remaining planned distance and recorded ground-track distance. These require fresh flight telemetry and, where applicable, verified mission geometry, reported home, retained trail or prepared official terrain. |
 | Flight time | Flight-controller power-on time and observed armed, airborne and AUTO-execution totals. They use reported boot, heartbeat and landed-state messages; see the counter rules below. |
 | Electrical | Per-battery voltage, current, remaining charge, consumed mAh/Wh, temperature, remaining time, charge state and fault flags, plus the independent system battery summary. The flight controller needs configured battery monitors and must report each supported field. |
 | Propulsion | ESC temperature, voltage/current, charge used and reported RPM; separate RPM sensors; engine/EFI health, RPM, fuel, pressure, temperature, throttle and ignition readings; generator power, current, voltage, temperature, runtime and maintenance time. These require the corresponding ESC, RPM, EFI or generator telemetry and firmware support. |
 | Navigation health | Separate GPS fix, satellites, coordinates, altitude, speed/course, accuracy and dilution readings; estimator flags, ratios, variances and accuracy. Each depends on its GPS or estimator report; a second receiver is not assumed. |
-| Terrain | Rangefinder/distance-sensor measurements, orientation, limits and signal/variance; flight-controller terrain elevation, clearance, grid spacing and block counts. A downward range sensor, aircraft terrain report and browser terrain estimate remain distinct sources. |
+| Terrain | Rangefinder/distance-sensor measurements, orientation, limits and signal/variance; flight-controller terrain elevation, clearance, grid spacing and block counts. A downward range sensor, aircraft terrain report, Yonder's official MSL sample and the detailed browser display remain distinct sources. |
 | Aircraft state | Reported mode, armed state, landed state and VTOL state. VTOL transition labels require the autopilot's explicit state report; altitude or speed does not determine a transition. |
 | Controller health | Flight-controller scheduler load, sensor presence/enabled/health flags, memory, communication/error counts, board/servo power, MCU temperature/voltage, vibration and IMU clipping. MCU measurements require hardware-monitor support; they are separate from the companion board's temperature and CPU use. |
 | Fence & alerts | Reported fence breach, breach count/type/time and mitigation. A missing fence report does not establish that no breach or alert exists. |
@@ -688,30 +698,35 @@ loop is introduced. See the [protocol evidence](console/evidence/2026-09-07-flig
 
 Press **Profile** at the bottom of the mission inset, or expand the inset and
 select its **Profile** tab. The PFD remains visible. The chart shows magenta planned
-altitude, green ground and an amber mapped-surface line. Move **Inspect along route**
-to read estimated AGL and clearance over mapped surface between waypoints. Select
-a waypoint on the chart or in the picker to see its altitude and edit it.
+MSL altitude and green official ground. Move **Inspect along route** to read estimated
+AGL between waypoints. Select a waypoint on the chart or in the picker to see its
+altitude and edit it. An optional amber detailed mapped-surface overlay retains its
+own source and survey metadata. It is a display aid, not controller terrain coverage.
 
-The profile uses native prepared terrain from the selected source. It loads a
-bounded route sample set in the background for waypoint AGL, retains decoded tiles,
-and recalculates after edits or source changes. The ground browser/source supplies
-these data by default. With aircraft-proxied terrain selected, press **Load route
-terrain from aircraft** explicitly; the profile does not start that transfer merely
-because the page opened. There are at most 192 native tiles, 32 MiB decoded tile
-cache, two concurrent tile requests and 2,048 route samples per calculation.
+The profile reads a bounded route sample set from Yonder's prepared official terrain
+service and recalculates after mission or home edits. Press **Refresh official terrain**
+to request another calculation. Requests are split into batches of at most 128 points,
+with at most 2,048 route samples per calculation. This reads Yonder's authenticated
+local service; it does not select a browser ground source, load route terrain through
+the aircraft, or initiate an upstream source download.
 
-Check **Plan MSL datum** before comparing an imported plan with terrain. The default
-uses the aircraft's configured height reference; an unknown or mismatched reference
-removes calculated clearances. Source and survey details are expandable below the
-chart. Ground and surface coverage are reported independently. A missing surface
-sample means unknown obstacle clearance even when ground elevation is present.
+There is no profile datum override. Each accepted sample must carry the fixed
+`ardupilot-srtm1` provider, 30 m spacing, source generation and MSL datum evidence;
+the expandable **Official terrain source** section shows that evidence. An unavailable,
+unknown or malformed sample creates a visible gap and removes the affected AGL value.
+Detailed Cove ground never substitutes for official ground or AGL. The optional
+mapped-surface overlay requires a verified EGM96 transform and a matching selected
+display datum; other or unknown datums remain unavailable. Its source and survey
+metadata are shown separately. Aircraft-sourced display loading requires an explicit
+operator request and uses a bounded cache. Missing official ground remains a gap even
+when detailed mapped-surface data is available.
 
 This is a sampled centreline planning view. Ordinary legs interpolate waypoint MSL
 altitudes; a pair of terrain-relative waypoints interpolates their ground offset.
 Climb performance, turn arcs, loiters, return/landing paths and unresolved mission
 jumps are not predicted. Visible limitations identify omitted geometry and sample
-or load limits. Gaps remain gaps; small objects between samples and obstacles absent
-from the survey are not established clear by this view.
+limits. Gaps remain gaps, and the official source is ground elevation rather than a
+current obstacle survey; this view does not establish obstacle clearance.
 
 
 ## Slip / skid ball
@@ -1044,6 +1059,57 @@ hybrid imagery and internet traffic independently in Display → Map, terrain & 
 assets are served by the device. The grid map, mission geometry and instruments
 remain useful with sources disabled or unavailable.
 
+### Prepare official terrain for the controller
+
+**Official controller terrain** is a separate onboard service for ArduPilot. It always
+uses the official ArduPilot ALOS-derived SRTM1 source and a 30 m controller grid. It does
+not use the selected detailed display source, its browser cache or the surveyed Cove
+ground/surface pack. Keep the service's source and coverage readouts separate from what the
+map happens to draw.
+
+Set up coverage at a safe, disarmed bench:
+
+1. Open **Display → Map, terrain & data → Official controller terrain**. The service is
+   disabled by default. Review **Enable official terrain service** and the persistent
+   storage quota, which defaults to 2048 MiB, then apply the terrain-only policy. Confirm
+   and keep the change if the ordinary configuration rollback prompt is shown.
+2. Select the intended controller and press **Refresh controller terrain**. This explicit,
+   authenticated read-only action asks for capability, terrain parameters and rally points;
+   it does not write a parameter. **Refresh status** only reloads Yonder's status. Merely
+   opening the panel or leaving it open does not send an aircraft command.
+3. Choose **Current map area** or **Current aircraft mission**, name the area and review
+   the buffer and server-calculated geometry. Mission coverage uses only a mission that was
+   explicitly downloaded and verified, plus current home and explicitly refreshed rally
+   points. Select **Refresh source tiles** only when you intend another upstream download.
+4. Press **Preview area**, inspect tile count, estimated bytes, filesystem free space and
+   any partial-coverage reasons, then press **Prepare**. Preparation requires a fresh
+   selected-controller identity, observed disarmed state, persistent writable storage,
+   enough quota and the shared device storage reserve. Cancelling removes staging; it does
+   not turn missing source samples into usable elevations.
+5. Review **Prepared areas**. Pin marks data you intend to retain; this version does not
+   automatically evict saved areas. Use Delete explicitly to reclaim an area no longer needed.
+   Closing the browser or losing internet after preparation does not stop Yonder
+   serving validated objects from persistent storage. A controller cache miss never starts
+   an upstream download.
+
+Read the three status groups independently. **Yonder coverage** describes prepared areas,
+including partial coverage and source nodata. **Service** reports requests answered by
+Yonder and missing requests. **Controller** reports the controller's fresh or stale
+pending/loaded counters and spacing. A sent block is not proof the controller loaded it,
+and pending zero does not prove that the full mission is resident or ready for flight. A
+controller reboot invalidates the controller report while prepared Yonder coverage remains
+on disk.
+
+Operate one terrain responder per aircraft: disable terrain delivery in other ground
+stations while Yonder is the selected responder. This is an operator-managed policy;
+Yonder does not enforce exclusivity. A station attached directly to another FC UART, USB
+port or radio can bypass Yonder entirely, and no competing packet observed by Yonder does
+not prove one is absent.
+
+Hardware acceptance remains pending. The current Radxa bench state partition cannot meet
+the default shared storage reserve, so preparation must refuse it. The existing software
+and simulated-controller evidence does not establish flight readiness.
+
 Offline terrain/map imports and geoid validation require **HTTPS**, or a page
 served from **localhost**. For an iPad connecting to another computer, use an
 HTTPS ground service; `127.0.0.1` on the iPad points to the iPad itself. A missing
@@ -1077,22 +1143,28 @@ Lost/invalid data still removes the affected indication. Cached meshes and satel
 textures survive region changes. Yellow shading eases in when new surfaces arrive;
 red warning shading and numeric advisories do not wait for that visual fade.
 
-The aircraft height datum defaults to **Unknown** because MAVLink AMSL does not
-identify its geoid model. Declare EGM96, NAVD88 or WGS84 ellipsoid only from a
-verified receiver configuration. Native height comparisons require compatible
-references. The named Terrarium fallback can provide approximate terrain when the
-pack cannot be used; it does not supply numeric AGL without a verified common
-reference. Estimated ground AGL is separate from clearance over mapped objects. **EST AGL**
-appears directly beneath the MSL tape. **AGL —** means fresh compatible terrain is
-unavailable, including when the aircraft leaves a prepared pack's footprint.
+The **Verified aircraft height datum** selector remains a display and registration
+setting for detailed terrain/surface comparisons and camera overlays. It defaults to
+**Unknown** because generic MAVLink altitude does not identify every receiver's geoid
+model. Declare EGM96, NAVD88 or WGS84 ellipsoid only from a verified receiver
+configuration; incompatible display references remain unavailable.
 
-The **Current-motion forecast** samples reported track, ground speed and vertical
-speed through the selected time/distance horizon. It checks a ±20 m corridor,
-with bounded sampling, and reports coverage, minimum ground/surface clearance,
-closure and time to the 30 m warning or 90 m caution threshold. A partial result
-does not assert that the remaining path is clear. It is a constant-motion estimate;
-it does not predict autopilot turns or control the aircraft. Static terrain colors
-and the future-motion forecast are separate advisories.
+That selector is not an input or fallback for flight **EST AGL**. The numeric value
+beneath the MSL tape requires a recent authenticated official ArduPilot MSL sample at
+the current position and fresh MSL altitude from `GLOBAL_POSITION_INT`. The sample must
+carry the expected provider, generation, 30 m spacing and datum evidence. A stale or
+missing position, source gap or invalid evidence shows **AGL —**. The cockpit does not
+substitute GPS ellipsoid height, barometric altitude, Terrarium, Cove ground or Cove
+mapped surface for this value.
+
+The detailed display layer retains its separately sourced **Current-motion forecast**.
+It samples reported track, ground speed and vertical speed through the selected
+time/distance horizon against that displayed ground/surface source. It checks a ±20 m
+corridor, with bounded sampling, and reports coverage, minimum ground/surface clearance,
+closure and time to the 30 m warning or 90 m caution threshold. This is a display aid,
+not the official controller datum and not a fallback for official ownship, waypoint,
+profile or home estimates. A partial result does not assert that the remaining path is
+clear. It does not predict autopilot turns or control the aircraft.
 
 Traffic controls select 1–100 NM depiction range and 60, 120 or 300 second observed
 breadcrumbs. Fetch coverage follows the selected 1–100 NM depiction range; a

@@ -337,6 +337,28 @@
       "additionalProperties": false,
       "default": {}
     },
+    "terrain": {
+      "type": "object",
+      "properties": {
+        "enabled": {
+          "type": "boolean",
+          "default": false
+        },
+        "provider": {
+          "type": "string",
+          "const": "ardupilot-srtm1",
+          "default": "ardupilot-srtm1"
+        },
+        "quotaMiB": {
+          "type": "integer",
+          "minimum": 128,
+          "maximum": 32768,
+          "default": 2048
+        }
+      },
+      "additionalProperties": false,
+      "default": {}
+    },
     "remote": {
       "type": "object",
       "properties": {

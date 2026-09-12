@@ -53,6 +53,10 @@ system:
   timezone: UTC
 storage:
   reserve_mb: 1024
+terrain:
+  enabled: false
+  provider: ardupilot-srtm1
+  quotaMiB: 2048
 remote:
   zerotier:
     enabled: false

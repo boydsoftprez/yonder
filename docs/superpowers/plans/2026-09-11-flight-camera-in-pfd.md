@@ -244,7 +244,7 @@ deliverable's own evidence.
 - [ ] **Step 7:** Add the guide group, restoring palette, viewport and background after it
       so later groups are unaffected, and assert no command was sent.
 - [ ] **Step 8:** Commit the captures with their README rows and manifest entries, write the
-      user-guide step, correct its camera-unavailable row, move manifest rows F-31 to F-34
+      user-guide step, correct its camera-unavailable row, move manifest rows F-32 to F-35
       to their implementations, and close K-68 leaving its hardware line pending.
 - [ ] **Step 9:** Run the final checks once on the finished revision, then hand the hardware
       scenario over.
@@ -296,7 +296,7 @@ own initiative. Independent of Tasks 1 and 2 and can run beside them.
 
 ## Ledger
 
-Base: the commit adding the spec, R-FLT-29, K-68 and manifest rows F-31 to F-34. Tasks 1
+Base: the commit adding the spec, R-FLT-29, K-68 and manifest rows F-32 to F-35. Tasks 1
 and 2 are serialised on the working tree; Task 3 changes no code and runs beside them.
 
 Nothing here touches networking, config apply and rollback, secrets, authorisation or

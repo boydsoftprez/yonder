@@ -286,7 +286,7 @@ predates these and must be brought up to them:
 Settled on 2026-09-11 by rendering the production PFD component in the cockpit
 fixture harness with synthetic telemetry and a synthetic camera frame; the design is
 [the camera in the flight display](../../../superpowers/specs/2026-09-11-flight-camera-in-pfd-design.md),
-the defect it corrects is K-68, and the manifest rows are F-31 to F-34. None of these
+the defect it corrects is K-68, and the manifest rows are F-32 to F-35. None of these
 renders is flight evidence, and the two overlay candidates are composites of a terrain
 plate over a picture from a different place: they show a treatment, not alignment.
 
