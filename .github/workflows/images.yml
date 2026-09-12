@@ -87,8 +87,6 @@ jobs:
       contents: read
     env:
       IMAGE_INPUT_ROOT: ${{ vars.IMAGE_INPUT_ROOT }}
-      BUILD_DIR: ${{ runner.temp }}/yonder-image-${{ matrix.target }}
-      SEALED_DIR: ${{ runner.temp }}/yonder-transfer-${{ matrix.target }}
     steps:
       - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
         with:
@@ -120,6 +118,9 @@ jobs:
             test "$available" -ge "$minimum"
           done
       - name: Build one production image without network access
+        env:
+          BUILD_DIR: ${{ runner.temp }}/yonder-image-${{ matrix.target }}
+          SEALED_DIR: ${{ runner.temp }}/yonder-transfer-${{ matrix.target }}
         run: |
           set -euo pipefail
           complete=0
@@ -130,6 +131,8 @@ jobs:
           complete=1
       - name: Encrypt the complete target output before handoff
         env:
+          BUILD_DIR: ${{ runner.temp }}/yonder-image-${{ matrix.target }}
+          SEALED_DIR: ${{ runner.temp }}/yonder-transfer-${{ matrix.target }}
           IMAGE_TRANSFER_KEY: ${{ secrets.IMAGE_TRANSFER_PUBLIC_KEY }}
         run: |
           set -euo pipefail
@@ -146,6 +149,9 @@ jobs:
           retention-days: 1
       - name: Remove target scratch data
         if: always()
+        env:
+          BUILD_DIR: ${{ runner.temp }}/yonder-image-${{ matrix.target }}
+          SEALED_DIR: ${{ runner.temp }}/yonder-transfer-${{ matrix.target }}
         run: rm -rf "$BUILD_DIR" "$SEALED_DIR"
 
   draft:
@@ -158,8 +164,6 @@ jobs:
       contents: write
     env:
       IMAGE_INPUT_ROOT: ${{ vars.IMAGE_INPUT_ROOT }}
-      SOURCE_DIR: ${{ runner.temp }}/yonder-source-evidence
-      TRANSFER_DIR: ${{ runner.temp }}/yonder-image-transfers
     steps:
       - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
         with:
@@ -199,6 +203,8 @@ jobs:
           test "$available" -ge "$minimum"
       - name: Authenticate transfers and create or update a draft release
         env:
+          SOURCE_DIR: ${{ runner.temp }}/yonder-source-evidence
+          TRANSFER_DIR: ${{ runner.temp }}/yonder-image-transfers
           GH_TOKEN: ${{ github.token }}
           IMAGE_TRANSFER_KEY: ${{ secrets.IMAGE_TRANSFER_PRIVATE_KEY }}
           IMAGE_TARGET: ${{ github.event_name == 'push' && 'all' || inputs.target }}

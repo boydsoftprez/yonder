@@ -243,6 +243,11 @@ test('images workflow has exact triggers, pinned actions, isolated permissions a
   assert.deepEqual(workflow.jobs.draft.permissions, { contents: 'write' });
   assert.equal(workflow.jobs.build['runs-on'], '${{ vars.IMAGE_RUNNER }}');
   assert.equal(workflow.jobs.draft['runs-on'], workflow.jobs.build['runs-on']);
+  for (const job of [workflow.jobs.build, workflow.jobs.draft]) {
+    assert.doesNotMatch(JSON.stringify(job.env ?? {}), /runner\.temp/);
+  }
+  assert.ok(workflow.jobs.build.steps.filter(step => step.env?.BUILD_DIR).length >= 2);
+  assert.ok(workflow.jobs.draft.steps.some(step => step.env?.SOURCE_DIR && step.env?.TRANSFER_DIR));
   assert.match(text, /Require the configured native ARM64 image runner/);
   assert.equal(text.match(/process\.versions\.node[^\n]+>= 24/g)?.length, 3);
   assert.equal(workflow.jobs.build.strategy['fail-fast'], false);
