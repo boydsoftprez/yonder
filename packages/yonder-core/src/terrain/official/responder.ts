@@ -3,7 +3,7 @@
 import {common, minimal, MavLinkProtocolV2} from 'node-mavlink';
 import type {Clock} from '../../apply/types.js';
 import {decodeDatagram, type DecodedFrame} from '../../mav/protocol.js';
-import type {VehicleSnapshot} from '../../mav/types.js';
+import type {VehicleContext} from '../../mav/types.js';
 import type {OfficialTerrainStore, SubgridResult} from './store.js';
 import {TerrainCompatibility} from './compatibility.js';
 import type {TerrainPolicy, TerrainRequestKey} from './types.js';
@@ -15,7 +15,7 @@ export const TERRAIN_SOURCE_SYSTEM=254;
 export const TERRAIN_SOURCE_COMPONENT=192;
 
 export interface TerrainResponderOptions {
-  vehicle:()=>VehicleSnapshot;
+  vehicle:()=>VehicleContext;
   store:Pick<OfficialTerrainStore,'readSubgrid'>;
   send:(bytes:Uint8Array)=>Promise<void>;
   clock:Clock;
@@ -118,7 +118,7 @@ export class TerrainResponder {
     this.closed=true; this.queue.splice(0); this.clearTimer();
   }
 
-  private receiveFrame(frame:DecodedFrame,vehicle:VehicleSnapshot,now:number):void {
+  private receiveFrame(frame:DecodedFrame,vehicle:VehicleContext,now:number):void {
     this.compatibility.receive(frame,vehicle,now);
     if(frame.data instanceof minimal.Heartbeat && frame.data.autopilot!==8 && frame.data.type!==6) this.observeHeartbeat(frame,now);
     if(frame.data instanceof common.TerrainData
@@ -151,7 +151,7 @@ export class TerrainResponder {
     }
   }
 
-  private enqueue(request:common.TerrainRequest,vehicle:VehicleSnapshot,now:number):void {
+  private enqueue(request:common.TerrainRequest,vehicle:VehicleContext,now:number):void {
     if(!this.admitted(vehicle,false)) return;
     if(!validRequest(request)) {this.dropped++;return;}
     const routerGeneration=this.options.routerGeneration()!, compatibility=this.compatibility.snapshot(vehicle);
@@ -166,7 +166,7 @@ export class TerrainResponder {
     }
   }
 
-  private selectedFrame(frame:DecodedFrame,vehicle:VehicleSnapshot):boolean {
+  private selectedFrame(frame:DecodedFrame,vehicle:VehicleContext):boolean {
     return vehicle.connected&&frame.system===vehicle.identity?.system&&frame.component===vehicle.identity.component;
   }
 
@@ -219,7 +219,7 @@ export class TerrainResponder {
     }
   }
 
-  private admitted(vehicle:VehicleSnapshot,requireIdle:boolean):boolean {
+  private admitted(vehicle:VehicleContext,requireIdle:boolean):boolean {
     this.prune(this.options.clock.now());
     const identity=vehicle.connected?vehicle.identity:null;
     if(!identity||!this.options.policy().enabled||this.options.routerGeneration()===null||this.ambiguous(vehicle)) return false;
@@ -227,13 +227,13 @@ export class TerrainResponder {
     return this.compatibility.snapshot(vehicle).compatible;
   }
 
-  private current(pending:PendingRequest,vehicle:VehicleSnapshot):boolean {
+  private current(pending:PendingRequest,vehicle:VehicleContext):boolean {
     const compatibility=this.compatibility.snapshot(vehicle);
     return !this.closed&&pending.expiresAt>this.options.clock.now()&&vehicle.connected&&vehicle.identity?.generation===pending.vehicleGeneration
       &&this.options.routerGeneration()===pending.routerGeneration&&compatibility.reboot===pending.reboot;
   }
 
-  private ambiguous(vehicle:VehicleSnapshot):boolean {
+  private ambiguous(vehicle:VehicleContext):boolean {
     const identity=vehicle.connected?vehicle.identity:null;
     if(!identity||this.options.clock.now()<this.identityOverflowUntil||this.known.size!==1) return true;
     const only=this.known.values().next().value as SeenIdentity;
@@ -249,7 +249,7 @@ export class TerrainResponder {
     this.lastVehicleGeneration=selected;
   }
 
-  private observeCompatibility(vehicle:VehicleSnapshot):void {
+  private observeCompatibility(vehicle:VehicleContext):void {
     const reboot=this.compatibility.snapshot(vehicle).reboot;
     if(reboot!==this.lastReboot) {this.clearQueue();this.report=null;this.lastReboot=reboot;}
   }

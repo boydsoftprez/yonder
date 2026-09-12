@@ -2,7 +2,7 @@
 // R-CMD-04/05, R-FLT-28: this read-only aircraft transaction starts only on an authenticated action.
 import {ardupilotmega, common, MavLinkProtocolV2, standard, type MavLinkData} from 'node-mavlink';
 import {createHash} from 'node:crypto';
-import type {VehicleSnapshot} from '../../mav/types.js';
+import type {VehicleContext} from '../../mav/types.js';
 import type {DecodedFrame} from '../../mav/protocol.js';
 import type {Clock} from '../../apply/types.js';
 
@@ -19,7 +19,7 @@ export class TerrainControllerRefresh {
   private chain: Promise<void> = Promise.resolve();
   private epoch = 0;
   private closed = false;
-  constructor(private options: {vehicle: () => VehicleSnapshot; send: (bytes: Uint8Array) => Promise<void>; clock: Clock}) {}
+  constructor(private options: {vehicle: () => VehicleContext; send: (bytes: Uint8Array) => Promise<void>; clock: Clock}) {}
   get busy(): boolean { return this.state === 'refreshing'; }
   start(operator: string, generation: string): void {
     if (this.closed) throw new Error('Controller refresh service is closed');

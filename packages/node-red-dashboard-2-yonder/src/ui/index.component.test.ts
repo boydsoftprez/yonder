@@ -1,5 +1,6 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 import { mount, type VueWrapper } from "@vue/test-utils";
+import { nextTick, reactive } from "vue";
 import { describe, expect, it, vi } from "vitest";
 import YonderIndex from "./YonderIndex.vue";
 
@@ -153,9 +154,18 @@ function mountIndex(report: unknown, id = "i1") {
 
 /** The one place this file mounts against a live `$store` at all — see
  * "the live report" below. */
-function mountIndexWithStore(live: unknown, configuredFallback: unknown = null, id = "i1") {
+function mountIndexWithStore(
+    live: unknown,
+    configuredFallback: unknown = null,
+    id = "i1",
+    yonder: unknown = null,
+) {
     const emit = vi.fn();
-    const store = { state: { data: { messages: { [id]: { payload: live } } } } };
+    const store = {
+        state: reactive<{ data: { messages: Record<string, { payload: unknown; yonder: unknown }> } }>({
+            data: { messages: { [id]: { payload: live, yonder } } },
+        }),
+    };
     const wrapper = mount(YonderIndex, {
         props: { id, props: { report: configuredFallback } },
         global: {
@@ -163,7 +173,7 @@ function mountIndexWithStore(live: unknown, configuredFallback: unknown = null, 
             mixins: [{ computed: { $store: () => store } }],
         },
     });
-    return { wrapper, emit };
+    return { wrapper, emit, store };
 }
 
 function camRows(w: VueWrapper<any>) {
@@ -342,25 +352,79 @@ describe("a rejected device's row", () => {
     });
 });
 
-describe("no camera", () => {
+describe("the camera scan state", () => {
     it("draws \"No camera.\" rather than an empty pane when the found list is empty", () => {
         const { wrapper } = mountIndex(makeReport({ cameras: [] }));
         expect(wrapper.text()).toContain("No camera");
         expect(camRows(wrapper)).toHaveLength(0);
     });
 
-    it("draws the identical sentence when there is no report at all yet", () => {
-        // Collapsed deliberately (this component's own doc comment): an
-        // operator still sees a concrete, drawn sentence either way, rather
-        // than blank space that could as easily mean the page failed.
+    it("waits for the first report rather than calling it an empty scan", () => {
         const { wrapper } = mountIndex(undefined);
-        expect(wrapper.text()).toContain("No camera");
+        expect(wrapper.text()).toContain("Waiting for a camera scan.");
+        expect(wrapper.text()).not.toContain("No cameras found.");
+        expect(wrapper.find(".y-idx__summary").text()).toBe("Waiting for scan");
     });
 
     it("still draws the rejected list when the found list is empty — the falling-off-the-bus case", () => {
         const { wrapper } = mountIndex(makeReport({ cameras: [] }));
         expect(wrapper.text()).toContain("No camera");
         expect(rejRows(wrapper)).toHaveLength(1);
+    });
+
+    it("calls a complete empty report empty, with its honest zero counts", () => {
+        const { wrapper } = mountIndex(makeReport({ cameras: [], rejected: [] }));
+        expect(wrapper.text()).toContain("No cameras found.");
+        expect(wrapper.find(".y-idx__summary").text()).toBe("0 found · 0 rejected");
+    });
+
+    it("states a live null payload as missing, never as the configured report", () => {
+        const fallback = makeReport();
+        fallback.cameras[0]!.name = "Old camera";
+        const { wrapper } = mountIndexWithStore(null, fallback);
+        expect(wrapper.text()).toContain("Camera scan did not return a report.");
+        expect(wrapper.text()).not.toContain("Old camera");
+        expect(wrapper.find(".y-idx__summary").text()).toBe("No report");
+    });
+
+    it("states an incomplete live report as invalid, rather than as zero cameras", () => {
+        const { wrapper } = mountIndexWithStore({ cameras: [] }, makeReport());
+        expect(wrapper.text()).toContain("Camera scan returned an invalid report.");
+        expect(wrapper.text()).not.toContain("No cameras found.");
+        expect(wrapper.find(".y-idx__summary").text()).toBe("Invalid report");
+    });
+
+    it("states a rejected live scan with its CommandStatus reason", () => {
+        const { wrapper } = mountIndexWithStore(
+            null,
+            makeReport(),
+            "i1",
+            { state: "rejected", message: "Camera probe did not respond.", at: 0 },
+        );
+        expect(wrapper.text()).toContain("Camera scan failed: Camera probe did not respond.");
+        expect(wrapper.text()).not.toContain("Nose");
+        expect(wrapper.find(".y-idx__summary").text()).toBe("Scan failed");
+    });
+
+    it("replaces a failed scan with the next complete report", async () => {
+        const fallback = makeReport();
+        fallback.cameras[0]!.name = "Stale camera";
+        const { wrapper, store } = mountIndexWithStore(
+            null,
+            fallback,
+            "i1",
+            { state: "rejected", message: "Camera probe did not respond.", at: 0 },
+        );
+        const recovered = makeReport();
+        recovered.cameras[0]!.name = "Recovered camera";
+        store.state.data.messages.i1 = {
+            payload: recovered,
+            yonder: { state: "idle", message: "", at: 1 },
+        };
+        await nextTick();
+        expect(wrapper.text()).toContain("Recovered camera");
+        expect(wrapper.text()).not.toContain("Camera scan failed");
+        expect(wrapper.text()).not.toContain("Stale camera");
     });
 });
 
@@ -385,6 +449,29 @@ describe("the live report wins over the configured fallback", () => {
                 mixins: [{ computed: { $store: () => store } }],
             },
         });
+        expect(wrapper.text()).toContain("Nose");
+    });
+
+    it("reacts when Dashboard adds this widget's first live message", async () => {
+        const emit = vi.fn();
+        const store = {
+            state: reactive<{ data: { messages: Record<string, { payload: unknown; yonder: unknown }> } }>({
+                data: { messages: {} },
+            }),
+        };
+        const wrapper = mount(YonderIndex, {
+            props: { id: "i1", props: {} },
+            global: {
+                provide: { $socket: { emit }, $dataTracker: () => {} },
+                mixins: [{ computed: { $store: () => store } }],
+            },
+        });
+        expect(wrapper.text()).toContain("Waiting for a camera scan.");
+        store.state.data.messages.i1 = {
+            payload: makeReport(),
+            yonder: { state: "idle", message: "", at: 1 },
+        };
+        await nextTick();
         expect(wrapper.text()).toContain("Nose");
     });
 });

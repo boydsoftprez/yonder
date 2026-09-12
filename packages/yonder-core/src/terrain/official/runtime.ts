@@ -18,7 +18,7 @@ import type {CoverageInput} from './coverage.js';
 import type {acquireOfficialTile} from './provider.js';
 
 export interface TerrainRuntimeOptions {
-  vehicle: Pick<VehicleService, 'snapshot'>;
+  vehicle: Pick<VehicleService, 'snapshot' | 'context'>;
   send: (bytes: Uint8Array) => Promise<void>;
   routerGeneration: () => string | null;
   serialBaud: () => number;
@@ -48,9 +48,9 @@ export class TerrainRuntime implements Renderer {
   private boot = 0;
   constructor(private options: TerrainRuntimeOptions) {
     this.root = options.root ?? '/var/lib/yonder/terrain';
-    this.refresh = new TerrainControllerRefresh({vehicle: () => options.vehicle.snapshot({details: false}), send: options.send, clock: options.clock});
+    this.refresh = new TerrainControllerRefresh({vehicle: () => options.vehicle.context(), send: options.send, clock: options.clock});
     this.responder = new TerrainResponder({
-      vehicle: () => { const snapshot = options.vehicle.snapshot({details: false}); return {...snapshot, busy: snapshot.busy || this.refresh.busy}; },
+      vehicle: () => { const context = options.vehicle.context(); return {...context, busy: context.busy || this.refresh.busy}; },
       store: {readSubgrid: (key, bit, signal) => this.store?.readSubgrid(key, bit, signal)
         ?? Promise.resolve({available: false, reason: this.failure ?? 'terrain-storage-not-ready'})},
       compatibility: this.compatibility, send: options.send, clock: options.clock,
@@ -96,7 +96,7 @@ export class TerrainRuntime implements Renderer {
     if (this.closed) return;
     try {
       this.responder.receive(datagram);
-      const boot = this.compatibility.snapshot(this.options.vehicle.snapshot({details: false})).reboot;
+      const boot = this.compatibility.snapshot(this.options.vehicle.context()).reboot;
       if (boot !== this.boot) { this.boot = boot; this.refresh.reset(); }
       for (const frame of decodeDatagram(datagram)) this.refresh.receive(frame);
     } catch (error) { this.failure = `Terrain observation failed: ${String(error)}`; }

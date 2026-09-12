@@ -2,7 +2,7 @@
 // R-FLT-28: optional build capabilities must be observed, not inferred from version.
 import {common, standard} from 'node-mavlink';
 import type {DecodedFrame} from '../../mav/protocol.js';
-import type {VehicleSnapshot} from '../../mav/types.js';
+import type {VehicleContext} from '../../mav/types.js';
 
 export class TerrainCompatibility {
   private generation: string | null = null;
@@ -12,14 +12,14 @@ export class TerrainCompatibility {
   private observedAt: number | null = null;
   private lastBootMs: number | null = null;
   private reboot = 0;
-  select(vehicle: VehicleSnapshot): void {
+  select(vehicle: VehicleContext): void {
     const generation = vehicle.connected ? vehicle.identity?.generation ?? null : null;
     if (generation !== this.generation) {
       this.generation = generation; this.clear(); this.lastBootMs = null;
     }
   }
   private clear(): void { this.capabilities = null; this.version = null; this.parameters.clear(); this.observedAt = null; }
-  receive(frame: DecodedFrame, vehicle: VehicleSnapshot, now: number): void {
+  receive(frame: DecodedFrame, vehicle: VehicleContext, now: number): void {
     this.select(vehicle);
     if (!vehicle.connected || frame.system !== vehicle.identity?.system || frame.component !== vehicle.identity.component) return;
     const message = frame.data;
@@ -41,7 +41,7 @@ export class TerrainCompatibility {
       }
     }
   }
-  snapshot(vehicle: VehicleSnapshot) {
+  snapshot(vehicle: VehicleContext) {
     this.select(vehicle);
     const reasons: string[] = [];
     if (!vehicle.connected || !vehicle.identity) reasons.push('fresh-controller-required');

@@ -1,5 +1,5 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
-import {afterEach, describe, expect, it} from 'vitest';
+import {afterEach, describe, expect, it, vi} from 'vitest';
 import {mkdtemp, realpath, rm, writeFile} from 'node:fs/promises';
 import {tmpdir} from 'node:os';
 import {join} from 'node:path';
@@ -7,7 +7,7 @@ import {TerrainRuntime} from './runtime.js';
 import {DEFAULT_CONFIG} from '../../schema/config.js';
 import {VehicleService} from '../../mav/vehicle.js';
 import {systemClock} from '../../apply/types.js';
-import {minimal, MavLinkProtocolV2} from 'node-mavlink';
+import {common, minimal, MavLinkProtocolV2} from 'node-mavlink';
 const roots: string[] = [];
 const cleanups: (() => Promise<void>)[] = [];
 afterEach(async () => { for (const cleanup of cleanups.splice(0)) await cleanup(); await Promise.all(roots.splice(0).map(path => rm(path,{recursive:true,force:true}))); });
@@ -22,6 +22,17 @@ async function setup(persistent = true) {
   return {root,runtime,sent,vehicle};
 }
 describe('terrain daemon runtime lifecycle',()=>{
+  it('observes telemetry without composing full aircraft reports for each packet (R-FLT-28)',async()=>{
+    const {runtime,vehicle,sent}=await setup();
+    const snapshot=vi.spyOn(vehicle,'snapshot');
+    const protocol=new MavLinkProtocolV2(1,1);
+    const attitude=protocol.serialize(Object.assign(new common.Attitude(),{roll:0.1,pitch:0.2,yaw:0.3}),1);
+    for(let i=0;i<100;i++){vehicle.receive(attitude);runtime.receive(attitude);}
+    expect(snapshot.mock.calls.length).toBe(0);
+    expect(sent).toHaveLength(0);
+    expect((await runtime.status()).service.identities).toEqual([expect.objectContaining({system:1,component:1})]);
+    expect(vehicle.snapshot().telemetry.rollDeg).toBeCloseTo(0.1*180/Math.PI);
+  });
   it('defaults disabled, emits nothing on reads, and rolls policy back without losing telemetry',async()=>{
     const {runtime,sent,vehicle}=await setup();
     await runtime.render(DEFAULT_CONFIG);
