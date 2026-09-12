@@ -142,11 +142,14 @@ jobs:
             echo "run=false" >> "$GITHUB_OUTPUT"
           fi
       - uses: actions/setup-node@v4
+        if: steps.scope.outputs.run == 'true'
         with:
           node-version: "24"
           cache: npm
       - run: npm ci
+        if: steps.scope.outputs.run == 'true'
       - run: npm run build
+        if: steps.scope.outputs.run == 'true'
       # The same staged tree a board gets. linux-x64 here rather than the
       # arm64 a Pi runs, because this runner has to execute it.
       #
@@ -159,14 +162,17 @@ jobs:
       # job depend on a Docker daemon being present on the runner. The
       # payload-mavlink-router job below is where that build is proven.
       - name: Stage the console tree
+        if: steps.scope.outputs.run == 'true'
         run: ./installer/make-payload.sh --arch linux-x64 --only console
       # --with-deps is an apt install under sudo. A GitHub-hosted VM is new
       # every run and needs it; a persistent runner had those libraries
       # installed once, so asking for them per job is sudo and bandwidth spent
       # on a no-op. The browser itself is cached either way.
       - name: Install the browser the capture gate needs
+        if: steps.scope.outputs.run == 'true'
         run: npx playwright install ${{ runner.environment == 'github-hosted' && '--with-deps' || '' }} chromium
       - name: Verify the pages, and capture them
+        if: steps.scope.outputs.run == 'true'
         run: ./scripts/verify-pages.sh
       # Geometry is per-platform — the system font stack resolves differently
       # here than on a laptop — so references are named for the platform that
@@ -184,6 +190,7 @@ jobs:
       # runners is a coin toss about font rasterisation, which is the whole
       # reason the reference is geometry. The run's own are uploaded below.
       - name: Check the recorded shape is current and committed
+        if: steps.scope.outputs.run == 'true'
         run: |
           out=$(git status --porcelain docs/console/shape)
           if [ -n "$out" ]; then
@@ -200,7 +207,7 @@ jobs:
       # needs it: a platform with no reference at all records thirty-odd new
       # files and there is nowhere else to get them from.
       - uses: actions/upload-artifact@v4
-        if: always()
+        if: always() && steps.scope.outputs.run == 'true'
         with:
           name: console-pages
           path: |

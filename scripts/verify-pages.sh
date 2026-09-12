@@ -531,15 +531,50 @@ wait_for_socket() {
     give_up "the daemon never bound $SOCKET"
 }
 
+# K-57: this gate used to poll until *something* answered on the port and then
+# photograph it. A `HOLD=1` console left running by an earlier run keeps the
+# port, the new run's Node-RED cannot bind it, and the capture connects to the
+# *old* console — every page captured, no shape changed, green, and the edit
+# under test invisible. Observed on 2026-09-05: a run at 16:17 reported "every
+# page captured, and none changed shape" against a four-hour-old page.
+#
+# So the port is proved free before the console is started, rather than after,
+# when it is too late to tell whose console answered. Node does the asking
+# because this script already depends on it and `lsof`/`ss` are not both
+# present on both platforms this runs on.
+assert_port_free() {
+    node -e '
+        const net = require("net"), port = Number(process.argv[1]);
+        const probe = net.createServer();
+        probe.once("error", () => process.exit(1));
+        probe.once("listening", () => probe.close(() => process.exit(0)));
+        probe.listen(port, "127.0.0.1");
+    ' "$PORT" && return 0
+    printf '\n'
+    echo "port $PORT is already in use, so this run cannot prove whose console it would photograph."
+    echo "a HOLD=1 run leaves its pids in vendor/verify-pages.pids; a finished run can leave an"
+    echo "orphaned daemon whose argv is this repository path. check with:"
+    echo "    pgrep -fl 'verify-pages.sh|yonder-pages|dist/daemon/server.js'"
+    echo "then kill what is left, or run this gate on another port with PORT=..."
+    give_up "refusing to capture against a console this run did not start"
+}
+
+# And the answer has to come from a Yonder console, not merely from something
+# holding the port: the second half of the same defect. `Administrator
+# password` is the sign-in page this harness always comes up on, and is ASCII,
+# so it survives shell matching.
 wait_for_console() {
     i=0
     while [ "$i" -lt "$TRIES" ]; do
-        if curl -s -o /dev/null --max-time 1 "http://127.0.0.1:$PORT/"; then return 0; fi
+        body=$(curl -s --max-time 1 "http://127.0.0.1:$PORT/" 2>/dev/null || true)
+        case "$body" in
+            *"Administrator password"*) return 0 ;;
+        esac
         kill -0 "$CONSOLE_PID" 2>/dev/null || give_up "the console exited before it answered"
         sleep "$POLL"
         i=$((i + 1))
     done
-    give_up "the console never answered on port $PORT"
+    give_up "no Yonder console answered on port $PORT"
 }
 
 status() { curl -s -o /dev/null -w '%{http_code}' -b "$ROOT/cookies" -X "$1" "http://127.0.0.1:$PORT$2"; }
@@ -745,6 +780,7 @@ for entry in "$CONSOLE_TREE/node_modules"/*; do
     [ -e "$CONSOLE/node_modules/$name" ] || ln -s "$entry" "$CONSOLE/node_modules/$name"
 done
 
+assert_port_free
 node "$CONSOLE/node_modules/node-red/red.js" -s "$CONSOLE/settings.js" >>"$JOURNAL" 2>&1 &
 CONSOLE_PID=$!
 wait_for_console
@@ -1024,10 +1060,19 @@ if node -e 'import("playwright")' >/dev/null 2>&1; then
     # anything on this console does anything when pressed. Every soft key
     # shipped dead once — Dashboard drops a widget-action from a widget that
     # did not register onAction, silently — and no layout check could see it.
+    # `|| true` stays, deliberately: this invocation exists to *press a key*,
+    # and `wait_for_theme` below is the verdict. A side-effect capture that
+    # hiccups should not fail the gate.
+    #
+    # K-47: what does not stay is `>/dev/null 2>&1`. It sent a real failure —
+    # a rule violation on this page, a crash before the press — to nowhere, so
+    # the only way this run could speak was by the theme not changing, and
+    # anything it found on the way was lost. It goes to the journal now, with
+    # everything else this harness runs.
     node "$REPO/scripts/capture-pages.mjs" \
         --base-url "http://127.0.0.1:$PORT" --password "$PASSWORD" \
         --palette day --artifacts "$REPO/vendor/capture" \
-        --only settings --press Night >/dev/null 2>&1 || true
+        --only settings --press Night >>"$JOURNAL" 2>&1 || true
 
     if wait_for_theme night; then
         ok "pressing Night in Settings actually reached the device"

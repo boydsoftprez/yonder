@@ -1258,7 +1258,19 @@ measured afterwards, and no drop has happened since it was installed.
 
 ### K-47 · The capture gate's `--press NIGHT` run checks no credential, and discards its own verdict
 
-**Status:** Open — narrowed on 2026-09-07 · **Requirements:** R-SEC-10, R-UI-12
+**Status:** Open — narrowed again on 2026-09-11 · **Requirements:** R-SEC-10, R-UI-12
+
+**The half about the discarded verdict is closed.** The run's `>/dev/null 2>&1` is gone;
+its output goes to the harness journal like everything else, so a rule violation or a
+crash on that page is visible instead of lost. `|| true` stays on purpose: this invocation
+exists to press a key, and `wait_for_theme` immediately below it is the verdict that
+matters, so a side-effect capture that hiccups should not fail the gate.
+
+**What remains open is the credential half, and it is a security question, not a gate
+question.** This run passes no `--secrets`, so the masking check the main sweep performs
+does not run on images that CI uploads as an artifact for a reviewer to download. That is
+R-SEC-10's concern and wants its own change; it was deliberately not bundled into the
+2026-09-11 gate work.
 
 **The half about committed images is closed, by policy rather than by a fix.**
 On 2026-09-06 the operator adopted the telemetry branch's rule that captured
@@ -2102,7 +2114,7 @@ Not decided here (CLAUDE.md rule 8). The measurements are what the choice
 should be made on.
 ---
 
-### K-57 · The capture gate photographs whatever answers on the port, and calls it green
+### K-57 · ~~The capture gate photographs whatever answers on the port, and calls it green~~ — CLOSED
 
 *Filed on the telemetry branch as K-45, renumbered on merge: this repository had already issued that number. Ids are never reused.*
 
@@ -2132,6 +2144,16 @@ itself green.
 gate whose entire purpose is to notice that a page changed. The `R-UI-12` machinery exists
 because nothing in this repository had ever looked at a page; a gate that looks at the
 wrong page restores that condition while appearing not to.
+
+**Closed on 2026-09-11** by proving the port free *before* the console is started, rather
+than asking afterwards who answered, when it is too late to tell. `assert_port_free` in
+`scripts/verify-pages.sh` binds the port with Node — which this script already depends on,
+unlike `lsof` and `ss`, neither of which is present on both platforms this runs on — and
+refuses the run with the `pgrep` line and the `vendor/verify-pages.pids` path if anything
+holds it. `wait_for_console` no longer accepts any HTTP reply either: it requires the body
+to be a Yonder console, which both the sign-in and the first-run setup page satisfy. The
+probe was checked against a free port and an occupied one and reports each correctly. The
+gate has not been run end to end since the change; that is the next run's evidence.
 
 **The fix is to make the run own the port rather than share it:** fail immediately when
 `$PORT` is already listening (naming the stale process), or bind an ephemeral port and
