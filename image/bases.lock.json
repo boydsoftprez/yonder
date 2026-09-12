@@ -1,0 +1,41 @@
+{
+  "schemaVersion": 1,
+  "targets": {
+    "rpi": {
+      "fileName": "2026-06-18-raspios-trixie-arm64-lite.img.xz",
+      "url": "https://downloads.raspberrypi.com/raspios_lite_arm64/images/raspios_lite_arm64-2026-06-19/2026-06-18-raspios-trixie-arm64-lite.img.xz",
+      "sha256": "acff736ca7945e3b305f07cda4abdb870910e12634991da69783611756e381b3",
+      "sha256Url": "https://downloads.raspberrypi.com/raspios_lite_arm64/images/raspios_lite_arm64-2026-06-19/2026-06-18-raspios-trixie-arm64-lite.img.xz.sha256",
+      "distribution": "Raspberry Pi OS Lite",
+      "release": "trixie",
+      "architecture": "arm64",
+      "version": "2026-06-18",
+      "kernelFamily": "raspberry-pi",
+      "qualification": "unqualified"
+    },
+    "radxa-zero3w": {
+      "fileName": "Armbian_26.8.1_Radxa-zero3_trixie_vendor_6.1.115_minimal.img.xz",
+      "url": "https://dl.armbian.com/radxa-zero3/archive/Armbian_26.8.1_Radxa-zero3_trixie_vendor_6.1.115_minimal.img.xz",
+      "sha256": "e78de9cb4b2d8ff1710c65c509d08faef1ba88c07fc3276b9dd637597e8234e8",
+      "sha256Url": "https://dl.armbian.com/radxa-zero3/archive/Armbian_26.8.1_Radxa-zero3_trixie_vendor_6.1.115_minimal.img.xz.sha",
+      "distribution": "Armbian Minimal",
+      "release": "trixie",
+      "architecture": "arm64",
+      "version": "26.8.1",
+      "kernelFamily": "vendor",
+      "qualification": "unqualified"
+    },
+    "radxa-rock5c": {
+      "fileName": "Armbian_26.8.3_Rock-5c_trixie_vendor_6.1.115_minimal.img.xz",
+      "url": "https://dl.armbian.com/rock-5c/archive/Armbian_26.8.3_Rock-5c_trixie_vendor_6.1.115_minimal.img.xz",
+      "sha256": "334300f250802d6f8bb015fb7581da957f176b4b1dd230db3591749367b9dace",
+      "sha256Url": "https://dl.armbian.com/rock-5c/archive/Armbian_26.8.3_Rock-5c_trixie_vendor_6.1.115_minimal.img.xz.sha",
+      "distribution": "Armbian Minimal",
+      "release": "trixie",
+      "architecture": "arm64",
+      "version": "26.8.3",
+      "kernelFamily": "vendor",
+      "qualification": "unqualified"
+    }
+  }
+}

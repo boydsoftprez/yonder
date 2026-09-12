@@ -261,6 +261,92 @@ const probe = async (node, card) => {
 // nodes or media listeners are opened, and all still files stay under this run.
 const pipelineHost = fileURLToPath(new URL('../installer/payload/yonder-pipeline', import.meta.url));
 const fakeGi = fileURLToPath(new URL('../packages/yonder-core/src/video/fake-gi', import.meta.url));
+
+// Settings administration fixtures are opt-in and stateful so a browser run
+// can exercise the authenticated proxy and the production Vue forms without
+// touching a developer's accounts, SSH policy, mesh identity, or boot mode.
+// The persisted file contains only public fixture state and call names; fake
+// passwords, public-key bodies and archive bytes are deliberately omitted.
+const adminFixturePath = process.env.YONDER_PAGES_ADMIN_FIXTURE;
+const adminFixture = adminFixturePath === undefined ? undefined : (() => {
+  const restoreId = '12345678-1234-4123-8123-123456789abc';
+  const destinationGeneration = '23456789-2345-4234-8234-23456789abcd';
+  const maintenanceId = '3456789a-3456-4345-8345-3456789abcde';
+  const archive = Buffer.from('{"format":1,"fixture":"owner-recovery-ui","contains":"fake credentials only"}\n');
+  const initial = {
+    schemaVersion: 1,
+    owner: { configured: false, username: null, sshEnabled: false,
+      sshPasswordAuthentication: false, authorizedKeyFingerprints: [] },
+    storage: { managed: true, mode: 'protected', operation: null },
+    calls: [], passwordChanges: 0, restoreCommits: 0, restoreActivations: 0,
+  };
+  let state;
+  try { state = JSON.parse(readFileSync(adminFixturePath, 'utf8')); }
+  catch { state = initial; }
+  const save = () => writeFileSync(adminFixturePath, `${JSON.stringify(state, null, 2)}\n`, { mode: 0o600 });
+  const called = (name) => { state.calls.push(name); save(); };
+  const ownerState = () => structuredClone(state.owner);
+  const previews = new Map();
+  save();
+  return {
+    ownerTools: {
+      async ownerState() { called('owner.state'); return ownerState(); },
+      async createOwner(input) {
+        state.owner = { configured: true, username: input.username, sshEnabled: false,
+          sshPasswordAuthentication: false, authorizedKeyFingerprints: [] };
+        called('owner.create'); return ownerState();
+      },
+      async changeOwnerPassword() { state.passwordChanges += 1; called('owner.password'); return ownerState(); },
+      async configureOwnerSsh(input) {
+        state.owner.sshEnabled = input.enabled;
+        state.owner.sshPasswordAuthentication = input.passwordAuthentication;
+        if (input.authorizedKeys !== undefined) {
+          state.owner.authorizedKeyFingerprints = input.authorizedKeys.map((_, index) => `SHA256:fixture-key-${index + 1}`);
+        }
+        called(input.authorizedKeys === undefined ? 'owner.ssh.preserve-keys' : 'owner.ssh.replace-keys');
+        return ownerState();
+      },
+    },
+    recoveryTools: {
+      async exportRecovery() { called('recovery.export'); return Buffer.from(archive); },
+      async previewRecovery(input) {
+        if (!Buffer.from(input.bytes).equals(archive)) throw new Error('fixture archive mismatch');
+        previews.set(restoreId, input.sessionId); called('recovery.preview');
+        return { restoreId, destinationGeneration, expiresAt: Date.now() + 10 * 60_000,
+          summary: { replacesLinuxOwner: true, replacesDeviceCredentials: true, replacesMeshIdentity: true,
+            membershipCount: 2, networkInterruption: true,
+            warnings: ['Restoring may disconnect current network and administrator sessions.',
+              'Setup AP and fallback remain enabled; unavailable hardware will not start automatically.'],
+            excluded: ['recordings', 'browser Flight state', 'custom Node-RED flows and extensions', 'operating-system files'],
+            compatibility: { adjusted: true, crossBoard: false, unavailableCameras: 1,
+              unavailableUarts: 1, unavailableNetworkInterfaces: 0, apFallbackReachable: true } } };
+      },
+      async commitRecovery(input) {
+        if (previews.get(input.restoreId) !== input.sessionId || input.destinationGeneration !== destinationGeneration
+          || input.confirm !== true) throw new Error('fixture restore binding mismatch');
+        previews.delete(input.restoreId); state.restoreCommits += 1; called('recovery.commit');
+        return { operationId: restoreId, generation: destinationGeneration };
+      },
+      async cancelRecovery(input) {
+        if (previews.get(input.restoreId) !== input.sessionId) throw new Error('fixture restore binding mismatch');
+        previews.delete(input.restoreId); called('recovery.cancel');
+      },
+    },
+    storageTools: {
+      async storageState() {
+        called('storage.state');
+        return { managed: state.storage.managed, mode: state.storage.mode,
+          ownerConfigured: state.owner.configured, operation: structuredClone(state.storage.operation) };
+      },
+      async requestMaintenance() {
+        state.storage.operation = { id: maintenanceId, kind: 'maintenance', phase: 'awaiting-maintenance-reboot' };
+        called('storage.enter'); return { id: maintenanceId, generation: destinationGeneration };
+      },
+    },
+    async afterRestore() { state.restoreActivations += 1; called('recovery.activate'); },
+  };
+})();
+
 await startServer({
   spawner: controlledSpawner(pipelineHost, { PYTHONPATH: fakeGi }),
   stillsRoot: dirname(env('YONDER_SOCKET')) + '/stills',
@@ -292,6 +378,12 @@ await startServer({
     // is allowed to show (R-SEC-10).
     rtspPassword: () => current().rtspPassword ?? null,
   },
+  ...(adminFixture === undefined ? {} : {
+    ownerTools: adminFixture.ownerTools,
+    recoveryTools: adminFixture.recoveryTools,
+    storageTools: adminFixture.storageTools,
+    restartAfterRestore: adminFixture.afterRestore,
+  }),
 });
 process.stdout.write(
   `yonder-core listening (pages harness: a serial stand-in, cameras from ${fixturePath})\n`,

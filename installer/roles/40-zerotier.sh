@@ -38,11 +38,9 @@ fi
 # that talks to a company's infrastructure because software is merely present
 # contradicts the first thing this project claims about itself.
 #
-# So the client ships installed and off. yonder-core starts it when, and only
-# when, a network id is configured, and stops it again on leave (R-VPN-05,
-# R-VPN-08). Nothing else will: the renderer acts only on a client it has a
-# record of starting, and on a freshly flashed image it has none, so a unit
-# left enabled here is left enabled for ever.
+# So the client ships installed and off. The root durable-state projector
+# starts it only when the captured, validated membership set is non-empty and
+# stops it when that set becomes empty (R-VPN-05, R-VPN-08).
 #
 # `stop` keeps `try`, and needs it. `try`, not `run ... || true`: roles are
 # sourced, so `die`'s `exit` inside `run` terminates the whole install and the
@@ -56,27 +54,28 @@ fi
 # unit with, and it works with or without a running systemd; the assertion
 # after it is what makes "installed and off" a checked claim rather than a
 # hoped-for one. See lib/common.sh for both.
-# ...but only where nothing has claimed it yet.
-#
-# Raised in review of PR #1. This installer is documented as idempotent and is
-# re-run to upgrade. Roles run in order, so 20-yonder-core has already
-# restarted the daemon by the time this one executes, and that daemon's
-# start-up render enables and joins whatever mesh the configuration names. This
-# role then stopped it, disabled it, and no later role re-renders — so an
-# operator upgrading a device *over* its mesh lost the mesh, and it stayed down
-# until the next apply or reboot. The same irony as K-37: the tool for reaching
-# a device is what takes it away.
-#
-# The ownership record is the same source of truth the renderer uses: it exists
-# only when yonder-core started this client, so its presence means the daemon
-# owns the service and this role must keep its hands off. Absent — a fresh
-# flash, or a device with no mesh — and "installed and off" applies.
-zt_record=/var/lib/yonder/remote.json
-if [ -f "$zt_record" ]; then
-    log "yonder-core owns zerotier-one (a mesh is configured); leaving it running"
+# Image assembly has no live helper. Package starts are suppressed there and
+# the unit is disabled on disk; first boot lets yonder-admin generate and
+# project the per-device identity before anything can join.
+if [ "$IMAGE_MODE" = "1" ]; then
+    log "stopping and disabling zerotier-one until first-boot state projection"
+    service_stop zerotier-one.service
+    service_disable zerotier-one.service
 else
-    log "stopping and disabling zerotier-one until a network is configured"
-    try systemctl stop zerotier-one
-    disable_unit_offline zerotier-one.service
-    assert_unit_disabled zerotier-one.service
+    # Role 20 starts the helper before this later role installs ZeroTier. A
+    # fresh helper therefore observed no idtool and correctly bootstrapped a
+    # null mesh. Restart it now: its fixed adapter captures an existing
+    # upgrade identity or generates a fresh one offline, merges the configured
+    # membership, and projects the service state from the checked generation.
+    # This replaces remote.json, whose absence after the renderer cutover must
+    # never be read as permission to stop a configured upgrade over its mesh.
+    if command -v service_restart >/dev/null 2>&1; then
+        service_restart yonder-admin.service
+        if [ "$DRY_RUN" != "1" ] && command -v systemctl >/dev/null 2>&1; then
+            run systemctl is-active --quiet yonder-admin.service
+        fi
+    else
+        die "the yonder-admin lifecycle helper is unavailable after installing zerotier-one"
+    fi
+    log "yonder-admin reconciled zerotier-one from canonical durable state"
 fi

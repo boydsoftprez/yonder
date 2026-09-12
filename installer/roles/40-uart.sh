@@ -3,6 +3,13 @@
 # and Bluetooth off it. R-MAV-02, R-HW-04.
 # shellcheck shell=sh
 
+# An image target is declared before any role runs. Its module owns the boot
+# preparation so ZERO 3W's verified overlay cannot leak onto ROCK 5C. The
+# unflagged live path below retains its existing boot-layout detection.
+if [ "${IMAGE_MODE:-0}" = "1" ]; then
+    target_prepare_uart
+    return 0
+fi
 # Two boot layouts. A Raspberry Pi's /boot/firmware holds config.txt and
 # cmdline.txt (R-HW-01, R-HW-02); Armbian, which R-HW-03's Radxa boards run,
 # holds one armbianEnv.txt u-boot reads (R-HW-04: which is decided by what

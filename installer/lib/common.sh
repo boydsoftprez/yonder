@@ -3,6 +3,9 @@
 # shellcheck shell=sh
 
 : "${DRY_RUN:=0}"
+: "${IMAGE_MODE:=0}"
+: "${IMAGE_HARDWARE_TEST:=0}"
+: "${YONDER_TARGET:=}"
 : "${YONDER_PREFIX:=/opt/yonder}"
 : "${YONDER_ETC:=/etc/yonder}"
 
@@ -53,6 +56,8 @@
 : "${YONDER_GST_LIBDIR:=/usr/lib/aarch64-linux-gnu}"
 : "${YONDER_GST_PLUGIN_DIR:=/usr/lib/aarch64-linux-gnu/gstreamer-1.0}"
 : "${YONDER_GST_REGISTRY_DIRS:=/root/.cache/gstreamer-1.0 /var/cache/gstreamer-1.0 /home/yonder/.cache/gstreamer-1.0}"
+: "${YONDER_MODULES_LOAD_DIR:=/etc/modules-load.d}"
+: "${YONDER_ACCESSORY_MODULES_CONF:=$YONDER_MODULES_LOAD_DIR/yonder-accessory.conf}"
 
 # Armbian's boot layout, which R-HW-03's boards use: one file of key=value
 # pairs u-boot reads, the kernel's overlays, and the directory user overlays
@@ -61,7 +66,10 @@
 # never sets any of them.
 : "${YONDER_ARMBIAN_ENV:=/boot/armbianEnv.txt}"
 : "${YONDER_DTB_OVERLAY_DIR:=/boot/dtb/rockchip/overlay}"
+: "${YONDER_ROCK5C_DTB:=/boot/dtb/rockchip/rk3588s-rock-5c.dtb}"
 : "${YONDER_USER_OVERLAY_DIR:=/boot/overlay-user}"
+: "${YONDER_NETPLAN_DIR:=/etc/netplan}"
+: "${YONDER_NETPLAN_DISABLED_DIR:=/etc/netplan.disabled}"
 
 # The one path the systemd unit's ExecStart names, and a symlink this
 # installer points at whichever node the install actually resolved.
@@ -403,17 +411,281 @@ for (const name of deps) {
 if (missing.length > 0) { console.error(missing.join("; ")); process.exit(1); }
 '
 
+# Image payloads must carry the full required dependency graph, not just the
+# root package's first layer. Resolution reads package metadata only; it never
+# imports package code. optionalDependencies are allowed to be absent, as npm
+# permits, even when the same name also appears in dependencies.
+PREBUILT_CLOSURE_PROBE='
+const { createRequire } = require("node:module");
+const { dirname, join, resolve, sep } = require("node:path");
+const { existsSync, readFileSync, realpathSync, statSync } = require("node:fs");
+
+const root = realpathSync(resolve(process.env.YONDER_TREE));
+const modulesPath = join(root, "node_modules");
+const modulesRoot = realpathSync(modulesPath);
+const inside = (path, base) => path === base || path.startsWith(base + sep);
+if (!inside(modulesRoot, root)) {
+  console.error("node_modules resolves outside the standalone tree: " + modulesRoot);
+  process.exit(1);
+}
+
+const load = (manifest) => JSON.parse(readFileSync(manifest, "utf8"));
+function findManifest(name, fromManifest) {
+  const req = createRequire(fromManifest);
+  try {
+    const entry = realpathSync(req.resolve(name));
+    let cursor = statSync(entry).isDirectory() ? entry : dirname(entry);
+    while (inside(cursor, modulesRoot)) {
+      const candidate = join(cursor, "package.json");
+      if (existsSync(candidate)) {
+        const real = realpathSync(candidate);
+        if (inside(real, modulesRoot) && load(real).name === name) return real;
+      }
+      const parent = dirname(cursor);
+      if (parent === cursor) break;
+      cursor = parent;
+    }
+  } catch (error) {
+    // An exports map may provide no require entry; locate package.json using
+    // the same upward node_modules search without executing the package.
+  }
+
+  let cursor = dirname(fromManifest);
+  while (inside(cursor, root)) {
+    const candidate = join(cursor, "node_modules", ...name.split("/"), "package.json");
+    if (existsSync(candidate)) {
+      const real = realpathSync(candidate);
+      if (!inside(real, modulesRoot)) {
+        throw new Error(name + " resolves to " + real + ", outside the standalone tree");
+      }
+      return real;
+    }
+    if (cursor === root) break;
+    cursor = dirname(cursor);
+  }
+  throw new Error(name + " is not installed");
+}
+
+const rootManifest = join(root, "package.json");
+const queue = [rootManifest];
+const visited = new Set();
+const missing = [];
+while (queue.length > 0) {
+  const manifest = queue.shift();
+  const realManifest = realpathSync(manifest);
+  if (visited.has(realManifest)) continue;
+  visited.add(realManifest);
+  const pkg = load(realManifest);
+  const optional = new Set(Object.keys(pkg.optionalDependencies || {}));
+  for (const name of Object.keys(pkg.dependencies || {})) {
+    if (optional.has(name)) continue;
+    try {
+      queue.push(findManifest(name, realManifest));
+    } catch (error) {
+      missing.push((pkg.name || realManifest) + " -> " + error.message);
+    }
+  }
+}
+if (missing.length > 0) { console.error(missing.join("; ")); process.exit(1); }
+'
+
 prebuilt_deps_present() {
     pdp_tree="$1"
-    if ! command -v node >/dev/null 2>&1; then
+    pdp_node="${2:-}"
+    if [ -z "$pdp_node" ]; then
+        pdp_node=$(command -v node 2>/dev/null || true)
+    fi
+    if [ -z "$pdp_node" ]; then
         log "no node here to check the dependency tree in $pdp_tree"
         return 1
     fi
-    if pdp_why=$(YONDER_TREE="$pdp_tree" node -e "$PREBUILT_DEPS_PROBE" 2>&1); then
+    if pdp_why=$(YONDER_TREE="$pdp_tree" "$pdp_node" -e "$PREBUILT_DEPS_PROBE" 2>&1); then
         return 0
     fi
     log "the node_modules in $pdp_tree is not a dependency tree the daemon could run from: $pdp_why"
     return 1
+}
+
+prebuilt_required_closure_present() {
+    prcp_tree="$1"
+    prcp_node="$2"
+    if prcp_why=$(YONDER_TREE="$prcp_tree" "$prcp_node" -e "$PREBUILT_CLOSURE_PROBE" 2>&1); then
+        return 0
+    fi
+    log "the node_modules in $prcp_tree does not contain its recursive required dependency closure: $prcp_why"
+    return 1
+}
+
+validate_image_library_family() {
+    vil_dir="$1"
+    vil_stem="$2"
+    vil_want="$3"
+    vil_found=0
+    vil_actual=0
+
+    for vil_file in "$vil_dir"/"$vil_stem"*; do
+        if [ -L "$vil_file" ]; then
+            vil_found=1
+            [ -e "$vil_file" ] \
+                || die "image payload is incomplete: dangling Rockchip library symlink $vil_file"
+            vil_link=$(readlink "$vil_file") \
+                || die "image payload is incomplete: cannot read Rockchip library symlink $vil_file"
+            case "$vil_link" in
+                ""|/*|*/*) die "image payload is incomplete: Rockchip library symlink $vil_file points outside its staged library directory" ;;
+                "$vil_stem"*) ;;
+                *) die "image payload is incomplete: Rockchip library symlink $vil_file leaves its validated soname family" ;;
+            esac
+        elif [ -f "$vil_file" ]; then
+            vil_found=1
+            vil_actual=1
+            [ -s "$vil_file" ] \
+                || die "image payload is incomplete: $vil_file is empty"
+        else
+            continue
+        fi
+
+        vil_have=$(elf_machine "$vil_file")
+        [ -n "$vil_have" ] \
+            || die "image payload is incomplete: $vil_file is not a little-endian ELF file"
+        [ "$vil_have" = "$vil_want" ] \
+            || die "image payload architecture mismatch: $vil_file is ELF machine $vil_have but the target root is $vil_want"
+    done
+
+    [ "$vil_found" = "1" ] && [ "$vil_actual" = "1" ] \
+        || die "image payload is incomplete: missing a nonempty $vil_stem* actual library in $vil_dir"
+}
+
+validate_required_image_library() {
+    vril_file="$1"
+    vril_want="$2"
+    [ -e "$vril_file" ] \
+        || die "image payload is incomplete: required Rockchip soname $vril_file is missing or dangling"
+    [ -f "$vril_file" ] && [ -s "$vril_file" ] \
+        || die "image payload is incomplete: required Rockchip soname $vril_file does not resolve to a nonempty file"
+    vril_have=$(elf_machine "$vril_file")
+    [ -n "$vril_have" ] \
+        || die "image payload is incomplete: required Rockchip soname $vril_file does not resolve to a little-endian ELF file"
+    [ "$vril_have" = "$vril_want" ] \
+        || die "image payload architecture mismatch: required Rockchip soname $vril_file is ELF machine $vril_have but the target root is $vril_want"
+}
+
+# Fail the image path before it changes the target filesystem when any input
+# that would otherwise select a build/download/skip fallback is absent.
+validate_image_payload() {
+    vip_target="$1"
+    vip_node="$YONDER_SRC/vendor/node/bin/node"
+
+    for vip_file in \
+        "$vip_node" \
+        "$YONDER_SRC/vendor/mavlink-router/mavlink-routerd" \
+        "$YONDER_SRC/vendor/mediamtx/mediamtx" \
+        "$YONDER_SRC/vendor/console/package.json" \
+        "$YONDER_SRC/vendor/console/node_modules/node-red/red.js" \
+        "$YONDER_SRC/packages/yonder-core/dist/daemon/server.js" \
+        "$YONDER_SRC/packages/yonder-core/dist/admin/main.js" \
+        "$YONDER_SRC/packages/yonder-core/dist/console/settings.js" \
+        "$YONDER_SRC/packages/yonder-core/package.json" \
+        "$YONDER_SRC/packages/yonder-core/package-lock.json" \
+        "$YONDER_SRC/packages/yonder-core/tsconfig.json" \
+        "$YONDER_SRC/config/defaults/config.yaml" \
+        "$YONDER_SRC/flows/flows.json" \
+        "$YONDER_SRC/installer/payload/yonder-pipeline" \
+        "$YONDER_SRC/systemd/mavlink-router.service" \
+        "$YONDER_SRC/systemd/yonder-admin.service" \
+        "$YONDER_SRC/systemd/yonder-admin.socket" \
+        "$YONDER_SRC/systemd/yonder-admin.tmpfiles" \
+        "$YONDER_SRC/systemd/yonder-owner-setup.service" \
+        "$YONDER_SRC/systemd/yonder-owner-getty.conf" \
+        "$YONDER_SRC/installer/payload/yonder-owner-setup" \
+        "$YONDER_SRC/packages/yonder-core/dist/owner-access/cli.js" \
+        "$YONDER_SRC/systemd/yonder-core.service" \
+        "$YONDER_SRC/systemd/yonder-console.service" \
+        "$YONDER_SRC/systemd/mediamtx.service"; do
+        [ -f "$vip_file" ] \
+            || die "image payload is incomplete: missing $vip_file; build the complete ARM64 application and payload before installing an image"
+    done
+
+    vip_zt=""
+    for vip_file in "$YONDER_SRC"/vendor/zerotier/zerotier-one_*.deb; do
+        [ -f "$vip_file" ] && { vip_zt="$vip_file"; break; }
+    done
+    [ -n "$vip_zt" ] \
+        || die "image payload is incomplete: missing vendor/zerotier/zerotier-one_*.deb"
+
+    for vip_pkg in node-red-contrib-yonder-system node-red-contrib-yonder-network \
+            node-red-contrib-yonder-remote node-red-contrib-yonder-modem \
+            node-red-contrib-yonder-video node-red-contrib-yonder-mavlink \
+            node-red-dashboard-2-yonder; do
+        [ -d "$YONDER_SRC/packages/$vip_pkg/dist" ] \
+            || die "image payload is incomplete: $vip_pkg has no dist/; run npm run build"
+        [ -f "$YONDER_SRC/packages/$vip_pkg/package.json" ] \
+            || die "image payload is incomplete: $vip_pkg has no package.json"
+    done
+    [ -d "$YONDER_SRC/packages/node-red-dashboard-2-yonder/resources" ] \
+        || die "image payload is incomplete: node-red-dashboard-2-yonder has no built resources/; run npm run build"
+
+    for vip_file in "$vip_node" \
+            "$YONDER_SRC/vendor/mavlink-router/mavlink-routerd" \
+            "$YONDER_SRC/vendor/mediamtx/mediamtx" \
+            "$YONDER_SRC/installer/payload/yonder-pipeline"; do
+        [ -x "$vip_file" ] \
+            || die "image payload is incomplete: $vip_file is not executable"
+    done
+
+    vip_want=$(elf_machine "$YONDER_ELF_REFERENCE")
+    [ -n "$vip_want" ] \
+        || die "image payload cannot be checked: $YONDER_ELF_REFERENCE is not a little-endian ELF file"
+    [ "$vip_want" = "183" ] \
+        || die "image targets require ARM64 (ELF machine 183), but the target root is ELF machine $vip_want"
+    for vip_file in "$vip_node" \
+            "$YONDER_SRC/vendor/mavlink-router/mavlink-routerd" \
+            "$YONDER_SRC/vendor/mediamtx/mediamtx"; do
+        vip_have=$(elf_machine "$vip_file")
+        [ -n "$vip_have" ] \
+            || die "image payload is incomplete: $vip_file is not a little-endian ELF file"
+        [ "$vip_have" = "$vip_want" ] \
+            || die "image payload architecture mismatch: $vip_file is ELF machine $vip_have but the target root is $vip_want"
+    done
+
+    if [ "$vip_target" = "radxa-zero3w" ] || [ "$vip_target" = "radxa-rock5c" ]; then
+        vip_gr="$YONDER_SRC/vendor/gst-rockchip/gstreamer-1.0/libgstrockchipmpp.so"
+        vip_gr_lib="$YONDER_SRC/vendor/gst-rockchip/lib"
+        [ -f "$vip_gr" ] && [ -d "$vip_gr_lib" ] \
+            || die "image payload is incomplete: $vip_target requires the gst-rockchip plugin and libraries"
+        vip_have=$(elf_machine "$vip_gr")
+        [ "$vip_have" = "$vip_want" ] \
+            || die "image payload architecture mismatch: $vip_gr is ELF machine ${vip_have:-unknown} but the target root is $vip_want"
+        validate_image_library_family "$vip_gr_lib" librockchip_mpp.so "$vip_want"
+        validate_image_library_family "$vip_gr_lib" librga.so "$vip_want"
+        validate_required_image_library "$vip_gr_lib/librockchip_mpp.so.1" "$vip_want"
+        validate_required_image_library "$vip_gr_lib/librga.so" "$vip_want"
+    fi
+
+    if command -v dpkg-deb >/dev/null 2>&1 && command -v dpkg >/dev/null 2>&1; then
+        vip_deb_arch=$(dpkg-deb -f "$vip_zt" Architecture 2>/dev/null || true)
+        vip_root_arch=$(dpkg --print-architecture 2>/dev/null || true)
+        [ -n "$vip_deb_arch" ] && [ -n "$vip_root_arch" ] \
+            || die "image payload architecture cannot be checked for $vip_zt"
+        [ "$vip_root_arch" = "arm64" ] \
+            || die "image targets require ARM64, but dpkg reports the target root as $vip_root_arch"
+        [ "$vip_deb_arch" = "$vip_root_arch" ] \
+            || die "image payload architecture mismatch: $vip_zt is $vip_deb_arch but the target root is $vip_root_arch"
+    else
+        die "image payload architecture cannot be checked: dpkg and dpkg-deb are required"
+    fi
+
+    # Only execute the bundled node after its ELF header and the target root
+    # have both been proven ARM64. A corrupt or wrong-architecture payload is
+    # data to reject, never a program to try on the build host.
+    [ -d "$YONDER_SRC/packages/yonder-core/node_modules" ] \
+        || die "image payload is incomplete: yonder-core has no standalone production node_modules/"
+    prebuilt_required_closure_present "$YONDER_SRC/packages/yonder-core" "$vip_node" \
+        || die "image payload is incomplete: yonder-core does not carry standalone production dependencies"
+    prebuilt_required_closure_present "$YONDER_SRC/vendor/console" "$vip_node" \
+        || die "image payload is incomplete: the vendored console dependency tree is incomplete"
+    assert_module_graph "$YONDER_SRC/packages/yonder-core" dist/daemon/server.js "$vip_node" image-preflight
+    assert_module_graph "$YONDER_SRC/packages/yonder-core" dist/admin/main.js "$vip_node" image-preflight
+    log "the complete $vip_target image payload is present and matches the target root architecture"
 }
 
 # The post-condition on the tree this installer has just installed: the entry
@@ -453,7 +725,8 @@ assert_module_graph() {
     amg_tree="$1"
     amg_entry="$2"
     amg_node="$3"
-    if [ "$DRY_RUN" = "1" ]; then
+    amg_mode="${4:-installed}"
+    if [ "$DRY_RUN" = "1" ] && [ "$amg_mode" != "image-preflight" ]; then
         log "would check that $amg_tree/$amg_entry and everything it imports load under $amg_node"
         return 0
     fi

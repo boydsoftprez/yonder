@@ -705,6 +705,152 @@ describe("installer/roles/20-yonder-core.sh, the build path", () => {
   });
 });
 
+describe("installer/roles/20-yonder-core.sh, the administration helper", () => {
+  const role = join(ROOT, "installer", "roles", "20-yonder-core.sh");
+  const services = join(ROOT, "installer", "lib", "services.sh");
+
+  function runRole(src = ROOT) {
+    return sh(
+      `set -eu; . '${COMMON}'; . '${services}'; . '${role}'`,
+      {
+        DRY_RUN: "1",
+        IMAGE_MODE: "0",
+        YONDER_SRC: src,
+        YONDER_PREFIX: join(dir, "prefix"),
+        YONDER_ETC: join(dir, "etc-yonder"),
+      },
+    );
+  }
+
+  function rolePayloadWithout(missingUnit: string): string {
+    const src = join(dir, "role-payload");
+    mkdirSync(join(src, "systemd"), { recursive: true });
+    for (const name of ["vendor", "packages", "config"]) {
+      symlinkSync(join(ROOT, name), join(src, name));
+    }
+    for (const name of ["yonder-core.service", "yonder-admin.service", "yonder-admin.socket", "yonder-admin.tmpfiles", "yonder-owner-setup.service", "yonder-owner-getty.conf"]) {
+      if (name !== missingUnit) {
+        writeFileSync(join(src, "systemd", name), readFileSync(join(SYSTEMD, name)));
+      }
+    }
+    return src;
+  }
+
+  it("plans the helper units and replaces no running core/helper generation", () => {
+    const r = runRole();
+    expect(r.code, r.out).toBe(0);
+    expect(r.out).toContain("systemd/yonder-admin.service /etc/systemd/system/yonder-admin.service");
+    expect(r.out).toContain("systemd/yonder-admin.socket /etc/systemd/system/yonder-admin.socket");
+    expect(r.out).toContain("systemctl enable yonder-admin.socket");
+    expect(r.out).toContain("systemctl restart yonder-admin.socket");
+    expect(r.out).toContain("systemctl restart yonder-core.service");
+
+    const firstReplacement = r.out.indexOf("/packages/yonder-core/package.json");
+    for (const unit of ["yonder-core.service", "yonder-admin.service", "yonder-admin.socket"]) {
+      const stopped = r.out.indexOf(`systemctl stop ${unit}`);
+      expect(stopped, `${unit} was not stopped during the dry-run plan`).toBeGreaterThanOrEqual(0);
+      expect(stopped, `${unit} was stopped only after package replacement began`).toBeLessThan(firstReplacement);
+    }
+    expect(r.out.indexOf("systemctl restart yonder-admin.socket"))
+      .toBeLessThan(r.out.indexOf("systemctl restart yonder-core.service"));
+  });
+
+  it("refuses a role payload missing an administration unit", () => {
+    const r = runRole(rolePayloadWithout("yonder-admin.service"));
+    expect(r.code).not.toBe(0);
+    expect(r.out).toContain("required administration unit is missing: yonder-admin.service");
+  });
+});
+
+describe("service_stop_for_replacement", () => {
+  const services = join(ROOT, "installer", "lib", "services.sh");
+
+  it("refuses to run the replacement when systemd cannot stop the old helper", () => {
+    const bin = join(dir, "strict-stop-bin");
+    const replacement = join(dir, "replacement-ran");
+    mkdirSync(bin, { recursive: true });
+    writeFileSync(join(bin, "systemctl"), [
+      "#!/bin/sh",
+      'case "$1" in',
+      '  show) case "$*" in *LoadState*) printf "loaded\\n" ;; *ActiveState*) printf "active\\n" ;; esac; exit 0 ;;',
+      "  stop) exit 1 ;;",
+      "esac",
+      "exit 2",
+      "",
+    ].join("\n"), { mode: 0o755 });
+
+    const r = sh(
+      `set -eu; . '${COMMON}'; . '${services}'; service_stop_for_replacement yonder-admin.service; touch '${replacement}'`,
+      { DRY_RUN: "0", IMAGE_MODE: "0" },
+      `${bin}:${process.env.PATH ?? ""}`,
+    );
+    expect(r.code).not.toBe(0);
+    expect(r.out).toContain("systemctl stop yonder-admin.service");
+    expect(existsSync(replacement)).toBe(false);
+  });
+});
+
+describe("validate_image_payload administration-helper completeness", () => {
+  const requiredFiles = [
+    "vendor/node/bin/node",
+    "vendor/mavlink-router/mavlink-routerd",
+    "vendor/mediamtx/mediamtx",
+    "vendor/console/package.json",
+    "vendor/console/node_modules/node-red/red.js",
+    "packages/yonder-core/dist/daemon/server.js",
+    "packages/yonder-core/dist/admin/main.js",
+    "packages/yonder-core/dist/console/settings.js",
+    "packages/yonder-core/package.json",
+    "packages/yonder-core/package-lock.json",
+    "packages/yonder-core/tsconfig.json",
+    "config/defaults/config.yaml",
+    "flows/flows.json",
+    "installer/payload/yonder-pipeline",
+    "systemd/mavlink-router.service",
+    "systemd/yonder-admin.service",
+    "systemd/yonder-admin.socket",
+    "systemd/yonder-admin.tmpfiles",
+    "systemd/yonder-owner-setup.service",
+    "systemd/yonder-owner-getty.conf",
+    "installer/payload/yonder-owner-setup",
+    "packages/yonder-core/dist/owner-access/cli.js",
+    "systemd/yonder-core.service",
+    "systemd/yonder-console.service",
+    "systemd/mediamtx.service",
+  ];
+
+  function preflightWithout(missing: string) {
+    const src = join(dir, "image-payload");
+    for (const relative of requiredFiles) {
+      if (relative === missing) continue;
+      const path = join(src, relative);
+      mkdirSync(dirname(path), { recursive: true });
+      writeFileSync(path, "fixture");
+    }
+    return sh(
+      `set -eu; . '${COMMON}'; validate_image_payload rpi`,
+      { DRY_RUN: "1", IMAGE_MODE: "1", YONDER_SRC: src },
+    );
+  }
+
+  for (const missing of [
+    "packages/yonder-core/dist/admin/main.js",
+    "systemd/yonder-admin.service",
+    "systemd/yonder-admin.socket",
+    "systemd/yonder-admin.tmpfiles",
+    "systemd/yonder-owner-setup.service",
+    "systemd/yonder-owner-getty.conf",
+    "installer/payload/yonder-owner-setup",
+    "packages/yonder-core/dist/owner-access/cli.js",
+  ]) {
+    it(`refuses an image payload missing ${missing}`, () => {
+      const r = preflightWithout(missing);
+      expect(r.code).not.toBe(0);
+      expect(r.out).toContain(`image payload is incomplete: missing ${join(dir, "image-payload", missing)}`);
+    });
+  }
+});
+
 
 /*
  * The telemetry branch's own tests for this file, appended whole on merge
@@ -1828,7 +1974,7 @@ describe("installer/make-payload.sh stages gst-rockchip", () => {
   });
 
   it("lists it as a component, staged before the console", () => {
-    expect(script).toMatch(/^COMPONENTS="node zerotier mavlink-router gst-rockchip console"$/m);
+    expect(script).toMatch(/^COMPONENTS="node zerotier mediamtx mavlink-router gst-rockchip seekerhd console application"$/m);
   });
 
   it("stages it only for arm64, which is every Rockchip board there is", () => {
@@ -2022,7 +2168,8 @@ describe('accessory daemon filesystem boundary', () => {
     const unit = readFileSync(join(ROOT, 'systemd/yonder-core.service'), 'utf8');
     expect(role).toContain('modprobe libcomposite'); expect(role).toContain('mount -t configfs');
     expect(role).toContain('core installation continues');
-    expect(unit).toContain('After=local-fs.target NetworkManager.service systemd-modules-load.service sys-kernel-config.mount');
+    expect(unit).toContain('After=local-fs.target yonder-admin.socket NetworkManager.service systemd-modules-load.service sys-kernel-config.mount');
+    expect(unit).toContain('Requires=yonder-admin.socket');
     expect(unit).toContain('-/sys/kernel/config/usb_gadget');
     expect(unit).toContain('ProtectSystem=strict'); expect(unit).not.toMatch(/^ReadWritePaths=.*(?:\s|=)\/sys(?:\s|$)/m);
     const helper = readFileSync(join(ROOT, 'packages/yonder-core/src/video/accessory/assets/functionfs.py'), 'utf8');

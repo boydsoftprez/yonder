@@ -73,19 +73,34 @@ export class SecretStore {
 
   constructor(path: string) {
     this.path = path;
-    if (!existsSync(path)) {
-      this.bag = {};
-      return;
+    this.bag = this.read();
+    this.guardAll();
+  }
+
+  private read(): Bag {
+    if (!existsSync(this.path)) {
+      return {};
     }
-    const parsed = BagSchema.safeParse(parseSecretsFile(path, readFileSync(path, "utf8")) ?? {});
+    const parsed = BagSchema.safeParse(parseSecretsFile(this.path, readFileSync(this.path, "utf8")) ?? {});
     if (!parsed.success) {
       throw new ConfigError(
-        `${path} must be a flat map of names to string values`,
+        `${this.path} must be a flat map of names to string values`,
         formatIssues(parsed.error),
       );
     }
-    this.bag = parsed.data;
+    return parsed.data;
+  }
+
+  /** Replace the in-memory view only after the projected file parsed completely. */
+  reload(): void {
+    const next = this.read();
+    this.bag = next;
     this.guardAll();
+  }
+
+  /** Trusted internal snapshot used to bootstrap the root-owned state service. */
+  snapshot(): Readonly<Record<string, string>> {
+    return { ...this.bag };
   }
 
   get(name: string): string | undefined {
@@ -97,9 +112,7 @@ export class SecretStore {
     const existing = this.bag[name];
     if (existing !== undefined) return { value: existing, created: false };
     const value = generateSecret(kind);
-    this.bag[name] = value;
-    guardSecretValue(value);
-    this.flush();
+    this.put(name, value);
     return { value, created: true };
   }
 
@@ -113,9 +126,7 @@ export class SecretStore {
   ensureValue(name: string, value: string): { value: string; created: boolean } {
     const existing = this.bag[name];
     if (existing !== undefined) return { value: existing, created: false };
-    this.bag[name] = value;
-    guardSecretValue(value);
-    this.flush();
+    this.put(name, value);
     return { value, created: true };
   }
 

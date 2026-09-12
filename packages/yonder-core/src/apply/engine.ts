@@ -15,6 +15,12 @@ import { warn } from "../log.js";
 // from the one the renderer actually acts on.
 import { wifiMode } from "../net/profiles.js";
 import { Journal } from "./journal.js";
+import type {
+  DurableState,
+  SecretPatch,
+  StateCoordinator,
+  StateTransaction,
+} from "../state/types.js";
 import {
   systemClock,
   type ApplyOutcome,
@@ -61,6 +67,12 @@ export interface ApplyEngineOptions {
    * diagnosable — see status().degraded.
    */
   degraded?: string;
+  /** Root-owned durable state authority. Production always supplies this. */
+  stateCoordinator?: StateCoordinator;
+  /** Reload in-process secret readers after the fixed projection changes. */
+  refreshSecrets?: () => void;
+  /** Add fixed derived state, such as media credentials, before staging. */
+  prepareState?: (state: DurableState, previous: DurableState) => DurableState;
 }
 
 /** States in which a new apply may not start. */
@@ -134,6 +146,9 @@ export class ApplyEngine {
   private readonly renderTimeoutMs: number;
   private readonly journal: Journal;
   private readonly degraded?: string;
+  private readonly stateCoordinator?: StateCoordinator;
+  private readonly refreshSecrets: () => void;
+  private readonly prepareState: (state: DurableState, previous: DurableState) => DurableState;
 
   private state: ApplyState = "idle";
   private id?: string;
@@ -159,6 +174,7 @@ export class ApplyEngine {
   private lastResult?: ApplyResult;
   /** An in-flight rollback render. A new apply waits for it rather than racing it. */
   private settling?: Promise<void>;
+  private pendingTransaction?: StateTransaction;
 
   constructor(opts: ApplyEngineOptions) {
     this.configPath = opts.configPath;
@@ -171,6 +187,9 @@ export class ApplyEngine {
     this.renderTimeoutMs = opts.renderTimeoutMs ?? 60_000;
     this.journal = new Journal(opts.journalPath);
     this.degraded = opts.degraded;
+    this.stateCoordinator = opts.stateCoordinator;
+    this.refreshSecrets = opts.refreshSecrets ?? (() => {});
+    this.prepareState = opts.prepareState ?? ((state) => state);
   }
 
   status(): ApplyStatus {
@@ -187,6 +206,11 @@ export class ApplyEngine {
     };
   }
 
+  /** Used only by the legacy route adapter; production must return true. */
+  usesDurableState(): boolean {
+    return this.stateCoordinator !== undefined;
+  }
+
   /**
    * Validate, snapshot, write, render, then start the countdown.
    *
@@ -196,7 +220,12 @@ export class ApplyEngine {
    * the loadConfig call below — and `previousIsDefault` is set on both the
    * journal entry and the return value so that substitution is never silent.
    */
-  async apply(next: unknown, options: { appearanceOnly?: boolean; gimbalPresetsOnly?: boolean } = {}): Promise<{
+  async apply(next: unknown, options: {
+    appearanceOnly?: boolean;
+    gimbalPresetsOnly?: boolean;
+    secretOnly?: boolean;
+    secretPatch?: SecretPatch;
+  } = {}): Promise<{
     id: string;
     /**
      * When the change reverts unless confirmed, or **null when there is
@@ -266,7 +295,17 @@ export class ApplyEngine {
 
     let previous: Config;
     let previousIsDefault = false;
-    try {
+    const id = randomUUID();
+    let transaction: StateTransaction | undefined;
+    if (this.stateCoordinator !== undefined) {
+      try {
+        transaction = await this.stateCoordinator.begin({ id, kind: "config-apply" });
+        previous = transaction.previous.state.config;
+      } catch (e) {
+        this.state = stateBeforeApply;
+        throw e;
+      }
+    } else try {
       previous = loadConfig(this.configPath);
     } catch (e) {
       // The rollback target would normally be the operator's own previous
@@ -311,22 +350,54 @@ export class ApplyEngine {
     const onlyPresets = options.gimbalPresetsOnly === true && !previousIsDefault
       && JSON.stringify(withoutPresets(previous)) === JSON.stringify(withoutPresets(parsed.data));
     if(options.gimbalPresetsOnly && !onlyPresets){
+      if (transaction !== undefined) await transaction.rollback("stale-config");
       this.state=stateBeforeApply;
       throw new ConfigError('Configuration changed while saving the preset; try again');
     }
-    const renderers = onlyPresets ? [] : options.appearanceOnly && !previousIsDefault && sameExceptTheme && this.appearanceRenderer
+    const onlySecret = options.secretOnly === true && JSON.stringify(previous) === JSON.stringify(parsed.data);
+    if (options.secretOnly && !onlySecret) {
+      if (transaction !== undefined) await this.retryTerminal(() => transaction.rollback("stale-config"));
+      this.state = stateBeforeApply;
+      throw new ConfigError("configuration changed while storing the credential; try again");
+    }
+    const renderers = onlyPresets || onlySecret ? [] : options.appearanceOnly && !previousIsDefault && sameExceptTheme && this.appearanceRenderer
       ? [this.appearanceRenderer] : this.renderers;
 
-    const id = randomUUID();
     this.id = id;
     this.previous = previous;
     this.expiresAt = undefined;
 
     try {
-      this.journal.write({ id, previous, previousIsDefault, startedAt: this.clock.now() });
-      saveConfig(this.configPath, parsed.data);
+      if (transaction !== undefined) {
+        const durable = this.prepareState(
+          withSecretPatch(transaction.previous.state, parsed.data, options.secretPatch),
+          transaction.previous.state,
+        );
+        await transaction.stage(durable);
+        await transaction.activate();
+        this.refreshSecrets();
+        this.pendingTransaction = transaction;
+      } else {
+        this.journal.write({ id, previous, previousIsDefault, startedAt: this.clock.now() });
+        saveConfig(this.configPath, parsed.data);
+      }
       await this.renderAll(parsed.data, renderers);
     } catch (e) {
+      if (transaction !== undefined) {
+        try {
+          await this.retryTerminal(() => transaction.rollback("renderer-failed"));
+          this.refreshSecrets();
+          if (!(e instanceof RenderTimeoutError)) {
+            await this.renderAll(previous, renderers).catch(() => { /* best effort */ });
+          }
+          this.pendingTransaction = undefined;
+          this.finish(id, "failed");
+        } catch (rollbackError) {
+          this.state = "reverting";
+          warn(`durable rollback failed after an apply error: ${(rollbackError as Error).message}`);
+        }
+        throw e;
+      }
       // Put everything back before returning the error.
       try {
         saveConfig(this.configPath, previous);
@@ -407,7 +478,12 @@ export class ApplyEngine {
     if (onlyPresets || !affectsReachability(previous, parsed.data)) {
       // Same order as confirm(): the journal is cleared first, because that
       // is what makes the change permanent.
-      this.journal.clear();
+      if (transaction !== undefined) {
+        await this.retryTerminal(() => transaction.commit());
+        this.pendingTransaction = undefined;
+      } else {
+        this.journal.clear();
+      }
       this.state = "confirmed";
       this.lastResult = { id, outcome: "confirmed", at: this.clock.now() };
       return {
@@ -417,6 +493,23 @@ export class ApplyEngine {
       };
     }
 
+    if (transaction !== undefined) {
+      try {
+        await transaction.holdForConfirmation();
+      } catch (e) {
+        try {
+          await this.retryTerminal(() => transaction.rollback("hold-failed"));
+          this.refreshSecrets();
+          await this.renderAll(previous, renderers).catch(() => { /* best effort */ });
+          this.pendingTransaction = undefined;
+          this.finish(id, "failed");
+        } catch (rollbackError) {
+          this.state = "reverting";
+          warn(`durable rollback failed after a hold error: ${(rollbackError as Error).message}`);
+        }
+        throw e;
+      }
+    }
     this.state = "pending";
     this.window = window;
     // The same answer the window above was chosen by, kept so `status()` can
@@ -444,7 +537,9 @@ export class ApplyEngine {
           if (this.state !== "pending" || this.id !== applyId) return;
           if (result.ok) {
             warn(`the device confirmed the change itself: ${result.reason}`);
-            this.confirm(applyId);
+            void Promise.resolve(this.confirm(applyId)).catch((e: unknown) => {
+              warn(`the device could not keep its verified change: ${(e as Error).message}`);
+            });
           } else {
             warn(`the change did not take (${result.reason}); reverting now rather than waiting`);
             this.revertInBackground("the device's own check of the change");
@@ -466,7 +561,7 @@ export class ApplyEngine {
   }
 
   /** Operator saw the device still working. Keep the change. */
-  confirm(id: string): void {
+  confirm(id: string): void | Promise<void> {
     if (this.state !== "pending") throw new ConfigError("nothing is pending confirmation");
     if (id !== this.id) throw new ConfigError(`unknown apply id "${id}"`);
     // Clearing the journal is what makes the change permanent, and it comes
@@ -474,6 +569,7 @@ export class ApplyEngine {
     // fsyncing the journal directory), the timer is left armed rather than
     // cleared, so the change still reverts on schedule instead of being
     // stuck "pending" with no rollback timer left to save it.
+    if (this.pendingTransaction !== undefined) return this.confirmDurable(id);
     this.journal.clear();
     if (this.timer !== undefined) this.clock.clearTimer(this.timer);
     this.state = "confirmed";
@@ -483,6 +579,19 @@ export class ApplyEngine {
     // any more, and a flag left set here would still be set when the next
     // apply is kept outright under R-CFG-12 — which never touches the radio
     // and never reaches finish() either.
+    this.movesRadio = false;
+    this.lastResult = { id, outcome: "confirmed", at: this.clock.now() };
+  }
+
+  private async confirmDurable(id: string): Promise<void> {
+    const transaction = this.pendingTransaction;
+    if (transaction === undefined) throw new ConfigError("nothing is pending confirmation");
+    await this.retryTerminal(() => transaction.commit());
+    this.pendingTransaction = undefined;
+    if (this.timer !== undefined) this.clock.clearTimer(this.timer);
+    this.state = "confirmed";
+    this.timer = undefined;
+    this.expiresAt = undefined;
     this.movesRadio = false;
     this.lastResult = { id, outcome: "confirmed", at: this.clock.now() };
   }
@@ -513,11 +622,16 @@ export class ApplyEngine {
     if (id !== this.id) throw new ConfigError(`unknown apply id "${id}"`);
     if (this.timer !== undefined) this.clock.clearTimer(this.timer);
     this.timer = undefined;
-    await this.revert();
+    await this.revert("operator-revert");
   }
 
   /** Called at start-up. Reverts an apply the previous process never confirmed. */
   async recover(): Promise<void> {
+    if (this.stateCoordinator !== undefined) {
+      await this.stateCoordinator.recover();
+      this.refreshSecrets();
+      return;
+    }
     const entry = this.journal.read();
     if (entry === null) return;
     saveConfig(this.configPath, entry.previous);
@@ -580,7 +694,7 @@ export class ApplyEngine {
    * and the re-armed countdown tries again.
    */
   private revertInBackground(who: string): void {
-    void this.revert().catch((e: unknown) => {
+    void this.revert("confirmation-expired").catch((e: unknown) => {
       warn(`${who} could not put the previous configuration back: ${(e as Error).message}`);
     });
   }
@@ -599,11 +713,28 @@ export class ApplyEngine {
     this.timer = this.clock.setTimer(window, () => { this.revertInBackground("the countdown"); });
   }
 
-  private async revert(): Promise<void> {
+  private async revert(reasonCode: string): Promise<void> {
     if (this.state !== "pending" || this.previous === undefined) return;
     this.state = "reverting";
     const previous = this.previous;
     const id = this.id;
+    if (this.pendingTransaction !== undefined) {
+      try {
+        await this.retryTerminal(() => this.pendingTransaction!.rollback(reasonCode));
+        this.refreshSecrets();
+      } catch (e) {
+        this.state = "pending";
+        this.rearm();
+        throw e;
+      }
+      this.pendingTransaction = undefined;
+      this.finish(id, "reverted");
+      const settling = this.renderAll(previous).catch(() => { /* best effort */ });
+      this.settling = settling;
+      await settling;
+      if (this.settling === settling) this.settling = undefined;
+      return;
+    }
     // Guarded, and it is the one write in this class that must never be
     // allowed to fail silently. `saveConfig` throws when the file cannot be
     // written — the ordinary way a Pi's rootfs fails is the kernel remounting
@@ -683,6 +814,11 @@ export class ApplyEngine {
     }
   }
 
+  /** A lost reply is safe to retry because terminal outcomes have durable receipts. */
+  private async retryTerminal<T>(operation: () => Promise<T>): Promise<T> {
+    try { return await operation(); } catch { return operation(); }
+  }
+
   /** Return to rest, recording how the apply ended. */
   private finish(id: string | undefined, outcome: ApplyOutcome): void {
     if (id !== undefined) this.lastResult = { id, outcome, at: this.clock.now() };
@@ -694,4 +830,13 @@ export class ApplyEngine {
     this.window = undefined;
     this.movesRadio = false;
   }
+}
+
+function withSecretPatch(previous: DurableState, config: Config, patch: SecretPatch | undefined): DurableState {
+  const secrets = { ...previous.secrets };
+  for (const [name, value] of Object.entries(patch ?? {})) {
+    if (value === null) delete secrets[name];
+    else secrets[name] = value;
+  }
+  return { ...structuredClone(previous), config, secrets };
 }

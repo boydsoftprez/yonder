@@ -1,0 +1,231 @@
+name: Images
+
+on:
+  workflow_dispatch:
+    inputs:
+      target:
+        description: Image target to build into a draft candidate
+        required: true
+        default: all
+        type: choice
+        options:
+          - all
+          - rpi
+          - radxa-zero3w
+          - radxa-rock5c
+  push:
+    tags:
+      - "v20*.*.*"
+
+permissions: {}
+
+concurrency:
+  group: images-${{ github.ref }}-${{ github.event_name == 'workflow_dispatch' && inputs.target || 'all' }}
+  cancel-in-progress: false
+
+jobs:
+  authorize:
+    runs-on: ubuntu-latest
+    permissions:
+      actions: read
+      contents: read
+    outputs:
+      source_revision: ${{ steps.source.outputs.source_revision }}
+      targets: ${{ steps.source.outputs.targets }}
+    steps:
+      - name: Require the configured native ARM64 image runner
+        env:
+          IMAGE_RUNNER: ${{ vars.IMAGE_RUNNER }}
+        run: test -n "$IMAGE_RUNNER"
+      - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+      - name: Verify release lineage, signatures and source CI
+        id: source
+        env:
+          GH_TOKEN: ${{ github.token }}
+          IMAGE_TARGET: ${{ github.event_name == 'push' && 'all' || inputs.target }}
+        run: |
+          set -euo pipefail
+          test "$(node -p 'Number(process.versions.node.split(".")[0]) >= 24')" = true
+          source_file="$RUNNER_TEMP/yonder-image-source.json"
+          node image/lib/release-source.mjs "$source_file"
+          node - "$source_file" "$GITHUB_OUTPUT" <<'JS'
+          const fs = require('node:fs');
+          const source = JSON.parse(fs.readFileSync(process.argv[2], 'utf8'));
+          const event = process.env.GITHUB_EVENT_NAME;
+          const ref = process.env.GITHUB_REF;
+          if (!['push', 'workflow_dispatch'].includes(event)
+            || (ref !== 'refs/heads/main' && ref !== `refs/tags/${source.tag}`)) process.exit(1);
+          source.trigger = {
+            event,
+            ref,
+            signedTagVerified: ref === `refs/tags/${source.tag}`,
+          };
+          fs.writeFileSync(process.argv[2], `${JSON.stringify(source, null, 2)}\n`, { mode: 0o600 });
+          fs.appendFileSync(process.argv[3], `source_revision=${source.sourceRevision}\n`);
+          fs.appendFileSync(process.argv[3], `targets=${JSON.stringify(source.targets)}\n`);
+          JS
+      - name: Retain verified source evidence for the draft job
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+        with:
+          name: image-source-evidence
+          path: ${{ runner.temp }}/yonder-image-source.json
+          if-no-files-found: error
+          retention-days: 1
+
+  build:
+    needs: authorize
+    strategy:
+      fail-fast: false
+      matrix:
+        target: ${{ fromJSON(needs.authorize.outputs.targets) }}
+    runs-on: ${{ vars.IMAGE_RUNNER }}
+    timeout-minutes: 180
+    permissions:
+      contents: read
+    env:
+      IMAGE_INPUT_ROOT: ${{ vars.IMAGE_INPUT_ROOT }}
+      BUILD_DIR: ${{ runner.temp }}/yonder-image-${{ matrix.target }}
+      SEALED_DIR: ${{ runner.temp }}/yonder-transfer-${{ matrix.target }}
+    steps:
+      - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
+        with:
+          ref: ${{ needs.authorize.outputs.source_revision }}
+          fetch-depth: 0
+          persist-credentials: false
+      - name: Fail fast unless the native builder and captured inputs are ready
+        env:
+          EXPECTED_REVISION: ${{ needs.authorize.outputs.source_revision }}
+        run: |
+          set -euo pipefail
+          test "$(uname -m)" = aarch64
+          test "$(node -p 'Number(process.versions.node.split(".")[0]) >= 24')" = true
+          test "$(git rev-parse HEAD)" = "$EXPECTED_REVISION"
+          test "$(docker info --format '{{.OSType}}')" = linux
+          test -n "$IMAGE_INPUT_ROOT"
+          case "$IMAGE_INPUT_ROOT" in /*) ;; *) exit 1 ;; esac
+          input_root=$(realpath -e "$IMAGE_INPUT_ROOT")
+          test "$input_root" = "$IMAGE_INPUT_ROOT"
+          test "$(findmnt -rn -T "$input_root" -o TARGET)" = "$input_root"
+          case ",$(findmnt -rn -T "$input_root" -o OPTIONS)," in *,ro,*) ;; *) exit 1 ;; esac
+          test "$(stat -c '%u:%g' "$input_root")" = 0:0
+          test -f "$input_root/${{ matrix.target }}/input-set.json"
+          test -f "$input_root/release/input-index.json"
+          docker_root=$(docker info --format '{{.DockerRootDir}}')
+          minimum=$((40 * 1024 * 1024 * 1024))
+          for path in "$RUNNER_TEMP" "$docker_root"; do
+            available=$(df -PB1 "$path" | awk 'NR == 2 { print $4 }')
+            test "$available" -ge "$minimum"
+          done
+      - name: Build one production image without network access
+        run: |
+          set -euo pipefail
+          complete=0
+          trap 'if [ "$complete" -ne 1 ]; then rm -rf "$BUILD_DIR"; fi' EXIT
+          rm -rf "$BUILD_DIR" "$SEALED_DIR"
+          YONDER_INPUTS_ROOT="$IMAGE_INPUT_ROOT" \
+            image/build.sh --target "${{ matrix.target }}" --output "$BUILD_DIR"
+          complete=1
+      - name: Encrypt the complete target output before handoff
+        env:
+          IMAGE_TRANSFER_KEY: ${{ secrets.IMAGE_TRANSFER_PUBLIC_KEY }}
+        run: |
+          set -euo pipefail
+          trap 'rm -rf "$BUILD_DIR"' EXIT
+          test -n "$IMAGE_TRANSFER_KEY"
+          node image/lib/transfer-directory.mjs seal "$BUILD_DIR" "$SEALED_DIR"
+      - name: Upload encrypted target transfer
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+        with:
+          name: image-transfer-${{ matrix.target }}
+          path: ${{ runner.temp }}/yonder-transfer-${{ matrix.target }}
+          if-no-files-found: error
+          compression-level: 0
+          retention-days: 1
+      - name: Remove target scratch data
+        if: always()
+        run: rm -rf "$BUILD_DIR" "$SEALED_DIR"
+
+  draft:
+    needs:
+      - authorize
+      - build
+    runs-on: ${{ vars.IMAGE_RUNNER }}
+    timeout-minutes: 90
+    permissions:
+      contents: write
+    env:
+      IMAGE_INPUT_ROOT: ${{ vars.IMAGE_INPUT_ROOT }}
+      SOURCE_DIR: ${{ runner.temp }}/yonder-source-evidence
+      TRANSFER_DIR: ${{ runner.temp }}/yonder-image-transfers
+    steps:
+      - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
+        with:
+          ref: ${{ needs.authorize.outputs.source_revision }}
+          fetch-depth: 0
+          persist-credentials: false
+      - name: Download verified source evidence
+        uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4.3.0
+        with:
+          name: image-source-evidence
+          path: ${{ runner.temp }}/yonder-source-evidence
+      - name: Download encrypted target transfers
+        uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4.3.0
+        with:
+          pattern: image-transfer-*
+          path: ${{ runner.temp }}/yonder-image-transfers
+          merge-multiple: false
+      - name: Verify the draft runner and retained input archive
+        env:
+          EXPECTED_REVISION: ${{ needs.authorize.outputs.source_revision }}
+        run: |
+          set -euo pipefail
+          test "$(uname -m)" = aarch64
+          test "$(node -p 'Number(process.versions.node.split(".")[0]) >= 24')" = true
+          command -v gh >/dev/null
+          command -v zstd >/dev/null
+          test "$(git rev-parse HEAD)" = "$EXPECTED_REVISION"
+          test -n "$IMAGE_INPUT_ROOT"
+          input_root=$(realpath -e "$IMAGE_INPUT_ROOT")
+          test "$input_root" = "$IMAGE_INPUT_ROOT"
+          test "$(findmnt -rn -T "$input_root" -o TARGET)" = "$input_root"
+          case ",$(findmnt -rn -T "$input_root" -o OPTIONS)," in *,ro,*) ;; *) exit 1 ;; esac
+          test "$(stat -c '%u:%g' "$input_root")" = 0:0
+          test -f "$input_root/release/input-index.json"
+          minimum=$((40 * 1024 * 1024 * 1024))
+          available=$(df -PB1 "$RUNNER_TEMP" | awk 'NR == 2 { print $4 }')
+          test "$available" -ge "$minimum"
+      - name: Authenticate transfers and create or update a draft release
+        env:
+          GH_TOKEN: ${{ github.token }}
+          IMAGE_TRANSFER_KEY: ${{ secrets.IMAGE_TRANSFER_PRIVATE_KEY }}
+          IMAGE_TARGET: ${{ github.event_name == 'push' && 'all' || inputs.target }}
+        run: |
+          set -euo pipefail
+          test -n "$IMAGE_TRANSFER_KEY"
+          work=$(mktemp -d "$RUNNER_TEMP/yonder-draft.XXXXXX")
+          trap 'rm -rf "$work" "$SOURCE_DIR" "$TRANSFER_DIR"' EXIT
+          mkdir "$work/builds"
+          while IFS= read -r target; do
+            case "$target" in rpi|radxa-zero3w|radxa-rock5c) ;; *) exit 1 ;; esac
+            node image/lib/transfer-directory.mjs open \
+              "$TRANSFER_DIR/image-transfer-$target" "$work/builds/$target"
+          done < <(node -e 'const s=require(process.argv[1]); for (const t of s.targets) console.log(t)' \
+            "$SOURCE_DIR/yonder-image-source.json")
+          assemble=(
+            --source "$SOURCE_DIR/yonder-image-source.json"
+            --input-release "$IMAGE_INPUT_ROOT/release"
+            --build-root "$work/builds"
+            --output "$work/staging"
+          )
+          if [ "$GITHUB_EVENT_NAME" = workflow_dispatch ]; then
+            assemble+=(--candidate "github-${GITHUB_RUN_ID}-${GITHUB_RUN_ATTEMPT}")
+          fi
+          node image/release/assemble-workflow.mjs "${assemble[@]}"
+          node image/release/draft.mjs \
+            --manifest "$work/staging/release-set.json" \
+            --repo "$GITHUB_REPOSITORY" \
+            --target "$IMAGE_TARGET" \
+            --apply

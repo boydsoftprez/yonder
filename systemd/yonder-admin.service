@@ -1,0 +1,29 @@
+# SPDX-License-Identifier: GPL-3.0-or-later
+[Unit]
+Description=Yonder durable state administration helper
+Documentation=https://github.com/boydsoftprez/yonder
+Requires=yonder-admin.socket
+After=local-fs.target systemd-tmpfiles-setup.service
+RequiresMountsFor=/var/lib/yonder-state
+
+[Service]
+Type=simple
+ExecStart=/usr/local/bin/yonder-node /opt/yonder/packages/yonder-core/dist/admin/main.js
+Restart=on-failure
+RestartSec=2
+# No User=/Group=: system services default to root, and naming a synthetic
+# account here would make the installer responsible for creating it.
+RuntimeDirectory=yonder-admin
+RuntimeDirectoryMode=0700
+UMask=0077
+ProtectSystem=strict
+# Native account tools update account and SSH policy files atomically in /etc.
+# Only this root helper gets these paths; the web console retains its sandbox.
+ReadWritePaths=/var/lib/yonder-state /etc /home /run/sshd -/var/lib/zerotier-one
+ProtectHome=no
+PrivateTmp=yes
+NoNewPrivileges=yes
+# ZeroTier CLI talks only to its local control API.
+RestrictAddressFamilies=AF_UNIX AF_INET AF_INET6
+IPAddressDeny=any
+IPAddressAllow=localhost

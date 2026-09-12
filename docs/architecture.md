@@ -402,17 +402,24 @@ installer/install.sh
    │
    └── run in a chroot in CI
          ├── over Raspberry Pi OS Lite  → yonder-rpi-<ver>.img.xz
-         └── over Armbian (rk35xx)      → yonder-radxa-<ver>.img.xz
+         ├── over Armbian ZERO 3W      → yonder-radxa-zero3w-<ver>.img.xz
+         └── over Armbian ROCK 5C      → yonder-radxa-rock5c-<ver>.img.xz
 ```
 
 Radxa hardware encoding needs the Rockchip MPP library and the GStreamer Rockchip plugin,
 which no repository packages; both are built from pinned commits into the offline payload by
-`installer/make-payload.sh` and installed by a role where `/dev/mpp_service` exists. Armbian
+`installer/make-payload.sh`. Image installation selects these filesystem payloads from the
+declared Radxa target; runtime probing of `/dev/mpp_service` establishes encoder capability. Armbian
 ships the vendor kernel, so Radxa is installable rather than image-only. The Pi supports
 both paths.
 
-Every release publishes both artifacts and the installer that produced them, so anyone can
-reproduce the image from the same commit.
+The image work targets three outputs: Raspberry Pi 3/4/5, ZERO 3W and ROCK 5C. Exact
+upstream compressed files and SHA-256 identities are recorded in `image/bases.lock.json`.
+Tag builds are intended to create draft releases; reviewed artifacts are published without
+rebuilding. Retained apt/payload inputs are also required before claiming reproducible
+images. See [ADR-0010](adr/0010-image-storage-and-owner-recovery.md) for protected storage,
+persistent diagnostics, Linux owner setup, apt maintenance and recovery. This design is
+in progress; no ready-to-flash Yonder image is established by a base download.
 
 ---
 

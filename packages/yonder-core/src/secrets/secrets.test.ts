@@ -1,6 +1,6 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 import { describe, it, expect, beforeEach, afterEach } from "vitest";
-import { mkdtempSync, rmSync, statSync, writeFileSync } from "node:fs";
+import { mkdirSync, mkdtempSync, rmSync, statSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { SecretStore } from "./store.js";
@@ -10,6 +10,25 @@ beforeEach(() => { dir = mkdtempSync(join(tmpdir(), "yonder-sec-")); });
 afterEach(() => { rmSync(dir, { recursive: true, force: true }); });
 
 describe("SecretStore", () => {
+  // R-STO-03/R-SEC-10: a failed first-owner/AP credential write must not
+  // appear configured in memory while the next boot finds no credential.
+  for (const operation of ["ensure", "ensureValue"] as const) {
+    it(`does not cache a failed ${operation}, and permits a durable retry`, () => {
+      const parent = join(dir, "not-mounted");
+      const path = join(parent, "secrets.yaml");
+      const store = new SecretStore(path);
+      const attempt = () => operation === "ensure"
+        ? store.ensure("admin_password", "password")
+        : store.ensureValue("admin_password", "fixture-password-hash");
+      expect(attempt).toThrow(/cannot write/);
+      expect(store.get("admin_password")).toBeUndefined();
+      mkdirSync(parent);
+      const retried = attempt();
+      expect(retried.created).toBe(true);
+      expect(new SecretStore(path).get("admin_password")).toBe(retried.value);
+    });
+  }
+
   it("creates a secret on first ensure and reports it as new", () => {
     const s = new SecretStore(join(dir, "secrets.yaml"));
     const first = s.ensure("ap_psk", "psk");
@@ -48,6 +67,26 @@ describe("SecretStore", () => {
       value: "an-operator-chose-this", created: false,
     });
     expect(new SecretStore(p).get("ap_psk")).toBe("an-operator-chose-this");
+  });
+
+  it("reloads an atomically projected set without retaining removed rows", () => {
+    const path = join(dir, "secrets.yaml");
+    const store = new SecretStore(path);
+    store.put("old", "old-value");
+    writeFileSync(path, "fresh: fresh-value\n", { mode: 0o600 });
+    store.reload();
+    expect(store.get("old")).toBeUndefined();
+    expect(store.get("fresh")).toBe("fresh-value");
+    expect(store.snapshot()).toEqual({ fresh: "fresh-value" });
+  });
+
+  it("keeps its previous view when a projected file is unreadable", () => {
+    const path = join(dir, "secrets.yaml");
+    const store = new SecretStore(path);
+    store.put("kept", "kept-value");
+    writeFileSync(path, "kept:\n\tbad", { mode: 0o600 });
+    expect(() => store.reload()).toThrow(/not valid YAML/);
+    expect(store.get("kept")).toBe("kept-value");
   });
 
   it("resolves a secret reference", () => {

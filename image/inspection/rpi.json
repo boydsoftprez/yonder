@@ -1,0 +1,35 @@
+{
+  "compressedSha256": "acff736ca7945e3b305f07cda4abdb870910e12634991da69783611756e381b3",
+  "imageFileName": "acff736ca7945e3b305f07cda4abdb870910e12634991da69783611756e381b3-2026-06-18-raspios-trixie-arm64-lite.img.xz",
+  "partitionTable": "mbr",
+  "partitions": [
+    {
+      "number": 1,
+      "sectorCount": 1048576,
+      "startSector": 16384,
+      "type": "0x0c"
+    },
+    {
+      "filesystem": {
+        "blockCount": 593920,
+        "blockSize": 4096,
+        "defaultMountOptions": "0x0000000c",
+        "features": {
+          "compatible": "0x0000103c",
+          "incompatible": "0x00002242",
+          "readOnlyCompatible": "0x00000463"
+        },
+        "type": "ext4",
+        "uuid": "15f4c6be-1102-4331-9904-f78e78afd1fd"
+      },
+      "number": 2,
+      "sectorCount": 4751360,
+      "startSector": 1064960,
+      "type": "0x83"
+    }
+  ],
+  "rawSha256": "e235fd24fc5f039c08daba7d3abc04aecc7313f979d16d2a3fdad29dd44c33a9",
+  "schemaVersion": 1,
+  "target": "rpi",
+  "uncompressedBytes": 2977955840
+}

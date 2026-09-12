@@ -14,6 +14,41 @@ sudo ./installer/install.sh
 sudo ./installer/install.sh --only 20-yonder-core
 ```
 
+An image builder invokes the same installer from inside the already-mounted
+target root:
+
+```sh
+./installer/install.sh --image --target rpi
+./installer/install.sh --image --target radxa-zero3w
+```
+
+Image mode requires one of `rpi`, `radxa-zero3w`, or `radxa-rock5c` and a
+complete ARM64 application and payload. It fails before mutation when required
+compiled packages, the recursive required dependency closure, the safe core
+module import, external payload components, boot files, or architectures do not
+match. Radxa payloads must provide the exact `librockchip_mpp.so.1` and
+`librga.so` sonames the plugin loads, resolved to staged ARM64 files. `--only`
+remains available for controlled repair/testing, but it does not relax the
+complete image-payload preflight.
+
+Package maintainer scripts are held behind a temporary `policy-rc.d` while an
+image is installed. Any prior policy file is moved aside and restored on normal
+exit, failure, or a handled termination signal. Intended boot enablement is
+written offline: core, console, Avahi, NetworkManager and ModemManager are
+enabled; mavlink-router, ZeroTier and MediaMTX stay disabled until configuration
+owns them. No service is started/restarted, and no udev, module, configfs or
+hardware-device operation runs in image mode.
+
+The Raspberry Pi candidate prepares the existing `config.txt`/`cmdline.txt`
+layout. The ZERO 3W candidate applies only the Armbian network handoff and
+`uart2-m0` preparation observed on the previous board. These are prepared image
+candidates; cold-flash/first-boot qualification and Raspberry Pi model coverage
+remain pending. ROCK 5C image installation currently refuses before
+mutation because its header UART/boot assets have not been qualified; it never
+receives the ZERO 3W overlay. Rockchip libraries and the GStreamer plugin are
+installed for declared Radxa images without manufacturing `/dev/mpp_service`;
+encoder discovery remains a runtime check on the board.
+
 An existing device configuration is preserved. Source files and runtime artifacts
 are replaced by the selected build. Configuration rollback does not roll back a
 software install. Use a bench maintenance session and keep a private backup.
@@ -116,11 +151,20 @@ assumes its prerequisites are already installed.
 | `40-zerotier` | Mesh client; disabled until a network is configured |
 | `50-mediamtx` | Media server, authentication/configuration path and required GStreamer elements |
 | `52-gst-rockchip` | Matching Rockchip plugin/libraries and registry checks on the applicable hardware |
+| `53-seekerhd` | ZERO 3W IMX462 driver, camera overlay, ISP21 runtime and tuning; verifies installed prerequisites |
 | `55-pipeline-host` | Python/GStreamer pipeline host and accessory support prerequisites |
 
-SeekerHD sensor/ISP preparation is still an explicit board-specific procedure in
-[its bring-up sources](../scripts/spikes/seekerhd/README.md). The standard installer
-does not install an arbitrary CSI sensor driver or tuning profile.
+ZERO 3W installation includes the SeekerHD sensor/ISP stack using
+`installer/make-payload.sh --arch linux-arm64 --only seekerhd` to assemble its
+required offline runtime. Role 53 installs the sensor through DKMS, validates
+the camera overlay with the base tree and UART overlay, and installs the ISP
+service and normal-light tuning. The installer checks the assembled files;
+camera activation after a live installation requires a reboot. Camera absence
+must not prevent the console from starting. See the
+[bring-up sources](../scripts/spikes/seekerhd/README.md) for the hardware scope
+and the [provisioning audit](../docs/hardware/image-provisioning-audit.md) for
+remaining hardware-specific setup. This ZERO 3W stack is not a ROCK 5C camera
+driver and does not enable experimental HDR.
 
 ## Verify the result
 
@@ -137,9 +181,24 @@ npm test
 npm run build
 ./installer/install.sh --dry-run
 ./scripts/verify-installer-lib.sh
+./scripts/verify-installer-image.sh
 ```
 
 `verify-pages.sh` additionally starts an isolated fixture console and browser;
 see [Verifying the console](../docs/verifying-the-console.md). It does not touch
 an aircraft. Node 20 remains the tested core-only runtime floor; the complete
 console needs at least Node 22.12 and the payload ships Node 24.
+
+The image verifier covers flag/payload rejection, service and hardware-call
+guards, policy restoration and declared-target Rockchip installation with
+filesystem fixtures and command shims. An ARM64 Debian Trixie container has
+also exercised the actual offline `systemctl --root=/` links and apt policy
+boundary. This is not a complete base-image build, first-boot/AP result, encoder
+result, or physical-board qualification.
+
+The private ROCK 5C bench exception uses
+`--image --target radxa-rock5c --hardware-test`; the flag is rejected for live
+installation and other targets. It preserves the UART2 recovery console and
+only stages UART4 when the applied device tree matches the expected M2 pins.
+See the [bench builder and first-flash procedure](../image/bench/README.md).
+This exception does not qualify a release, protected storage, or camera support.

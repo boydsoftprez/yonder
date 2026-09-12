@@ -58,7 +58,7 @@ ensure_dir "$mr_conf_dir" 0755
 # role does exactly that, so a whole install needs no action — but
 # `--only 15-mavlink-router` does, and that is the invocation somebody
 # reaches for when they are fixing this by hand.
-if [ "$mr_conf_dir_existed" = "0" ] && [ "$DRY_RUN" != "1" ] \
+if [ "$mr_conf_dir_existed" = "0" ] && [ "$DRY_RUN" != "1" ] && [ "$IMAGE_MODE" != "1" ] \
     && command -v systemctl >/dev/null 2>&1 \
     && systemctl is-active --quiet yonder-core.service 2>/dev/null; then
     log "yonder-core is running and was started before $mr_conf_dir existed, so it cannot write there yet;"
@@ -185,12 +185,18 @@ assert_unit_accounts "$mr_unit"
 # this role needs none, because it never asks the question — the only
 # lifecycle verb it uses is the one that changes nothing about the process
 # running now.
-if [ "$DRY_RUN" != "1" ] && command -v systemctl >/dev/null 2>&1; then
+if command -v service_daemon_reload >/dev/null 2>&1; then
+    service_daemon_reload
+elif [ "$DRY_RUN" != "1" ] && command -v systemctl >/dev/null 2>&1; then
     run systemctl daemon-reload
 else
     log "skipping systemctl daemon-reload (dry run or not a systemd host)"
 fi
 
 log "leaving mavlink-router disabled; yonder-core starts it, and only once a link has been found"
-disable_unit_offline mavlink-router.service
-assert_unit_disabled mavlink-router.service
+if command -v service_disable >/dev/null 2>&1; then
+    service_disable mavlink-router.service
+else
+    disable_unit_offline mavlink-router.service
+    assert_unit_disabled mavlink-router.service
+fi

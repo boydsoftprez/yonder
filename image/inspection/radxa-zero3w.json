@@ -1,0 +1,31 @@
+{
+  "compressedSha256": "e78de9cb4b2d8ff1710c65c509d08faef1ba88c07fc3276b9dd637597e8234e8",
+  "imageFileName": "e78de9cb4b2d8ff1710c65c509d08faef1ba88c07fc3276b9dd637597e8234e8-Armbian_26.8.1_Radxa-zero3_trixie_vendor_6.1.115_minimal.img.xz",
+  "partitionTable": "gpt",
+  "partitions": [
+    {
+      "attributes": "0x0",
+      "filesystem": {
+        "blockCount": 564992,
+        "blockSize": 4096,
+        "defaultMountOptions": "0x0000006c",
+        "features": {
+          "compatible": "0x0000003c",
+          "incompatible": "0x000022c2",
+          "readOnlyCompatible": "0x0000046b"
+        },
+        "type": "ext4",
+        "uuid": "2bae8c0f-7897-4388-a83a-f7f375d59dd1"
+      },
+      "number": 1,
+      "partitionUuid": "f77549c4-759d-497f-a3e2-11033bff595f",
+      "sectorCount": 4519936,
+      "startSector": 32768,
+      "typeGuid": "b921b045-1df0-41c3-af44-4c6f280d3fae"
+    }
+  ],
+  "rawSha256": "a78367cc5d099872cfc0664c0e18215ce4538931205a35b4cfef960220bb0dc8",
+  "schemaVersion": 1,
+  "target": "radxa-zero3w",
+  "uncompressedBytes": 2332033024
+}

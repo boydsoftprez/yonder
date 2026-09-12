@@ -26,6 +26,15 @@ export interface Encoder {
   /** The hardware MJPEG decoder, where the board has one (spec §5); null elsewhere. */
   readonly decoder: "mppjpegdec" | null;
   /**
+   * The hardware H.264 decoder, where the MPP registry exposes one.
+   *
+   * This is intentionally independent from both `element` and `decoder`:
+   * MPP can register an encoder or JPEG decoder without registering a usable
+   * H.264 decoder. Accessory video is already H.264, so `pipeline.ts` reads
+   * this capability rather than guessing from either of those other elements.
+   */
+  readonly h264Decoder?: "mppvideodec" | null;
+  /**
    * The node this board's encoder is on, or null where it is software.
    *
    * **Informational. It names the encoder; it does not select it.**
@@ -75,7 +84,7 @@ const SOFTWARE: Encoder = {
 };
 
 const MPP: Encoder = {
-  element: "mpph264enc", h265: "mpph265enc", decoder: "mppjpegdec",
+  element: "mpph264enc", h265: "mpph265enc", decoder: "mppjpegdec", h264Decoder: "mppvideodec",
   device: MPP_DEVICE, hardware: true,
   detail: "hardware H.264 and H.265 through Rockchip MPP (mpph264enc, mpph265enc)",
 };
@@ -97,8 +106,9 @@ async function probeMpp(runner: CommandRunner): Promise<Encoder | null> {
   if (!(await registered(runner, "mpph264enc"))) return null;
   const h265 = (await registered(runner, "mpph265enc")) ? "mpph265enc" : null;
   const decoder = (await registered(runner, "mppjpegdec")) ? "mppjpegdec" : null;
+  const h264Decoder = (await registered(runner, "mppvideodec")) ? "mppvideodec" : null;
   return {
-    ...MPP, h265, decoder,
+    ...MPP, h265, decoder, h264Decoder,
     detail: h265 === null
       ? "hardware H.264 through Rockchip MPP (mpph264enc)"
       : MPP.detail,
@@ -114,7 +124,7 @@ export async function probeEncoder(
       return { ...SOFTWARE, detail: "software H.264 (x264enc) — named by the operator" };
     }
     if (element === "mpph264enc") {
-      return { ...MPP, detail: "hardware H.264 and H.265 through Rockchip MPP — named by the operator, not probed" };
+      return { ...MPP, h264Decoder: null, detail: "hardware H.264 and H.265 through Rockchip MPP — named by the operator, not probed" };
     }
     if (element === "v4l2h264enc" && device) {
       return {

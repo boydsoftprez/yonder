@@ -14,6 +14,12 @@ SD image or a claim of physical flight acceptance.
   kernel, thermal and HDR limits.
 - Current network addresses and paths, ZeroTier measurements, streamed diagnostics,
   bounded public speed tests, console password changes and guarded reboot.
+- Owner-created Linux and SSH access, authenticated recovery backup/restore,
+  protected system storage with separate state, journal and recording filesystems,
+  and explicit writable package-maintenance boots.
+- Pinned Raspberry Pi 3/4/5, Radxa ZERO 3W and ROCK 5C image assembly with
+  retained inputs, credential-free finalization and draft-only GitHub release gates;
+  final image hardware qualification remains separate.
 - Approved Yonder branding, an operator-facing README, a complete base-OS installation
   guide, tested-hardware records and a project-wide user guide.
 - Shared `YYYY.M.RELEASE` versions, exact first-party dependency versions and a CI

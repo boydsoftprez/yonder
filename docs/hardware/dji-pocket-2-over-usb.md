@@ -1,5 +1,83 @@
 # A DJI Pocket 2 on the USB port
 
+**2026-09-11 resolution correction (R-CAM-15):** 720p is the USB live feed
+observed in our tested modes, not a proven limit for every Pocket 2 mode.
+[DJI's own specifications](https://www.dji.com/pocket-2/specs) list live-view
+quality as 480p for 4K/60 recording, **1080p for Story Mode**, and 720p otherwise.
+The [Mimo livestream guide](https://repair.dji.com/help/content?customId=zh-cn03400006728&spaceId=34)
+also lists 1080p streaming for Pocket 2, but does not establish the native
+resolution of the USB accessory stream. A transmitted 1080p output alone does
+not distinguish native pixels from an app upscale or a different transport.
+
+The earlier H1 SDK getter/setter stub finding is real evidence about those
+specific handlers in the inspected library. It does **not** prove that no other
+mode-entry path can change the feed. Historical statements below that the
+question is closed or that no phone-side lever can exist are superseded by this
+qualification. Existing tests still establish 1280×720 at approximately 30 fps.
+
+Community follow-up: [OpenPocketCine's live-view notes](https://openpocketcine.app/docs/protocol/live-view/)
+report 720p monitoring on newer cameras over Wi-Fi, independently of recording
+resolution; they do not demonstrate Pocket 2 USB 1080p.
+[o-gs camera command names](https://github.com/o-gs/dji-firmware-tools/blob/master/comm_dissector/wireshark/dji-dumlv1-camera.lua)
+include racing-liveview and LCD/HDMI output controls, but names alone establish
+neither Pocket 2 support nor working payloads. Pocket 3/4 UVC implementations
+use a different USB interface and cannot establish this camera's capability.
+
+The next discriminating experiment is to observe Pocket 2 Mimo Story Mode entry,
+inspect the source H.264 SPS dimensions before any scaling, and compare its
+mode-entry messages with normal video mode. A usable Yonder path must sustain
+native 1920×1080 with operator-controlled gimbal behavior; an edited story clip,
+upscaled output, or temporary mode screen is insufficient. No new camera
+commands or mode changes were sent during this literature/source review.
+
+### Community source audit, 2026-09-11 (R-CAM-15)
+
+A deeper GitHub repository/code/issue search found useful protocol leads but no
+reproducible native Pocket 2 USB 1080p implementation in the sources inspected.
+This is a search result, not proof that the camera cannot do it.
+
+- **Concrete stream configuration:**
+  [djictl configuration builder](https://github.com/xaionaro-go/djictl/blob/ddeced5422fe3a27075602d41b49e61ca60c99d8/pkg/djible/interface_app_to_video_transmission_start_live_stream.go)
+  constructs DUML `08/78` with resolution, bitrate, FPS, and RTMP URL.
+  Its [resolution mapping](https://github.com/xaionaro-go/djictl/blob/ddeced5422fe3a27075602d41b49e61ca60c99d8/pkg/duml/resolution.go)
+  encodes 1080p as `0x0a`, 720p as `0x04`, and 480p as `0x47`.
+  The builder includes a captured example; its 1080p/6000-kbps payload begins
+  `00 32 00 0a 70 17 02 00 03 00 00 00`, followed by the packed URL.
+  Starting uses `02/8e` with `01 01 1a 00 01 01`, after preparation and Wi-Fi setup.
+  The [author's research](https://github.com/xaionaro/reverse-engineering-dji/tree/5c9278ff0b53bbe0d03ea6c830aab13ac775871e)
+  reports success on **Pocket 3**, with a BLE dissector. These are RTMP controls,
+  not a verified USB monitor-resolution setter. Do not transplant them into the
+  Pocket 2 startup sequence without model-specific evidence.
+- **Related implementations are not independent Pocket 2 confirmations:**
+  [osmo-live](https://github.com/KevinCowleys/osmo-live/tree/77f4901acb14b76446e341d01f84a8c9c78c1116)
+  is a Go port of [node-osmo](https://github.com/datagutt/node-osmo), offers 1080p
+  RTMP, and reports personal testing on Action 4. Listed targets are newer Action
+  models and Pocket 3. [coolboy's protocol work](https://github.com/coolboy/dji-osmo-ble-protocol)
+  also targets Pocket 3 BLE/RTMP.
+- **Pocket 2-specific viewer:**
+  [OpenJetson/Pocket2-Viewer](https://github.com/OpenJetson/Pocket2-Viewer)
+  demonstrates the relevant USB-to-Jetson approach, but its repository exposes
+  no implementation or native-resolution evidence. Both
+  [issue 1](https://github.com/OpenJetson/Pocket2-Viewer/issues/1) and
+  [issue 2](https://github.com/OpenJetson/Pocket2-Viewer/issues/2) report missing
+  downloads/source, with no replies returned in this audit.
+- **Firmware investigation lead:**
+  [original-Pocket extraction script](https://github.com/sharklatan/dji_firm_osmo_pocket_extractor/blob/cd1fe4357238ff2c1635febe55e9fd37ffb1190c/extract_firmware_complete.py)
+  outlines LZ4 → SquashFS extraction. The inspected tree contains only a README
+  and script, despite the README describing extraction results. No Pocket 2
+  compatibility or encoder patch was established. Inspecting matching Pocket 2
+  firmware handlers could be a fallback to capturing Mimo's Story Mode transition.
+- **Older USB transport work:**
+  [samuelsadok's USB mobile protocol](https://github.com/samuelsadok/dji_protocol/blob/master/usb_mobile_protocol.md)
+  documents iOS transport on Mavic RC/Goggles, not Pocket 2 resolution control.
+  [PocketControl](https://github.com/leandrowicher-lang/PocketControl) currently
+  describes Pocket 1 USB enumeration only, with live view still unimplemented.
+
+Priority remains a Pocket 2-specific Story Mode capture and source-SPS check.
+Use the community field mappings as comparison clues, then trace the exact
+Pocket 2 handler that changes the encoder. No downloaded project code was run,
+and no camera command was transmitted during this audit.
+
 **2026-09-08 resume:** the camera is back on the dev Pi. See the
 [resumed bench evidence](pocket2-resume-2026-09-08.md) for measured stop timing,
 mode trajectories, shutter/focus readbacks, and the unresolved card detection.

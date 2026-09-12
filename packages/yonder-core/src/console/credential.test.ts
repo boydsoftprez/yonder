@@ -37,6 +37,20 @@ describe("AdminCredential", () => {
     expect(credential().verify(GOOD)).toBe(true);
   });
 
+  it("prepares first-set and replacement hashes without writing the secret store", () => {
+    const first = credential().prepareSet(GOOD);
+    expect(first.ok).toBe(true);
+    expect(existsSync(secretsPath)).toBe(false);
+    credential().set(GOOD);
+    const before = readFileSync(secretsPath, "utf8");
+    const replacement = credential().prepareChange(GOOD, "a replacement password");
+    expect(replacement.ok).toBe(true);
+    expect(readFileSync(secretsPath, "utf8")).toBe(before);
+    if (replacement.ok) {
+      expect(replacement.secretPatch[ADMIN_PASSWORD_SECRET]).toMatch(/^scrypt\$/);
+    }
+  });
+
   /**
    * First run is one-way. A device that lets an unauthenticated caller
    * *replace* the administrator password has no lock on it at all: whoever

@@ -1,0 +1,48 @@
+#!/bin/sh
+set -eu
+PREREQ=""
+prereqs() { echo "$PREREQ"; }
+case "${1:-}" in prereqs) prereqs; exit 0 ;; esac
+
+required_tools='mount umount blkid blockdev findmnt lsblk partx e2fsck resize2fs
+dumpe2fs sed cat readlink cp mkdir rmdir mknod chmod tr sync mv grep sleep wc'
+for tool in $required_tools; do
+    tool_path=$(command -v "$tool" 2>/dev/null || true)
+    if [ -z "$tool_path" ]; then
+        echo "Yonder Pi initramfs hook: required tool '$tool' is missing." >&2
+        exit 1
+    fi
+done
+[ -x /usr/lib/yonder/storage-prototype/yonder-pi-mbr-layout ] || {
+    echo 'Yonder Pi initramfs hook: static MBR layout helper is missing.' >&2
+    exit 1
+}
+[ -x /usr/lib/yonder/storage-prototype/yonder-maintenance-token ] || {
+    echo 'Yonder Pi initramfs hook: static maintenance token helper is missing.' >&2
+    exit 1
+}
+# shellcheck disable=SC1091 # installed Linux package
+. /usr/share/initramfs-tools/hook-functions
+
+# Pi02's two pinned kernel configurations build ext4, FAT, VFAT, CP437 and
+# ASCII NLS directly into the kernel. Full user-space tools still need private
+# names: an existing initramfs utility must never shadow the required version.
+tool_dir=/usr/lib/yonder/initramfs-bin
+for tool in $required_tools; do
+    tool_path=$(command -v "$tool")
+    copy_exec "$tool_path" "$tool_dir/$tool"
+done
+copy_exec /usr/lib/yonder/storage-prototype/yonder-pi-mbr-layout \
+    "$tool_dir/yonder-pi-mbr-layout"
+copy_exec /usr/lib/yonder/storage-prototype/yonder-maintenance-token \
+    "$tool_dir/yonder-maintenance-token"
+if [ -f /etc/yonder-storage-layout.conf ]; then
+    [ -f /usr/lib/yonder/storage/layout.sh ] || exit 1
+    copy_file script /usr/lib/yonder/storage/layout.sh /scripts/yonder-storage-layout
+fi
+copy_file script /usr/lib/yonder/storage-prototype/mount-storage.sh \
+    /scripts/yonder-pi-mount-storage
+chmod 0755 "$DESTDIR/scripts/yonder-pi-mount-storage"
+copy_file script /usr/lib/yonder/storage-prototype/grow-media.sh \
+    /scripts/yonder-pi-grow-media
+chmod 0755 "$DESTDIR/scripts/yonder-pi-grow-media"

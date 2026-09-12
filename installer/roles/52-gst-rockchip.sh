@@ -23,7 +23,11 @@ if [ ! -d "$gr_src" ]; then
     log "  build one with: installer/make-payload.sh --arch linux-arm64 --only gst-rockchip"
     return 0
 fi
-if [ ! -c "$YONDER_MPP_DEVICE" ]; then
+if [ "$IMAGE_MODE" = "1" ] && [ "$YONDER_TARGET" = "rpi" ]; then
+    log "the rpi image does not install the Rockchip-only payload"
+    return 0
+fi
+if [ "$IMAGE_MODE" != "1" ] && [ ! -c "$YONDER_MPP_DEVICE" ]; then
     log "no $YONDER_MPP_DEVICE on this device; not a Rockchip board, leaving the MPP plugin in the payload"
     return 0
 fi
@@ -81,7 +85,9 @@ done
 # open it sees the plugin register its decoders and none of its encoders,
 # silently — the failure below names that so it is not mistaken for a
 # missing plugin.
-if [ "$DRY_RUN" = "1" ]; then
+if [ "$IMAGE_MODE" = "1" ]; then
+    log "image mode: installed the Rockchip plugin; encoder discovery remains a runtime board check"
+elif [ "$DRY_RUN" = "1" ]; then
     log "would check that GStreamer resolves mpph264enc, mpph265enc and mppjpegdec"
 else
     for gr_element in mpph264enc mpph265enc mppjpegdec; do

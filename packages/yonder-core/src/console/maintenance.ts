@@ -1,6 +1,7 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 import type { IncomingMessage, ServerResponse } from "node:http";
 import type { DaemonClient } from "./client.js";
+import { MAX_RECOVERY_BASE64_BYTES } from "../admin/protocol.js";
 
 /** Narrow, authenticated HTTP transport. Passwords never enter flow/socket stores. */
 export function maintenanceProxy(options: {
@@ -8,6 +9,17 @@ export function maintenanceProxy(options: {
   passwordChanged: () => void;
 }) {
   const routes: Record<string, [string, string]> = {
+    "/maintenance/api/storage": ["GET", "/storage/state"],
+    "/maintenance/api/storage/enter": ["POST", "/storage/enter"],
+    "/maintenance/api/storage/exit": ["POST", "/storage/exit"],
+    "/maintenance/api/recovery/export": ["POST", "/recovery/export"],
+    "/maintenance/api/recovery/preview": ["POST", "/recovery/preview"],
+    "/maintenance/api/recovery/commit": ["POST", "/recovery/commit"],
+    "/maintenance/api/recovery/cancel": ["POST", "/recovery/cancel"],
+    "/maintenance/api/owner": ["GET", "/owner/state"],
+    "/maintenance/api/owner/create": ["POST", "/owner/create"],
+    "/maintenance/api/owner/password": ["POST", "/owner/password"],
+    "/maintenance/api/owner/ssh": ["POST", "/owner/ssh"],
     "/maintenance/api/interfaces": ["GET", "/net/interfaces"],
     "/maintenance/api/preferences": ["GET", "/ui/preferences"],
     "/maintenance/api/theme": ["POST", "/ui/theme"],
@@ -46,7 +58,8 @@ export function maintenanceProxy(options: {
         try {
           for await (const chunk of req) {
             length += chunk.length;
-            if (length > 8 * 1024) { req.resume(); answer(413, { error: "Request is too large." }); return; }
+            const limit = path === "/maintenance/api/recovery/preview" ? MAX_RECOVERY_BASE64_BYTES + 8 * 1024 : 8 * 1024;
+            if (length > limit) { req.resume(); answer(413, { error: "Request is too large." }); return; }
             chunks.push(Buffer.from(chunk));
           }
           const input: unknown = JSON.parse(Buffer.concat(chunks).toString("utf8"));
@@ -54,13 +67,14 @@ export function maintenanceProxy(options: {
           body = { ...input, owner };
         } catch { answer(400, { error: "Invalid JSON request." }); return; }
       }
+      if (options.session(req) !== owner) { answer(401, { error: "Sign in again to use the device tools." }); return; }
       const reply = await options.client.request({
         method: route[0]!, path: route[1]! + (job && req.method === "GET" ? `?owner=${encodeURIComponent(owner)}` : ""),
         ...(body === undefined ? {} : { body }),
-        ...(path.endsWith("/theme") ? { timeoutMs: 60_000 } : {}),
+        ...((path.endsWith("/theme") || path.startsWith("/maintenance/api/owner/") || path.startsWith("/maintenance/api/recovery/") || path.startsWith("/maintenance/api/storage/")) ? { timeoutMs: 60_000 } : {}),
       });
       if (!reply.ok) { answer(503, { error: "The device service did not answer. Refresh to check its state before retrying." }); return; }
-      if (path.endsWith("/password") && reply.status === 200) options.passwordChanged();
+      if ((path === "/maintenance/api/password" || path === "/maintenance/api/recovery/commit") && reply.status === 200) options.passwordChanged();
       answer(reply.status, reply.body);
     })().catch(() => answer(503, { error: "The device service is unavailable." }));
     return true;

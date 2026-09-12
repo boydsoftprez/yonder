@@ -477,8 +477,13 @@ export function compose(opts: ComposeOptions): string[] {
     if (!opts.accessory?.native || !/^\/[A-Za-z0-9/_.-]+\.sock$/.test(opts.accessory.endpoint)) throw new Error('Accessory framed media is not ready');
     // Host consumes this private argument; composition remains entirely here.
     argv.push(`--accessory-socket=${opts.accessory.endpoint}`);
+    // Pocket 2 supplies H.264 access units. MPP's encoder and JPEG decoder do
+    // not establish that its H.264 decoder is registered, so this follows the
+    // independently probed capability and leaves the portable software path
+    // intact when that element is absent.
+    const accessoryDecoder = encoder.h264Decoder ?? 'avdec_h264';
     push('appsrc', 'name=accessory-source', 'is-live=true', 'format=time', 'block=true', 'max-bytes=2000000',
-      'caps=video/x-h264,stream-format=byte-stream,alignment=au', LINK, 'h264parse', LINK, 'avdec_h264', LINK,
+      'caps=video/x-h264,stream-format=byte-stream,alignment=au', LINK, 'h264parse', LINK, accessoryDecoder, LINK,
       'videoscale', LINK, 'videorate', LINK,
       `video/x-raw,width=${camera.width},height=${camera.height},framerate=${camera.framerate}/1`, LINK,
       ...color(opts), ...turn(opts), 'tee', 'name=raw');

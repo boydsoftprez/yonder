@@ -47,7 +47,7 @@ trap 'rm -f "$case_out"' EXIT
 in_shell() {
     # `$0` inside the -c script is the repository path passed after it; `$1`
     # here is this function's own argument, interpolated into the script text.
-    /bin/sh -c ". \"\$0/installer/lib/common.sh\"; $1" "$REPO" >"$case_out" 2>&1
+    /bin/sh -c ". \"\$0/installer/lib/common.sh\"; . \"\$0/installer/lib/services.sh\"; $1" "$REPO" >"$case_out" 2>&1
     printf '%s' "$?"
 }
 
@@ -105,10 +105,10 @@ else
     ok "the role does not use 'run ... || true'"
 fi
 
-if grep -qE '^[[:space:]]*try systemctl stop zerotier-one$' "$REPO/installer/roles/40-zerotier.sh"; then
-    ok "stop is asked for with try, so a chroot cannot abort the install"
+if grep -qE '^[[:space:]]*service_stop zerotier-one.service$' "$REPO/installer/roles/40-zerotier.sh"; then
+    ok "stop goes through the live/image service boundary"
 else
-    bad "the role no longer stops the unit with try (R-VPN-08)"
+    bad "the role bypasses the live/image service boundary when stopping ZeroTier (R-VPN-08)"
 fi
 
 # `systemctl disable` is the defect, not the fix. It is a no-op in the chroot
@@ -119,25 +119,20 @@ else
     ok "the role does not disable with systemctl"
 fi
 
-if grep -qE '^[[:space:]]*disable_unit_offline zerotier-one.service$' "$REPO/installer/roles/40-zerotier.sh" \
-    && grep -qE '^[[:space:]]*assert_unit_disabled zerotier-one.service$' "$REPO/installer/roles/40-zerotier.sh"; then
-    ok "the role disables offline and then checks that it worked (R-VPN-05, R-VPN-08)"
+if grep -qE '^[[:space:]]*service_disable zerotier-one.service$' "$REPO/installer/roles/40-zerotier.sh"; then
+    ok "the role disables through the checked offline-capable helper (R-VPN-05, R-VPN-08)"
 else
-    bad "the role no longer disables the unit offline and asserts the result (R-VPN-05, R-VPN-08)"
+    bad "the role bypasses the checked offline-capable disable helper (R-VPN-05, R-VPN-08)"
 fi
 
-# Raised in review of PR #1: this installer is documented as idempotent and is
-# re-run to upgrade, and 20-yonder-core restarts the daemon before this role
-# runs. That daemon's start-up render enables and joins the configured mesh, so
-# a role that then unconditionally stops the unit takes the mesh away from the
-# operator upgrading over it — and nothing later re-renders. The ownership
-# record is the same source of truth the renderer uses.
-# shellcheck disable=SC2016  # the $zt_record is a literal to grep for, not a variable to expand
-if grep -q 'zt_record=/var/lib/yonder/remote.json' "$REPO/installer/roles/40-zerotier.sh" \
-    && grep -qE 'if \[ -f "\$zt_record" \]' "$REPO/installer/roles/40-zerotier.sh"; then
-    ok "the role leaves a mesh yonder-core owns alone on a re-run (R-VPN-05, R-VPN-08)"
+# Role 20 runs before this package role. The helper must be restarted after a
+# first install so it can create/capture identity state, while an upgrade must
+# use that same canonical projection rather than the retired remote.json hint.
+if grep -q 'service_restart yonder-admin.service' "$REPO/installer/roles/40-zerotier.sh" \
+    && ! grep -q '/var/lib/yonder/remote.json' "$REPO/installer/roles/40-zerotier.sh"; then
+    ok "the role hands fresh installs and upgrades to the canonical mesh projector (R-VPN-05, R-VPN-08)"
 else
-    bad "the role stops the unit unconditionally, so re-running the installer over a mesh drops it"
+    bad "the role can leave fresh mesh state null or use the retired ownership hint after installing ZeroTier"
 fi
 
 # Which command gets called, recorded by the command itself. Nothing here is

@@ -356,7 +356,6 @@ export {
   JOIN_TOPIC,
   type JoinRequest,
   type JoinResult,
-  type SecretSink,
 } from "./net/join.js";
 export {
   configureModem,

@@ -1,0 +1,39 @@
+#!/bin/sh
+set -eu
+PREREQ=""
+prereqs() { echo "$PREREQ"; }
+case "${1:-}" in prereqs) prereqs; exit 0 ;; esac
+required_tools='mount umount blkid blockdev findmnt lsblk partx sgdisk e2fsck resize2fs
+dumpe2fs sed cat readlink cp mkdir rmdir mknod chmod tr sync mv grep sleep wc'
+for tool in $required_tools; do
+    tool_path=$(command -v "$tool" 2>/dev/null || true)
+    if [ -z "$tool_path" ]; then
+        echo "Yonder initramfs hook: required tool '$tool' is missing." >&2
+        exit 1
+    fi
+done
+# shellcheck disable=SC1091 # installed Linux package
+. /usr/share/initramfs-tools/hook-functions
+manual_add_modules ext4
+[ -x /usr/lib/yonder/storage-prototype/yonder-maintenance-token ] || {
+    echo 'Yonder initramfs hook: static maintenance token helper is missing.' >&2
+    exit 1
+}
+# initramfs-tools already installs klibc tools at /bin and copy_exec does not
+# replace them. Keep full tools at private paths so hook ordering cannot silently
+# substitute implementations lacking --bind, sync -f or blkid -U.
+tool_dir=/usr/lib/yonder/initramfs-bin
+for tool in $required_tools; do
+    tool_path=$(command -v "$tool")
+    copy_exec "$tool_path" "$tool_dir/$tool"
+done
+copy_exec /usr/lib/yonder/storage-prototype/yonder-maintenance-token \
+    "$tool_dir/yonder-maintenance-token"
+if [ -f /etc/yonder-storage-layout.conf ]; then
+    [ -f /usr/lib/yonder/storage/layout.sh ] || exit 1
+    copy_file script /usr/lib/yonder/storage/layout.sh /scripts/yonder-storage-layout
+fi
+copy_file script /usr/lib/yonder/storage-prototype/mount-storage.sh /scripts/yonder-mount-storage
+chmod 0755 "$DESTDIR/scripts/yonder-mount-storage"
+copy_file script /usr/lib/yonder/storage-prototype/grow-media.sh /scripts/yonder-grow-media
+chmod 0755 "$DESTDIR/scripts/yonder-grow-media"

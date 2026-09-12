@@ -304,6 +304,19 @@ describe("buildRenderers", () => {
     expect(renderers.map((r) => r.name)).toEqual(["hostname", "network", "remote", "video", "camera-autostart"]);
   });
 
+  it("removes the legacy ZeroTier writer when the root projector owns durable mesh state", () => {
+    const run: CommandRunner = async () => ({ code: 0, stdout: "", stderr: "" });
+    const built = buildRenderers({
+      secretsPath: join(dir, "secrets.yaml"),
+      runner: run,
+      remoteStatePath: join(dir, "remote.json"),
+      manageRemote: false,
+    });
+    expect(built.renderers.map(renderer => renderer.name)).not.toContain("remote");
+    // Observation still uses the same injected CLI; only mutation moves.
+    expect(built.zerotier).toBeDefined();
+  });
+
   /**
    * Absent unless a caller says where the console is. That is what stops a
    * test — or a future call site that forgot an option — writing to

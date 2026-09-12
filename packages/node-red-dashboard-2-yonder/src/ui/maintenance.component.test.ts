@@ -40,7 +40,7 @@ it("displays terminal output as text, runs the selected interface and can cancel
 it("masks passwords, rejects mismatch without a request and clears secrets after submission", async () => {
   const fetcher = vi.fn((url: string) => response(url.endsWith("preferences") ? { theme: "night" } : { ok: true }));
   vi.stubGlobal("fetch", fetcher);
-  const wrapper = mount(YonderSettings); wrappers.push(wrapper); await flushPromises();
+  const wrapper = mount(YonderSettings, { global: { stubs: { OwnerAccess: true, StorageMaintenance: true } } }); wrappers.push(wrapper); await flushPromises();
   const inputs = wrapper.findAll('input[type="password"]'); expect(inputs).toHaveLength(3);
   await inputs[0]!.setValue("old password"); await inputs[1]!.setValue("new password"); await inputs[2]!.setValue("different");
   await wrapper.get("form").trigger("submit"); await flushPromises();

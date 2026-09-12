@@ -31,11 +31,32 @@ def sensor_capture_mode(fd):
     return mode
 
 
+def bound_sensor_device(driver=Path('/sys/bus/i2c/drivers/imx462')):
+    """Return the bound IMX462 I2C device, or None if no sensor answered."""
+    if not driver.is_dir():
+        return None
+    for device in sorted(driver.glob('*-001a')):
+        if device.is_symlink():
+            # The media subdevice may not exist yet: rebuilding that async
+            # graph is the purpose of this helper. The I2C driver's binding
+            # is the safe prerequisite for touching the ISP/DPHY graph.
+            return str(device)
+    return None
+
+
 def main():
     compatible = Path('/proc/device-tree/compatible').read_bytes().split(b'\0')
     if not any(c == b'radxa,zero3' or c.startswith(b'radxa,zero3-') for c in compatible):
         raise SystemExit('This camera preparation is only for Radxa Zero 3')
     run('modprobe', 'imx462_yonder')
+    bound_sensor = bound_sensor_device()
+    if bound_sensor is None:
+        # With the overlay loaded, Linux creates the I2C client even when the
+        # camera is unplugged. Never tear down the built-in ISP/DPHY graph
+        # unless this driver actually bound: vendor remove paths retain
+        # references, and camera absence must cost only the camera.
+        print('SeekerHD IMX462 is not bound; leaving the ISP graph untouched')
+        return
     graph = run('media-ctl', '-d', 'platform:rkisp-vir0', '-p')
     if 'subtype Sensor' not in graph:
         # The built-in vendor ISP drops unbound sensor links at late-init,

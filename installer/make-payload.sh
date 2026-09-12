@@ -46,6 +46,8 @@ NODE_DIST=${NODE_DIST:-https://nodejs.org/dist}
 # that same site when it was written down.
 ZEROTIER_VERSION=${ZEROTIER_VERSION:-1.16.2}
 ZEROTIER_REPO=${ZEROTIER_REPO:-https://download.zerotier.com/debian/trixie}
+ZEROTIER_SOURCE_URL=${ZEROTIER_SOURCE_URL:-https://codeload.github.com/zerotier/ZeroTierOne/tar.gz/refs/tags/$ZEROTIER_VERSION}
+ZEROTIER_SOURCE_SHA256=2c607f573c6e38815433af289d364a689a203b18b51125f06c4472014d0657f0
 # shellcheck disable=SC2034 # read by the `eval` below, keyed on DEB_ARCH
 ZEROTIER_SHA256_arm64=e6c71707d8db57dd9bc6d6a4d5d5b8343ad244f48ff1ebd288f5f588fbdb10a4
 # shellcheck disable=SC2034 # likewise
@@ -108,7 +110,8 @@ MAVLINK_ROUTER_COMMIT=${MAVLINK_ROUTER_COMMIT:-2362c620f483cef1edd574fb962a373a2
 MAVLINK_ROUTER_REPO=${MAVLINK_ROUTER_REPO:-https://github.com/mavlink-router/mavlink-router}
 # Debian 13, the release the boards run, so the binary is linked against the
 # glibc it will actually meet rather than one that merely happens to be newer.
-MAVLINK_ROUTER_IMAGE=${MAVLINK_ROUTER_IMAGE:-debian:trixie}
+MAVLINK_ROUTER_IMAGE=${MAVLINK_ROUTER_IMAGE:-debian@sha256:f324c7ff54321e8d9c588493a20244965938ce0aa50bbd1022d38010e9ffc4b1}
+APPLICATION_IMAGE=${APPLICATION_IMAGE:-debian@sha256:f324c7ff54321e8d9c588493a20244965938ce0aa50bbd1022d38010e9ffc4b1}
 
 # gstreamer-rockchip, and the two libraries it links: the second component
 # that is *built* rather than downloaded, for mavlink-router's reason — no
@@ -135,28 +138,53 @@ LIBRGA_REPO=${LIBRGA_REPO:-https://github.com/airockchip/librga}
 GST_ROCKCHIP_COMMIT=${GST_ROCKCHIP_COMMIT:-a0d45af504099b4b82f3d3377019a63d357e7cef}
 GST_ROCKCHIP_REPO=${GST_ROCKCHIP_REPO:-https://github.com/JeffyCN/mirrors}
 GST_ROCKCHIP_BRANCH=${GST_ROCKCHIP_BRANCH:-gstreamer-rockchip}
-GST_ROCKCHIP_IMAGE=${GST_ROCKCHIP_IMAGE:-debian:trixie}
+GST_ROCKCHIP_IMAGE=${GST_ROCKCHIP_IMAGE:-debian@sha256:f324c7ff54321e8d9c588493a20244965938ce0aa50bbd1022d38010e9ffc4b1}
 
-# The five things a payload can carry, in the order they are staged.
-COMPONENTS="node zerotier mavlink-router gst-rockchip console"
+# RKAIQ userspace for the ZERO 3W's ISP21 camera path. The commit is the
+# complete source input fingerprint; the two IQ inputs additionally have
+# recorded byte hashes because they are fetched as individual files.
+RKAIQ_COMMIT=${RKAIQ_COMMIT:-622bdfa1ee61d2279cfc273b1a53b546e0ec71be}
+RKAIQ_REPO=${RKAIQ_REPO:-https://github.com/roju/rkaiq_3A_server-rk356x}
+RKAIQ_IMAGE=${RKAIQ_IMAGE:-debian@sha256:f324c7ff54321e8d9c588493a20244965938ce0aa50bbd1022d38010e9ffc4b1}
+SEEKERHD_REFERENCE_COMMIT=${SEEKERHD_REFERENCE_COMMIT:-0b896b19cb43132ea5cd862a5a7f7870c292f07e}
+SEEKERHD_REFERENCE_URL=${SEEKERHD_REFERENCE_URL:-https://raw.githubusercontent.com/kinchims/Radxa-Zero3-IMX462/$SEEKERHD_REFERENCE_COMMIT/etc/iqfiles/imx290_IMX462_default.json}
+SEEKERHD_REFERENCE_SHA256=6f596c69c62f9d46be45328d921c52c231426a4f7bbd0a4556bd5111d858052f
+SEEKERHD_DIVIMATH_COMMIT=${SEEKERHD_DIVIMATH_COMMIT:-b94150b2b5798840ed5d931232808100836a8606}
+SEEKERHD_DIVIMATH_URL=${SEEKERHD_DIVIMATH_URL:-https://raw.githubusercontent.com/rquellet/SeekerHD-RaspberryPi-Helper/$SEEKERHD_DIVIMATH_COMMIT/installer/Divimath-SeekerHD/tuning/imx462-seekerhd.json}
+SEEKERHD_DIVIMATH_SHA256=d51bfea346bd1932ce76cab5cbf064e103af144e0e389178f81bf37e7cae2ac0
+
+# The things a payload can carry, in the order they are staged.
+COMPONENTS="node zerotier mediamtx mavlink-router gst-rockchip seekerhd console application"
 
 ARCH=""
 OUT="$REPO/vendor"
 ONLY=""
+TARGET=""
+CAPTURE_INPUTS=""
+OUT_EXPLICIT=0
+ONLY_EXPLICIT=0
 
 usage() {
     cat <<'USAGE'
 Usage: make-payload.sh --arch <linux-arm64|linux-x64> [--out DIR] [--only LIST]
+       make-payload.sh --arch linux-arm64 --target TARGET --out NEW_DIR \
+         --capture-inputs NEW_DIR
 
   --arch ARCH        the board's architecture; required
   --out DIR          where to stage the payload (default: vendor/ in this repo)
   --only LIST        stage only these components, comma-separated:
-                     node, zerotier, mavlink-router, gst-rockchip, console.
+                     node, zerotier, mediamtx, mavlink-router, gst-rockchip,
+                     seekerhd, console.
                      Default: all of them. What is not staged in this run is
                      left exactly as an earlier run left it, so --only is an
                      update of one part of a payload rather than a smaller
                      payload.
   --node-version V   override the pinned Node version
+  --target TARGET     rpi, radxa-zero3w or radxa-rock5c; required with
+                     --capture-inputs and invalid otherwise
+  --capture-inputs DIR
+                     retain exact public inputs, sources, notices and payload
+                     output for offline replay; DIR and --out must be new
   -h, --help         this message
 
 Produces:
@@ -168,16 +196,20 @@ Produces:
   DIR/mavlink-router/mavlink-routerd              the service that owns the serial port
   DIR/gst-rockchip/gstreamer-1.0/libgstrockchipmpp.so   Rockchip's encoders, for GStreamer
   DIR/gst-rockchip/lib/                                   MPP and librga, which it links
+  DIR/seekerhd/                                           pinned RKAIQ and generated IQ profiles
   DIR/console/node_modules/node-red/red.js        the console
+  DIR/application/packages/                       fresh first-party ARM64 build (capture mode)
 USAGE
 }
 
 while [ $# -gt 0 ]; do
     case "$1" in
         --arch)         shift; [ $# -gt 0 ] || { usage; exit 2; }; ARCH="$1" ;;
-        --out)          shift; [ $# -gt 0 ] || { usage; exit 2; }; OUT="$1" ;;
-        --only)         shift; [ $# -gt 0 ] || { usage; exit 2; }; ONLY="$1" ;;
+        --out)          shift; [ $# -gt 0 ] || { usage; exit 2; }; OUT="$1"; OUT_EXPLICIT=1 ;;
+        --only)         shift; [ $# -gt 0 ] || { usage; exit 2; }; ONLY="$1"; ONLY_EXPLICIT=1 ;;
         --node-version) shift; [ $# -gt 0 ] || { usage; exit 2; }; NODE_VERSION="$1" ;;
+        --target)       shift; [ $# -gt 0 ] || { usage; exit 2; }; TARGET="$1" ;;
+        --capture-inputs) shift; [ $# -gt 0 ] || { usage; exit 2; }; CAPTURE_INPUTS="$1" ;;
         -h|--help)      usage; exit 0 ;;
         *)              printf 'unknown option: %s\n' "$1" >&2; usage; exit 2 ;;
     esac
@@ -187,6 +219,34 @@ done
 die()  { printf 'error: %s\n' "$*" >&2; exit 1; }
 log()  { printf '  %s\n' "$*"; }
 step() { printf '\n== %s\n' "$*"; }
+
+if [ -n "$CAPTURE_INPUTS" ]; then
+    command -v python3 >/dev/null 2>&1 \
+        || die "--capture-inputs requires python3"
+    OUT=$(python3 -c 'from pathlib import Path; import sys; print(Path(sys.argv[1]).resolve())' "$OUT")
+    CAPTURE_INPUTS=$(python3 -c 'from pathlib import Path; import sys; print(Path(sys.argv[1]).resolve())' "$CAPTURE_INPUTS")
+    python3 -c '
+from pathlib import Path
+import sys
+left, right = map(Path, sys.argv[1:])
+raise SystemExit(1 if left == right or left in right.parents or right in left.parents else 0)
+' "$OUT" "$CAPTURE_INPUTS" \
+        || die "--out and --capture-inputs must be separate, non-nested paths"
+    [ "$ONLY_EXPLICIT" = "0" ] || die "--capture-inputs does not accept --only; a production capture must select the target's complete payload"
+    [ "$OUT_EXPLICIT" = "1" ] || die "--capture-inputs requires an explicit new --out directory"
+    [ "$ARCH" = "linux-arm64" ] || die "--capture-inputs is for the ARM64 image targets"
+    case "$TARGET" in
+        rpi) ONLY="node,zerotier,mediamtx,mavlink-router,console,application" ;;
+        radxa-zero3w) ONLY="node,zerotier,mediamtx,mavlink-router,gst-rockchip,seekerhd,console,application" ;;
+        radxa-rock5c) ONLY="node,zerotier,mediamtx,mavlink-router,gst-rockchip,console,application" ;;
+        *) die "--capture-inputs requires --target rpi, radxa-zero3w or radxa-rock5c" ;;
+    esac
+    [ ! -e "$OUT" ] && [ ! -L "$OUT" ] || die "--capture-inputs requires a new --out directory"
+    [ ! -e "$CAPTURE_INPUTS" ] && [ ! -L "$CAPTURE_INPUTS" ] \
+        || die "--capture-inputs output must not already exist"
+elif [ -n "$TARGET" ]; then
+    die "--target is valid only with --capture-inputs"
+fi
 
 # Whether this run stages a given component.
 #
@@ -203,8 +263,17 @@ for asked in $ONLY_LIST; do
     [ "$known" = "1" ] || die "unknown component: $asked
 --only takes any of: $COMPONENTS"
 done
+if [ -z "$CAPTURE_INPUTS" ]; then
+    case " $ONLY_LIST " in
+        *" application "*) die "application is built only as part of a complete --capture-inputs target" ;;
+    esac
+fi
 
 wanted() {
+    # The application bundle is a production-capture input. Ordinary partial
+    # payload refreshes retain their established behavior and never trust or
+    # rebuild local ignored workspace output.
+    [ "$1" = "application" ] && [ -z "$CAPTURE_INPUTS" ] && return 1
     [ -n "$ONLY_LIST" ] || return 0
     for name in $ONLY_LIST; do
         [ "$1" = "$name" ] && return 0
@@ -236,20 +305,50 @@ case "$ARCH" in
     "") die "--arch is required (linux-arm64 for a Raspberry Pi or Radxa, linux-x64 for a PC)" ;;
     *)  die "unsupported architecture: $ARCH" ;;
 esac
+case " $ONLY_LIST " in
+    *" seekerhd "*) SEEKERHD_EXPLICIT=1 ;;
+    *) SEEKERHD_EXPLICIT=0 ;;
+esac
+if [ "$ARCH" != "linux-arm64" ] && [ "$SEEKERHD_EXPLICIT" = "1" ]; then
+    die "SeekerHD is available only for linux-arm64"
+fi
 # Debian, so glibc. A musl target would be a different --arch.
 NPM_LIBC=glibc
 
 # Asked per component, not once for everything: a run that stages only the
 # router needs neither npm nor a checksum tool, and dying for the want of one
 # it will never call is how a selector stops being usable.
-if wanted node || wanted zerotier; then
+if wanted node || wanted zerotier || wanted mediamtx \
+        || { [ "$ARCH" = "linux-arm64" ] && wanted seekerhd; }; then
     command -v curl >/dev/null 2>&1 || die "curl is needed to fetch the payload"
 fi
-if wanted node; then
+if wanted node || wanted mediamtx; then
     command -v tar >/dev/null 2>&1 || die "tar is needed to unpack the payload"
 fi
 if wanted console; then
     command -v npm >/dev/null 2>&1 || die "npm is needed to install the console's dependencies"
+fi
+if [ "$ARCH" = "linux-arm64" ] && wanted seekerhd; then
+    command -v git >/dev/null 2>&1 || die "git is needed to fetch the pinned RKAIQ source"
+    command -v patch >/dev/null 2>&1 || die "patch is needed to prepare RKAIQ"
+    command -v python3 >/dev/null 2>&1 || die "python3 is needed to generate the IQ profiles"
+fi
+if [ -n "$CAPTURE_INPUTS" ]; then
+    command -v python3 >/dev/null 2>&1 || die "python3 is needed to inventory retained payload inputs"
+    command -v dpkg-deb >/dev/null 2>&1 || die "dpkg-deb is needed to retain the ZeroTier package notice"
+    [ -f "$REPO/image/inputs/payload-inventory.py" ] \
+        || die "image/inputs/payload-inventory.py is missing"
+    [ -f "$REPO/image/inputs/application-bundle.py" ] \
+        || die "image/inputs/application-bundle.py is missing"
+fi
+if wanted application; then
+    command -v git >/dev/null 2>&1 || die "git is needed to archive the exact application source"
+    APP_ENGINE=$(command -v docker 2>/dev/null || command -v podman 2>/dev/null || true)
+    [ -n "$APP_ENGINE" ] || die "docker or podman is needed to build the ARM64 application"
+    APP_SOURCE_COMMIT=$(git -C "$REPO" rev-parse HEAD 2>/dev/null) \
+        || die "could not identify the application source commit"
+    [ -z "$(git -C "$REPO" status --porcelain --untracked-files=all)" ] \
+        || die "production application capture requires a clean source tree"
 fi
 
 # sha256sum on Linux, shasum on macOS. Checking the download is not optional:
@@ -264,7 +363,8 @@ if command -v sha256sum >/dev/null 2>&1; then
 elif command -v shasum >/dev/null 2>&1; then
     SHA_CHECK="shasum -a 256 -c"
     SHA_SUM="shasum -a 256"
-elif wanted node || wanted zerotier; then
+elif wanted node || wanted zerotier || wanted mediamtx \
+        || { [ "$ARCH" = "linux-arm64" ] && wanted seekerhd; }; then
     die "neither sha256sum nor shasum is here; the Node download could not be verified"
 fi
 
@@ -275,7 +375,48 @@ rm -rf "$WORK"
 mkdir -p "$WORK"
 # The staging directory is removed on any exit, including a failed download,
 # so a re-run never resumes from a half-fetched tarball.
-trap 'rm -rf "$WORK"' EXIT INT TERM
+cleanup_payload() {
+    cleanup_status=$?
+    trap - EXIT INT TERM
+    rm -rf "$WORK"
+    if [ "$cleanup_status" -ne 0 ] && [ -n "$CAPTURE_INPUTS" ]; then
+        # Both paths were required to be absent before capture began, so a
+        # failed production capture cannot leave a plausible partial result.
+        rm -rf "$OUT" "$CAPTURE_INPUTS"
+    fi
+    exit "$cleanup_status"
+}
+trap cleanup_payload EXIT
+trap 'exit 130' INT
+trap 'exit 143' TERM
+
+CAPTURE_STAGE=""
+if [ -n "$CAPTURE_INPUTS" ]; then
+    CAPTURE_STAGE="$WORK/payload-capture"
+    mkdir -p "$CAPTURE_STAGE/inputs"
+    : >"$CAPTURE_STAGE/records.tsv"
+fi
+
+retain_record() {
+    [ -n "$CAPTURE_STAGE" ] || return 0
+    printf '%s\t%s\t%s\t%s\t%s\n' "$1" "$2" "$3" "$4" "$5" >>"$CAPTURE_STAGE/records.tsv"
+}
+
+retain_file() {
+    [ -n "$CAPTURE_STAGE" ] || return 0
+    retain_destination="$CAPTURE_STAGE/$6"
+    mkdir -p "$(dirname -- "$retain_destination")"
+    cp -p "$5" "$retain_destination"
+    retain_record "$1" "$2" "$3" "$4" "$6"
+}
+
+retain_tree() {
+    [ -n "$CAPTURE_STAGE" ] || return 0
+    retain_destination="$CAPTURE_STAGE/$6"
+    mkdir -p "$(dirname -- "$retain_destination")"
+    cp -pR "$5" "$retain_destination"
+    retain_record "$1" "$2" "$3" "$4" "$6"
+}
 
 # ---------------------------------------------------------------------------
 if wanted node; then
@@ -301,6 +442,10 @@ if wanted node; then
     ( cd "$WORK" && $SHA_CHECK expected.sha256 ) >/dev/null \
         || die "$NODE_TARBALL does not match its published checksum; refusing to unpack it"
     log "checksum matches"
+    retain_file archive node-distribution "$($SHA_SUM "$WORK/$NODE_TARBALL" | cut -d' ' -f1)" \
+        "$NODE_URL" "$WORK/$NODE_TARBALL" "inputs/downloads/node/$NODE_TARBALL"
+    retain_file index node-checksums "v$NODE_VERSION" "$NODE_DIST/v$NODE_VERSION/SHASUMS256.txt" \
+        "$WORK/SHASUMS256.txt" "inputs/downloads/node/SHASUMS256.txt"
 
     rm -rf "$WORK/node" "$OUT/node"
     mkdir -p "$WORK/node"
@@ -312,6 +457,42 @@ if wanted node; then
     [ -f "$WORK/node/bin/node" ] || die "the unpacked distribution has no bin/node"
     mv "$WORK/node" "$OUT/node"
     log "staged $OUT/node/bin/node"
+fi
+
+# ---------------------------------------------------------------------------
+if wanted application; then
+    step "first-party application at $APP_SOURCE_COMMIT for linux/arm64"
+    APP_SOURCE_ARCHIVE="$CAPTURE_STAGE/inputs/sources/application/source.tar"
+    APP_NPM_INPUT="$CAPTURE_STAGE/inputs/npm/application"
+    APP_BUILD="$WORK/application"
+    python3 -I "$REPO/image/inputs/application-bundle.py" \
+        --repo "$REPO" \
+        --output "$APP_BUILD" \
+        --npm-input "$APP_NPM_INPUT" \
+        --source-output "$APP_SOURCE_ARCHIVE" \
+        --node-runtime "$OUT/node" \
+        --engine "$APP_ENGINE" \
+        --image "$APPLICATION_IMAGE" \
+        --platform linux/arm64 \
+        --expected-commit "$APP_SOURCE_COMMIT" \
+        || die "could not build the first-party ARM64 application from clean source"
+    APP_ARCHIVE_SHA=$($SHA_SUM "$APP_SOURCE_ARCHIVE" | cut -d' ' -f1)
+    APP_LOCK_SHA=$($SHA_SUM "$APP_NPM_INPUT/manifests/package-lock.json" | cut -d' ' -f1)
+    retain_record git-source application-source "$APP_SOURCE_COMMIT" \
+        "repository:git-archive" "inputs/sources/application/source.tar"
+    retain_record index application-manifests "$APP_LOCK_SHA" \
+        "repository:package-lock.json" "inputs/npm/application/manifests"
+    retain_record npm-cache application-npm-cache "$APP_LOCK_SHA" \
+        "https://registry.npmjs.org/" "inputs/npm/application/cache"
+    # The archive hash is repeated in the bundle metadata and the outer file
+    # inventory; checking it here catches a helper/caller handoff mismatch.
+    APP_RECORDED_SHA=$(python3 -c \
+        'import json,sys; print(json.load(open(sys.argv[1], encoding="utf-8"))["sourceArchiveSha256"])' \
+        "$APP_BUILD/application-bundle.json")
+    [ "$APP_ARCHIVE_SHA" = "$APP_RECORDED_SHA" ] \
+        || die "application source archive does not match its build metadata"
+    mv "$APP_BUILD" "$OUT/application"
+    log "staged fresh first-party application and standalone yonder-core dependencies"
 fi
 
 # ---------------------------------------------------------------------------
@@ -368,6 +549,36 @@ if the version was bumped deliberately, update ZEROTIER_SHA256_$DEB_ARCH"
     ( cd "$WORK" && $SHA_CHECK zt.sha256 ) >/dev/null \
         || die "$ZT_DEB does not match its recorded checksum; refusing to stage it"
     log "signature and checksum both match"
+    if [ -n "$CAPTURE_STAGE" ]; then
+        ZT_SOURCE="ZeroTierOne-$ZEROTIER_VERSION.tar.gz"
+        curl -fsSL --retry 3 -o "$WORK/$ZT_SOURCE" "$ZEROTIER_SOURCE_URL" \
+            || die "could not download the ZeroTier $ZEROTIER_VERSION source archive"
+        printf '%s  %s\n' "$ZEROTIER_SOURCE_SHA256" "$ZT_SOURCE" \
+            >"$WORK/zerotier-source.sha256"
+        (cd "$WORK" && $SHA_CHECK zerotier-source.sha256) >/dev/null \
+            || die "$ZT_SOURCE does not match its recorded source checksum"
+        retain_file archive zerotier-source "$ZEROTIER_SOURCE_SHA256" \
+            "$ZEROTIER_SOURCE_URL" "$WORK/$ZT_SOURCE" \
+            "inputs/sources/zerotier/$ZT_SOURCE"
+    fi
+    retain_file index zerotier-inrelease "$ZEROTIER_VERSION" \
+        "$ZEROTIER_REPO/dists/trixie/InRelease" "$WORK/InRelease" \
+        "inputs/downloads/zerotier/InRelease"
+    retain_file index zerotier-packages "$want" \
+        "$ZEROTIER_REPO/dists/trixie/main/binary-$DEB_ARCH/Packages" "$WORK/Packages" \
+        "inputs/downloads/zerotier/Packages"
+    retain_file archive zerotier-package "$ZT_EXPECTED" \
+        "$ZEROTIER_REPO/pool/main/z/zerotier-one/$ZT_DEB" "$WORK/$ZT_DEB" \
+        "inputs/downloads/zerotier/$ZT_DEB"
+    if [ -n "$CAPTURE_STAGE" ]; then
+        rm -rf "$WORK/zerotier-notice"
+        dpkg-deb -x "$WORK/$ZT_DEB" "$WORK/zerotier-notice" \
+            || die "could not extract the ZeroTier package notice"
+        ZT_NOTICE="$WORK/zerotier-notice/usr/share/doc/zerotier-one/copyright"
+        [ -f "$ZT_NOTICE" ] || die "the ZeroTier package has no copyright notice"
+        retain_file notice zerotier-copyright "$ZEROTIER_VERSION" "$ZEROTIER_REPO" \
+            "$ZT_NOTICE" "inputs/notices/zerotier-one.copyright"
+    fi
 
     rm -rf "$OUT/zerotier"
     mkdir -p "$OUT/zerotier"
@@ -376,6 +587,7 @@ if the version was bumped deliberately, update ZEROTIER_SHA256_$DEB_ARCH"
 fi
 
 # ---------------------------------------------------------------------------
+if wanted mediamtx; then
 step "mediamtx $MEDIAMTX_VERSION for $DEB_ARCH"
 
 # mediamtx names its Linux tarballs by the same two words Debian names its
@@ -414,6 +626,12 @@ printf '%s  %s\n' "$MTX_EXPECTED" "$MTX_TARBALL" > "$WORK/mtx.sha256"
 ( cd "$WORK" && $SHA_CHECK mtx.sha256 ) >/dev/null \
     || die "$MTX_TARBALL does not match its recorded checksum; refusing to stage it"
 log "checksum matches"
+retain_file index mediamtx-checksums "v$MEDIAMTX_VERSION" \
+    "$MEDIAMTX_BASE/v$MEDIAMTX_VERSION/checksums.sha256" "$WORK/mediamtx.sha256" \
+    "inputs/downloads/mediamtx/checksums.sha256"
+retain_file archive mediamtx-distribution "$MTX_EXPECTED" \
+    "$MEDIAMTX_BASE/v$MEDIAMTX_VERSION/$MTX_TARBALL" "$WORK/$MTX_TARBALL" \
+    "inputs/downloads/mediamtx/$MTX_TARBALL"
 
 rm -rf "$WORK/mediamtx" "$OUT/mediamtx"
 mkdir -p "$WORK/mediamtx"
@@ -431,6 +649,7 @@ chmod 0755 "$OUT/mediamtx/mediamtx"
 # configuration on the disk is a second place somebody could turn one on.
 [ -f "$WORK/mediamtx/LICENSE" ] && mv "$WORK/mediamtx/LICENSE" "$OUT/mediamtx/LICENSE"
 log "staged $OUT/mediamtx/mediamtx"
+fi
 
 # ---------------------------------------------------------------------------
 step "the console: node-red and the dashboard"
@@ -483,6 +702,8 @@ It is not in Debian and publishes no binary, so a $ARCH build needs a $ARCH tool
     [ "$MR_HEAD" = "$MAVLINK_ROUTER_COMMIT" ] \
         || die "the checkout is at $MR_HEAD, not the pinned $MAVLINK_ROUTER_COMMIT"
     log "source is $MR_HEAD, exactly the pinned commit"
+    retain_tree git-source mavlink-router "$MR_HEAD" "$MAVLINK_ROUTER_REPO" \
+        "$WORK/mavlink-router" "inputs/sources/mavlink-router"
 
     log "building in $MAVLINK_ROUTER_IMAGE for $OCI_PLATFORM; this compiles C++, so give it a few minutes"
     # `chown` at the end because the container runs as root and the source is
@@ -553,6 +774,123 @@ register the emulation handlers (Linux: qemu-user-static and binfmt-support) and
 fi
 
 # ---------------------------------------------------------------------------
+if [ "$ARCH" = "linux-arm64" ] && wanted seekerhd; then
+    step "SeekerHD RKAIQ $RKAIQ_COMMIT and pinned IQ inputs for $ARCH"
+    SH_ENGINE=$(command -v docker 2>/dev/null || command -v podman 2>/dev/null || true)
+    [ -n "$SH_ENGINE" ] || die "no docker or podman here, and SeekerHD RKAIQ is a source build"
+    SH_SRC="$WORK/seekerhd-rkaiq"
+    mkdir -p "$SH_SRC"
+    git -C "$SH_SRC" init --quiet
+    git -C "$SH_SRC" remote add origin "$RKAIQ_REPO"
+    git -C "$SH_SRC" fetch --quiet --depth=1 origin "$RKAIQ_COMMIT" \
+        || die "could not fetch RKAIQ $RKAIQ_COMMIT from $RKAIQ_REPO"
+    git -C "$SH_SRC" checkout --quiet --detach FETCH_HEAD
+    SH_HEAD=$(git -C "$SH_SRC" rev-parse HEAD)
+    [ "$SH_HEAD" = "$RKAIQ_COMMIT" ] \
+        || die "the RKAIQ checkout is at $SH_HEAD, not the pinned $RKAIQ_COMMIT"
+    retain_tree git-source rkaiq "$SH_HEAD" "$RKAIQ_REPO" "$SH_SRC" \
+        "inputs/sources/rkaiq"
+
+    # Normal linear service: readiness, scheduling fallback, current sensor
+    # timing, native live controls, and the vendor 6.1 frame-interval ABI.
+    # aiq-hdr-mode.patch is deliberately absent; the image never opts into
+    # experimental HDR.
+    SH_PATCHES="aiq-server.patch aiq-thread-fallback.patch aiq-sensor-timing.patch aiq-live-controls.patch aiq-vendor-hdr-abi.patch"
+    for sh_patch in $SH_PATCHES; do
+        retain_file patch "rkaiq-$sh_patch" \
+            "$($SHA_SUM "$REPO/scripts/spikes/seekerhd/$sh_patch" | cut -d' ' -f1)" \
+            "repository:scripts/spikes/seekerhd/$sh_patch" \
+            "$REPO/scripts/spikes/seekerhd/$sh_patch" "inputs/patches/seekerhd/$sh_patch"
+        patch --batch --forward -d "$SH_SRC" -p1 \
+            <"$REPO/scripts/spikes/seekerhd/$sh_patch" \
+            || die "$sh_patch does not apply to pinned RKAIQ $RKAIQ_COMMIT"
+    done
+
+    log "building patched ISP21 RKAIQ in $RKAIQ_IMAGE for $OCI_PLATFORM"
+    # shellcheck disable=SC2016 # SH_OWNER is expanded by the container shell
+    "$SH_ENGINE" run --rm --platform "$OCI_PLATFORM" \
+        -v "$SH_SRC:/src" -w /src \
+        -e DEBIAN_FRONTEND=noninteractive \
+        -e "SH_OWNER=$(id -u):$(id -g)" \
+        "$RKAIQ_IMAGE" sh -c '
+            set -eu
+            apt-get update -qq
+            apt-get install -y --no-install-recommends \
+                build-essential cmake pkg-config libdrm-dev m4 xxd >/dev/null
+            cmake -S /src -B /src/build -DCMAKE_BUILD_TYPE=Release >/dev/null
+            cmake --build /src/build --parallel "$(nproc)" >/dev/null
+            sh_lib=$(find /src/build -type f -name librkaiq.so -print -quit)
+            sh_bin=$(find /src/build -type f -name rkaiq_3A_server -perm /111 -print -quit)
+            [ -n "$sh_lib" ] && [ -n "$sh_bin" ]
+            mkdir -p /src/yonder-out/bin /src/yonder-out/lib
+            cp "$sh_lib" /src/yonder-out/lib/librkaiq.so
+            cp "$sh_bin" /src/yonder-out/bin/rkaiq_3A_server
+            strip /src/yonder-out/lib/librkaiq.so /src/yonder-out/bin/rkaiq_3A_server
+            sh_ldd=$(LD_LIBRARY_PATH=/src/yonder-out/lib \
+                ldd /src/yonder-out/bin/rkaiq_3A_server)
+            ! printf "%s\n" "$sh_ldd" | grep -q "not found"
+            chown -R "$SH_OWNER" /src/build /src/yonder-out
+        ' || die "the SeekerHD RKAIQ build failed in $RKAIQ_IMAGE for $OCI_PLATFORM"
+
+    SH_IQ="$WORK/seekerhd-iq"
+    mkdir -p "$SH_IQ"
+    curl -fsSL --retry 3 -o "$SH_IQ/reference.json" "$SEEKERHD_REFERENCE_URL" \
+        || die "could not fetch the pinned Rockchip IMX462 IQ reference"
+    curl -fsSL --retry 3 -o "$SH_IQ/divimath.json" "$SEEKERHD_DIVIMATH_URL" \
+        || die "could not fetch the pinned Divimath SeekerHD tuning"
+    printf '%s  %s\n' "$SEEKERHD_REFERENCE_SHA256" reference.json \
+        >"$SH_IQ/inputs.sha256"
+    printf '%s  %s\n' "$SEEKERHD_DIVIMATH_SHA256" divimath.json \
+        >>"$SH_IQ/inputs.sha256"
+    (cd "$SH_IQ" && $SHA_CHECK inputs.sha256) >/dev/null \
+        || die "a SeekerHD IQ input does not match its recorded checksum"
+    retain_file archive seekerhd-reference-iq "$SEEKERHD_REFERENCE_SHA256" \
+        "$SEEKERHD_REFERENCE_URL" "$SH_IQ/reference.json" \
+        "inputs/downloads/seekerhd/reference.json"
+    retain_file archive seekerhd-divimath-iq "$SEEKERHD_DIVIMATH_SHA256" \
+        "$SEEKERHD_DIVIMATH_URL" "$SH_IQ/divimath.json" \
+        "inputs/downloads/seekerhd/divimath.json"
+    python3 "$REPO/scripts/spikes/seekerhd/tune.py" \
+        "$SH_IQ/reference.json" "$SH_IQ/divimath.json" "$SH_IQ/tuned.json"
+    python3 "$REPO/scripts/spikes/seekerhd/profiles.py" \
+        "$SH_IQ/tuned.json" "$SH_IQ/profiles" >/dev/null
+
+    SH_OUT="$WORK/seekerhd-out"
+    mkdir -p "$SH_OUT/bin" "$SH_OUT/lib" "$SH_OUT/iqfiles" "$SH_OUT/profiles"
+    cp "$SH_SRC/yonder-out/bin/rkaiq_3A_server" "$SH_OUT/bin/"
+    cp "$SH_SRC/yonder-out/lib/librkaiq.so" "$SH_OUT/lib/"
+    cp "$SH_IQ/profiles/normal-light.json" \
+        "$SH_OUT/iqfiles/imx462_IMX462_default.json"
+    cp "$SH_IQ/profiles/"*.json "$SH_OUT/profiles/"
+    chmod 0755 "$SH_OUT/bin/rkaiq_3A_server"
+    chmod 0644 "$SH_OUT/lib/librkaiq.so" "$SH_OUT/iqfiles/"*.json \
+        "$SH_OUT/profiles/"*.json
+    {
+        printf 'rkaiq %s %s\n' "$RKAIQ_COMMIT" "$RKAIQ_REPO"
+        printf 'rockchip-iq %s %s %s\n' "$SEEKERHD_REFERENCE_COMMIT" \
+            "$SEEKERHD_REFERENCE_SHA256" "$SEEKERHD_REFERENCE_URL"
+        printf 'divimath-iq %s %s %s\n' "$SEEKERHD_DIVIMATH_COMMIT" \
+            "$SEEKERHD_DIVIMATH_SHA256" "$SEEKERHD_DIVIMATH_URL"
+        for sh_patch in $SH_PATCHES; do
+            printf 'patch %s %s\n' \
+                "$($SHA_SUM "$REPO/scripts/spikes/seekerhd/$sh_patch" | cut -d' ' -f1)" \
+                "$sh_patch"
+        done
+        printf '%s\n' 'mode linear'
+    } >"$SH_OUT/SOURCES"
+    (
+        cd "$SH_OUT"
+        find . -type f ! -name SHA256SUMS -print | LC_ALL=C sort \
+            | sed 's#^./##' | while IFS= read -r sh_file; do
+                printf '%s  %s\n' "$($SHA_SUM "$sh_file" | cut -d' ' -f1)" "$sh_file"
+            done
+    ) >"$SH_OUT/SHA256SUMS"
+    rm -rf "$OUT/seekerhd"
+    mv "$SH_OUT" "$OUT/seekerhd"
+    log "staged $OUT/seekerhd from pinned RKAIQ and verified IQ inputs"
+fi
+
+# ---------------------------------------------------------------------------
 if wanted gst-rockchip; then
     if [ "$ARCH" != "linux-arm64" ]; then
         step "gst-rockchip: not for $ARCH"
@@ -590,6 +928,13 @@ if wanted gst-rockchip; then
     gr_fetch "$MPP_REPO" "$MPP_COMMIT" "$GR/mpp"
     gr_fetch "$LIBRGA_REPO" "$LIBRGA_COMMIT" "$GR/librga"
     gr_fetch "$GST_ROCKCHIP_REPO" "$GST_ROCKCHIP_COMMIT" "$GR/plugin"
+    retain_tree git-source rockchip-mpp "$MPP_COMMIT" "$MPP_REPO" "$GR/mpp" \
+        "inputs/sources/rockchip-mpp"
+    retain_tree git-source librga "$LIBRGA_COMMIT" "$LIBRGA_REPO" "$GR/librga" \
+        "inputs/sources/librga"
+    retain_tree git-source gstreamer-rockchip "$GST_ROCKCHIP_COMMIT" \
+        "$GST_ROCKCHIP_REPO" "$GR/plugin" \
+        "inputs/sources/gstreamer-rockchip"
     [ -f "$GR/librga/libs/Linux/gcc-aarch64/librga.so" ] \
         || die "librga at $LIBRGA_COMMIT carries no libs/Linux/gcc-aarch64/librga.so"
     log "building in $GST_ROCKCHIP_IMAGE for $OCI_PLATFORM; MPP is a large C build, so give it several minutes"
@@ -673,6 +1018,15 @@ if wanted console; then
 
     CONSOLE_SRC="$HERE/console"
     [ -f "$CONSOLE_SRC/package.json" ] || die "no console manifest at $CONSOLE_SRC/package.json"
+    if [ -n "$CAPTURE_STAGE" ] && [ ! -f "$CONSOLE_SRC/package-lock.json" ]; then
+        die "production payload capture requires installer/console/package-lock.json"
+    fi
+
+    NPM_CACHE=""
+    if [ -n "$CAPTURE_STAGE" ]; then
+        NPM_CACHE="$CAPTURE_STAGE/inputs/npm/cache"
+        mkdir -p "$NPM_CACHE"
+    fi
 
     rm -rf "$OUT/console"
     mkdir -p "$OUT/console"
@@ -684,9 +1038,15 @@ if wanted console; then
         # lockfile pins, so two payloads built a week apart carry the same
         # console instead of whatever the registry was serving each day.
         log "installing from the committed lockfile, resolved for $NPM_OS/$NPM_CPU/$NPM_LIBC"
-        ( cd "$OUT/console" && npm ci --omit=dev --no-audit --no-fund \
-            --os="$NPM_OS" --cpu="$NPM_CPU" --libc="$NPM_LIBC" ) \
-            || die "npm ci failed in $OUT/console"
+        if [ -n "$NPM_CACHE" ]; then
+            ( cd "$OUT/console" && npm ci --omit=dev --no-audit --no-fund \
+                --cache="$NPM_CACHE" --os="$NPM_OS" --cpu="$NPM_CPU" --libc="$NPM_LIBC" ) \
+                || die "npm ci failed in $OUT/console"
+        else
+            ( cd "$OUT/console" && npm ci --omit=dev --no-audit --no-fund \
+                --os="$NPM_OS" --cpu="$NPM_CPU" --libc="$NPM_LIBC" ) \
+                || die "npm ci failed in $OUT/console"
+        fi
     else
         log "no lockfile yet; resolving one"
         ( cd "$OUT/console" && npm install --omit=dev --no-audit --no-fund \
@@ -694,6 +1054,22 @@ if wanted console; then
             || die "npm install failed in $OUT/console"
         cp "$OUT/console/package-lock.json" "$CONSOLE_SRC/package-lock.json"
         log "wrote $CONSOLE_SRC/package-lock.json — commit it, or the next payload will differ"
+    fi
+
+    if [ -n "$CAPTURE_STAGE" ]; then
+        rm -rf "$NPM_CACHE/_logs"
+        rm -f "$NPM_CACHE/_update-notifier-last-checked"
+        retain_file index console-package-json \
+            "$($SHA_SUM "$CONSOLE_SRC/package.json" | cut -d' ' -f1)" \
+            "repository:installer/console/package.json" "$CONSOLE_SRC/package.json" \
+            "inputs/npm/manifests/package.json"
+        retain_file index console-package-lock \
+            "$($SHA_SUM "$CONSOLE_SRC/package-lock.json" | cut -d' ' -f1)" \
+            "repository:installer/console/package-lock.json" "$CONSOLE_SRC/package-lock.json" \
+            "inputs/npm/manifests/package-lock.json"
+        retain_record npm-cache console-npm-cache \
+            "$($SHA_SUM "$CONSOLE_SRC/package-lock.json" | cut -d' ' -f1)" \
+            "https://registry.npmjs.org/" "inputs/npm/cache"
     fi
 
     [ -f "$OUT/console/node_modules/node-red/red.js" ] \
@@ -731,6 +1107,46 @@ $wrong_binding"
         log "         the console will fall back to pure JavaScript. npm $(npm --version) may not"
         log "         understand --libc; npm 10.4 or newer does."
     fi
+fi
+
+# ---------------------------------------------------------------------------
+if [ -n "$CAPTURE_STAGE" ]; then
+    step "inventorying retained application payload for $TARGET"
+    if [ "$(git -C "$REPO" rev-parse HEAD 2>/dev/null)" != "$APP_SOURCE_COMMIT" ] ||
+            [ -n "$(git -C "$REPO" status --porcelain --untracked-files=all)" ]; then
+        die "application source changed during production payload capture"
+    fi
+    capture_inventory() {
+        python3 -I "$REPO/image/inputs/payload-inventory.py" capture \
+            --staging "$CAPTURE_STAGE" \
+            --payload "$OUT" \
+            --output "$CAPTURE_INPUTS" \
+            --target "$TARGET" \
+            --arch "$ARCH" \
+            --selected "$ONLY" \
+            "$@"
+    }
+    case "$TARGET" in
+        rpi)
+            capture_inventory \
+                --toolchain "application=$APPLICATION_IMAGE" \
+                --toolchain "mavlink-router=$MAVLINK_ROUTER_IMAGE"
+            ;;
+        radxa-rock5c)
+            capture_inventory \
+                --toolchain "application=$APPLICATION_IMAGE" \
+                --toolchain "mavlink-router=$MAVLINK_ROUTER_IMAGE" \
+                --toolchain "gst-rockchip=$GST_ROCKCHIP_IMAGE"
+            ;;
+        radxa-zero3w)
+            capture_inventory \
+                --toolchain "application=$APPLICATION_IMAGE" \
+                --toolchain "mavlink-router=$MAVLINK_ROUTER_IMAGE" \
+                --toolchain "gst-rockchip=$GST_ROCKCHIP_IMAGE" \
+                --toolchain "seekerhd-rkaiq=$RKAIQ_IMAGE"
+            ;;
+    esac
+    log "retained inputs and exact payload replay at $CAPTURE_INPUTS"
 fi
 
 # ---------------------------------------------------------------------------

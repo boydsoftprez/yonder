@@ -1,5 +1,6 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 import type { Config } from "../schema/config.js";
+import type { SecretPatch } from "../state/types.js";
 
 /**
  * Turning "join this network" into a configuration (R-NET-03).
@@ -11,7 +12,7 @@ import type { Config } from "../schema/config.js";
  * form that merged into a configuration would be doing it in wiring, in a
  * browser, to the document that decides whether the device is reachable.
  *
- * Pure apart from one thing it is handed: somewhere to put the passphrase.
+ * Pure: the passphrase is returned as a patch for the durable transaction.
  * The passphrase never goes into `config.yaml` — that file is 0644 and read by
  * anything on the device — so it goes into `secrets.yaml` and the
  * configuration carries a reference to it. That is the same shape the access
@@ -26,13 +27,8 @@ export interface JoinRequest {
   psk?: unknown;
 }
 
-/** Somewhere to put a secret. `SecretStore` satisfies this; a test can fake it. */
-export interface SecretSink {
-  put(name: string, value: string): void;
-}
-
 export type JoinResult =
-  | { ok: true; config: Config }
+  | { ok: true; config: Config; secretPatch: SecretPatch }
   | { ok: false; error: string };
 
 /**
@@ -63,7 +59,6 @@ const MAX_SSID = 32;
 export function joinNetwork(
   current: Config,
   request: JoinRequest | undefined,
-  secrets: SecretSink,
 ): JoinResult {
   const ssid = request?.ssid;
   if (typeof ssid !== "string" || ssid === "" || ssid.length > MAX_SSID) {
@@ -91,12 +86,15 @@ export function joinNetwork(
     // Into secrets.yaml, never into config.yaml. The configuration file is
     // world-readable on the device and travels in a support bundle; the secret
     // store is 0600 root and does not.
-    secrets.put(CLIENT_PSK_SECRET, psk);
     config.network.client.psk = { secret: CLIENT_PSK_SECRET };
   } else {
     config.network.client.psk = null;
   }
-  return { ok: true, config };
+  return {
+    ok: true,
+    config,
+    secretPatch: hasPsk ? { [CLIENT_PSK_SECRET]: psk } : {},
+  };
 }
 
 /**

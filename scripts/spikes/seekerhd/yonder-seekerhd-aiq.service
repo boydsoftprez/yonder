@@ -4,6 +4,7 @@ Description=SeekerHD automatic exposure and white balance
 Requires=yonder-seekerhd.service
 After=yonder-seekerhd.service
 Before=yonder-core.service
+ConditionPathExistsGlob=/sys/bus/i2c/drivers/imx462/*-001a
 
 [Service]
 Type=notify

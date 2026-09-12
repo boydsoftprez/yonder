@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 import { z } from "zod";
 import { ModemSettings, type Config } from "../../schema/config.js";
-import type { SecretSink } from "../join.js";
+import type { SecretPatch } from "../../state/types.js";
 
 /**
  * Turning "use this SIM" into a configuration (R-CEL-02, R-CEL-12).
@@ -63,7 +63,7 @@ export const ModemRequest = ModemSettings
 export type ModemRequest = z.infer<typeof ModemRequest>;
 
 export type ModemConfigureResult =
-  | { ok: true; config: Config }
+  | { ok: true; config: Config; secretPatch: SecretPatch }
   | { ok: false; error: string };
 
 /**
@@ -99,7 +99,6 @@ export type ModemConfigureResult =
 export function configureModem(
   current: Config,
   request: unknown,
-  secrets: SecretSink,
 ): ModemConfigureResult {
   const parsed = ModemRequest.safeParse(request);
   if (!parsed.success) {
@@ -114,11 +113,16 @@ export function configureModem(
 
   if (typeof password === "string" && password !== "") {
     // Into secrets.yaml, never into config.yaml.
-    secrets.put(MODEM_PASSWORD_SECRET, password);
     config.network.modem.password = { secret: MODEM_PASSWORD_SECRET };
   } else if (password === null) {
     config.network.modem.password = null;
   }
 
-  return { ok: true, config };
+  return {
+    ok: true,
+    config,
+    secretPatch: typeof password === "string" && password !== ""
+      ? { [MODEM_PASSWORD_SECRET]: password }
+      : {},
+  };
 }

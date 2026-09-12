@@ -4,7 +4,7 @@ export class MaintenanceError extends Error {
 }
 export async function maintenanceRequest<T>(path: string, body?: object): Promise<T> {
   const controller = new AbortController();
-  const timer = setTimeout(() => controller.abort(), path === "theme" ? 65_000 : 6000);
+  const timer = setTimeout(() => controller.abort(), (path === "theme" || path.startsWith("owner/") || path.startsWith("recovery/") || path.startsWith("storage/")) ? 65_000 : 6000);
   try {
     const response = await fetch("/maintenance/api/" + path, {
       method: body === undefined ? "GET" : "POST", credentials: "same-origin", cache: "no-store",
