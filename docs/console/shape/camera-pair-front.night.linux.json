@@ -20,14 +20,14 @@
         "x": 285,
         "y": 93,
         "w": 614,
-        "h": 708
+        "h": 707
       }
     },
     {
       "key": "nrdb-ui-widget.nrdb-ui-yonder-holdkey.yonder-content-height",
       "box": {
         "x": 285,
-        "y": 813,
+        "y": 812,
         "w": 614,
         "h": 54
       }
@@ -72,7 +72,7 @@
       "key": "nrdb-ui-group.yonder-captures",
       "box": {
         "x": 268,
-        "y": 2843,
+        "y": 2842,
         "w": 1000,
         "h": 145
       }
@@ -81,7 +81,7 @@
       "key": "nrdb-ui-widget.nrdb-ui-yonder-captures",
       "box": {
         "x": 285,
-        "y": 2860,
+        "y": 2859,
         "w": 966,
         "h": 111
       }
