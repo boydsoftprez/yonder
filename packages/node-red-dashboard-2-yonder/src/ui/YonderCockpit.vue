@@ -1117,7 +1117,6 @@ export default {
     // R-FLT-29/K-68: see `cameraBackgroundChoice` and `picturePresent`.
     background(value) { if (value !== 'terrain') this.cameraBackgroundChoice = value },
     picturePresent(value) { if (!value) this.pictureStale = { seconds: 0, text: '' } },
-    cameraPath () { this.pictureAspect = 16 / 9 },
     headerDocked(){this.$nextTick(this.fitViewport)},
     telemetryRate(value){if(telemetryRates.includes(value))try{localStorage.setItem('yonder-telemetry-rate-v1',String(value))}catch{}},
     palette(value) { if(['day','night'].includes(value)){try{localStorage.setItem('yonder-cockpit-palette-v1',value)}catch{}} },

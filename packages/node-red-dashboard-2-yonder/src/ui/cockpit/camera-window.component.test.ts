@@ -211,6 +211,33 @@ describe('the Camera window and control (R-FLT-29, K-68)', () => {
     w.unmount()
   })
 
+  it('keeps decoded aspect when switching cameras that have the same frame shape', async () => {
+    const report = stoppedCameraReport()
+    const { wrapper: w } = host(report)
+    const picture = w.findComponent({ name: 'YonderPicture' })
+    const video = picture.get('video')
+    Object.defineProperties(video.element, {
+      videoWidth: { value: 640, configurable: true },
+      videoHeight: { value: 480, configurable: true }
+    })
+    await video.trigger('loadedmetadata')
+    expect(w.findComponent({ name: 'CameraWindow' }).props('aspect')).toBeCloseTo(4 / 3)
+
+    const camera = { ...report.camera, id: 'second', path: 'second-preview' }
+    await w.setProps({ report: { ...report, camera, cameras: [camera] } })
+    expect(w.findComponent({ name: 'YonderPicture' }).vm).toBe(picture.vm)
+    await video.trigger('loadedmetadata')
+    expect(w.findComponent({ name: 'CameraWindow' }).props('aspect')).toBeCloseTo(4 / 3)
+
+    Object.defineProperties(video.element, {
+      videoWidth: { value: 1280, configurable: true },
+      videoHeight: { value: 720, configurable: true }
+    })
+    await video.trigger('loadedmetadata')
+    expect(w.findComponent({ name: 'CameraWindow' }).props('aspect')).toBeCloseTo(16 / 9)
+    w.unmount()
+  })
+
   it('re-clamps a bottom window after decoded aspect changes without requiring a browser resize', async () => {
     const { wrapper: w } = host()
     w.vm.setOption('cameraWindow', { x: 0.1, y: 0.85, w: 0.2 })
