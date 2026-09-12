@@ -1,7 +1,7 @@
 <!-- SPDX-License-Identifier: GPL-3.0-or-later -->
 <template>
-    <div class="y-pic">
-        <header class="y-pic__toolbar" aria-label="Video status">
+    <div class="y-pic" :class="{ 'y-pic--scene': scene }">
+        <header v-if="!scene" class="y-pic__toolbar" aria-label="Video status">
             <div class="y-pic__controls">
                 <strong v-if="selectedCameraName" class="y-pic__camera" :title="selectedCameraName">{{ selectedCameraName }}</strong>
                 <div class="y-pic__view-modes" role="group" aria-label="This preview">
@@ -44,7 +44,7 @@
             ref="frame"
             class="y-pic__frame"
             :class="{ 'is-aiming': aimable }"
-            :style="{ aspectRatio: videoAspect, '--y-pic-aspect': String(videoAspect) }"
+            :style="scene ? null : { aspectRatio: videoAspect, '--y-pic-aspect': String(videoAspect) }"
             @pointerdown="dragDown"
             @pointermove="dragMove"
             @pointerup="onDragEnd"
@@ -82,15 +82,15 @@
         </div>
       </div>
 
-        <div class="y-pic__capture-host"></div>
+        <div v-if="!scene" class="y-pic__capture-host"></div>
 
-        <div class="y-pic__notices">
+        <div v-if="!scene" class="y-pic__notices">
             <button v-if="playbackBlocked" type="button" class="y-pic__resume" @click="resumePlayback">Resume live video</button>
             <div v-if="signInRequired || reason || aimRefusal" class="y-pic__reason" role="status">{{ signInRequired ? 'Your session expired. Sign in to restore video and controls.' : aimRefusal || reason }}</div>
             <div v-if="flashing" class="y-pic__saved" role="status"><i class="y-pic__saved-dot" aria-hidden="true"></i>Saved · to {{ savedTo }}</div>
         </div>
 
-        <div class="y-pic__thumbnails">
+        <div v-if="!scene" class="y-pic__thumbnails">
             <YonderThumbStrip
                 v-if="cameras.length"
                 class="y-pic__strip"
@@ -564,8 +564,20 @@ export default {
     props: {
         id: { type: String, required: true },
         props: { type: Object, default: () => ({}) },
-        state: { type: Object, default: () => ({}) }
+        state: { type: Object, default: () => ({}) },
+        /**
+         * R-FLT-29: the flight display's own presentation of this picture —
+         * frame and video only, filling the parent with `object-fit: cover`,
+         * none of this component's own chrome. A fourth sibling of the three
+         * props above, not a key inside `props`: those are the editor-
+         * configured, per-widget facts (path, label, cost, …); this is a
+         * host telling the component which of its two presentations to
+         * draw, the same kind of fact `aimable` already is internally.
+         * The Camera and Cockpit pages never set it and are unaffected.
+         */
+        scene: { type: Boolean, default: false }
     },
+    emits: ['stale'],
     data () {
         return {
             mode: 'live',
@@ -900,6 +912,24 @@ export default {
         }
     },
     watch: {
+        /**
+         * R-FLT-29: a host that draws this picture in the scene
+         * presentation has taken the toolbar — and the age reading inside
+         * it — away, and still needs to show that age somewhere else (the
+         * flight display's own footer label). `seconds`/`text` are
+         * `staleFor`/`ageText` verbatim, the identical two facts the
+         * toolbar's own `y-pic__age` already draws, so the two can never
+         * disagree about what "stale" means. `immediate` so a picture that
+         * is live for its entire mounted life still emits the `seconds: 0`
+         * a host needs to draw "not stale" — `staleFor` would otherwise
+         * never fire a change at all.
+         */
+        staleFor: {
+            immediate: true,
+            handler (value) {
+                this.$emit('stale', { seconds: value, text: this.ageText })
+            }
+        },
         cameraRunState (value, before) {
             if (value !== before) { this.videoRequestPending = false; clearTimeout(this.videoRequestTimer) }
             if (['stopped', 'failed'].includes(value)) { clearTimeout(this.retryTimer); clearTimeout(this.stillsTimer); this.teardown(); this.reason = ''; this.blank() }
@@ -1780,7 +1810,23 @@ export default {
    `width: 100%` is declared first and deliberately kept: a browser without
    container queries drops the `min()` line at parse time — `cqh` is not a
    unit it knows — and falls back to that, where `max-height` still holds the
-   box inside its slot. */
+   box inside its slot.
+
+   **A fourth version, in the grid rather than the width math** (R-FLT-29's
+   `scene` presentation, below): dropping the toolbar, capture host, notices
+   and thumbnails leaves three of `.y-pic`'s own four grid rows with nothing
+   in them, but `grid-template-rows` above still reserves their minimums —
+   34px, 80px — regardless of whether anything occupies them. That is this
+   same defect in a different unit: room subtracted from the row the frame
+   sizes against, unconnected to anything actually on screen. `.y-pic--scene`
+   fixes it the same way the fourth version of any of this component's own
+   sizing bugs should read as familiar rather than surprising: collapse the
+   row list to the one flexible track alone, and — because a picture filling
+   a flight instrument's background has no leftover to spend on empty panel
+   either — take `.y-pic__fit` and `.y-pic__frame` out of the container-query
+   arithmetic entirely, `position: absolute; inset: 0` against `.y-pic`
+   itself, `object-fit: cover` doing the cropping `aspect-ratio` and `cqh` no
+   longer need to. */
 .y-pic__fit {
     min-width: 0;
     min-height: 0;
@@ -1825,6 +1871,32 @@ export default {
    composite in a layer of its own that ignores DOM order, so nothing here
    is left to rely on painting later than its siblings by accident. */
 .y-pic__video { position: absolute; inset: 0; width: 100%; height: 100%; object-fit: contain; transition: filter 1s linear; z-index: 1; }
+/* R-FLT-29's scene presentation — see the fourth-version paragraph in
+   `.y-pic__frame`'s own comment above for why the grid row collapses and
+   `.y-pic__fit`/`.y-pic__frame` leave the container-query sizing entirely.
+   A plain `1fr`, not `minmax(0, 1fr)`: the one thing that could still grow
+   this row past its slot — `.y-pic__fit` sizing to its own content — cannot
+   happen once `.y-pic__fit` is taken out of flow below, so there is nothing
+   left for the `minmax()` floor to guard against. */
+.y-pic--scene { grid-template-rows: 1fr; }
+.y-pic--scene .y-pic__fit,
+.y-pic--scene .y-pic__frame {
+    position: absolute;
+    /* Longhand, not the `inset` shorthand this file uses elsewhere
+       (`.y-pic__video`, `.y-pic__hatch`, `.y-pic__flash`): jsdom's CSS
+       engine does not expand `inset` into `top`/`right`/`bottom`/`left`,
+       and `camera-scene.component.test.ts` reads exactly those four
+       through `getComputedStyle`, being unable to measure a box directly. */
+    top: 0;
+    right: 0;
+    bottom: 0;
+    left: 0;
+    width: auto;
+    height: auto;
+    max-width: none;
+    max-height: none;
+}
+.y-pic--scene .y-pic__video { object-fit: cover; }
 /* The hatch is the third of four signals, and the one that cannot be mistaken
    for a dark scene or a badly exposed shot. Above the video, below every
    reading drawn on top of it: it must wash over the picture, never obscure

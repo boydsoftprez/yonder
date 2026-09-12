@@ -29,6 +29,7 @@
         <label class="pfd-option pfd-range"><span>HSI background <b>{{Math.round(options.hsiOpacity*100)}}%</b></span><input aria-label="HSI background opacity" type="range" min="10" max="100" step="5" :value="options.hsiOpacity*100" @input="$emit('option','hsiOpacity',Number($event.target.value)/100)"></label>
         <label class="pfd-option"><span>Pitch ladder</span><input type="checkbox" :checked="options.pitchLadder" @change="$emit('option','pitchLadder',$event.target.checked)"></label>
         <label class="pfd-option"><span>Secondary readouts<small>Pitch / bank and desired track</small></span><input type="checkbox" :checked="options.secondary" @change="$emit('option','secondary',$event.target.checked)"></label>
+        <label class="pfd-option"><span>Horizon line over camera<small>Attitude line drawn over the picture when a camera is the flight display's background</small></span><input type="checkbox" :checked="options.horizonLine!==false" @change="$emit('option','horizonLine',$event.target.checked)"></label>
         <button class="pfd-wide-button" @click="navigate('instrument-layout')">Instrument panel &amp; PFD/MFD layout</button>
         <button class="pfd-wide-button" @click="navigate('sources')">Map, terrain &amp; data →</button>
         <button class="pfd-wide-button" @click="$emit('panel','director')">Flight director settings →</button>

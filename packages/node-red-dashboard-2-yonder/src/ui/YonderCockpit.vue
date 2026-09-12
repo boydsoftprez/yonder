@@ -55,6 +55,7 @@
       :background-ready="backgroundReady"
       :background-label="backgroundLabel"
       :terrain-report="terrainReport"
+      :camera-background="background!=='terrain'"
       @flight-controls="openFlightControls"
       @reference="setReference"
       @option="setOption"
@@ -62,49 +63,57 @@
     >
       <template #background="{pose,viewport}">
         <div class="cockpit-background">
-          <template v-if="background==='terrain'">
-            <slot
-              name="terrain"
+          <!-- R-FLT-29/K-68: terrain stays mounted regardless of which
+               background is chosen, so height above ground and the
+               clearance forecast keep reporting while a camera fills the
+               scene (design decision 9) — only `draw` changes with the
+               choice. The picture (below) is a later sibling, so it paints
+               over this on an equal z-index without either needing one. -->
+          <slot
+            name="terrain"
+            :snapshot="snapshot"
+            :pose="pose"
+            :viewport="viewport"
+          >
+            <component
+              v-if="terrainComponent"
+              :is="terrainComponent"
               :snapshot="snapshot"
-              :pose="pose"
-              :viewport="viewport"
-            >
-              <component
-                v-if="terrainComponent"
-                :is="terrainComponent"
-                :snapshot="snapshot"
-                :flight="flight"
-                :telemetry="displayTelemetry"
-                :display-pose="pose"
-                :viewport="viewport"
-                :data-provider="groundData"
-                :enabled="onlineTerrain"
-                :imagery-enabled="onlineMap"
-                :lookahead-seconds="predicted.seconds||predictionSeconds"
-                @status="terrainStatus=$event"
-              />
-            </slot>
-          </template>
-          <template v-else-if="cameraPath">
-            <YonderPicture
-              :id="id+'-camera'"
-              :props="cameraProps"
-              class="cockpit-camera"
-            />
-            <CameraTerrainOverlay
-              v-if="background==='camera-overlay'"
-              :camera="{...snapshot.camera,calibration:calibrationCandidate||snapshot.camera?.calibration}"
+              :flight="flight"
               :telemetry="displayTelemetry"
-              :now="now"
+              :display-pose="pose"
+              :viewport="viewport"
               :data-provider="groundData"
               :enabled="onlineTerrain"
-              @status="cameraRegistration=$event"
+              :imagery-enabled="onlineMap"
+              :lookahead-seconds="predicted.seconds||predictionSeconds"
+              :draw="background==='terrain'"
+              @status="terrainStatus=$event"
             />
+          </slot>
+          <template v-if="background!=='terrain'">
+            <template v-if="cameraPath">
+              <YonderPicture
+                :id="id+'-camera'"
+                :props="cameraProps"
+                :scene="true"
+                class="cockpit-camera"
+              />
+              <CameraTerrainOverlay
+                v-if="background==='camera-overlay'"
+                :camera="{...snapshot.camera,calibration:calibrationCandidate||snapshot.camera?.calibration}"
+                :telemetry="displayTelemetry"
+                :now="now"
+                :data-provider="groundData"
+                :enabled="onlineTerrain"
+                @status="cameraRegistration=$event"
+              />
+            </template>
+            <div
+              v-else
+              class="cockpit-empty-background"
+            >Selected camera unavailable</div>
           </template>
-          <div
-            v-else-if="background!=='terrain'"
-            class="cockpit-empty-background"
-          >Selected camera unavailable</div>
         </div>
       </template>
       <template #traffic="{pose,viewport}">

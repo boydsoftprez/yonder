@@ -186,6 +186,19 @@
   background: #102430
 }
 
+/* K-68/R-FLT-29: the fixed blue-and-brown split goes behind a camera.
+   Terrain stays mounted underneath for evaluation (R-FLT-29's own height-
+   above-ground and clearance forecast), so the rule above can still match
+   a not-yet-ready terrain-vision even while a camera is shown; keyed off
+   `data-background` directly instead, so this rule applies whenever the
+   flight display's own background choice is a camera, independent of
+   terrain's readiness. Same dark tone as the rule above, deliberately: the
+   scene never invents a second "nothing to show yet" colour. */
+.y-cockpit[data-background="camera"] .cockpit-background,
+.y-cockpit[data-background="camera-overlay"] .cockpit-background {
+  background: #102430
+}
+
 .y-cockpit .cockpit-camera {
   width: 100%;
   height: 100%

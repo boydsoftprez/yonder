@@ -52,6 +52,11 @@ export const displayDefaults = Object.freeze({
   standardRatePointers: true,
   turnRate: true,
   followMission: true,
+  // R-FLT-29: the attitude line drawn over a camera background. On by
+  // default because a forward camera shows the true horizon only when its
+  // mount is level and the picture is clear; the switch in PFD settings is
+  // for the operator who finds it distracting, not a default choice.
+  horizonLine: true,
   ...units(),
   stripPlacement: 'mfd',
   layout: 'split'
@@ -88,7 +93,7 @@ export function validatePfdPreferences(input = {}) {
       references[key] = parseReference(key, input?.references?.[key]);
     } catch {}
   }
-  for (const key of ['pitchLadder', 'secondary', 'syntheticVision', 'fdVisible', 'skidBall', 'standardRatePointers', 'turnRate', 'followMission'])
+  for (const key of ['pitchLadder', 'secondary', 'syntheticVision', 'fdVisible', 'skidBall', 'standardRatePointers', 'turnRate', 'followMission', 'horizonLine'])
     if (typeof input?.display?.[key] === 'boolean') display[key] = input.display[key];
   for (const key of ['tapeOpacity', 'hsiOpacity'])
     if (Number.isFinite(input?.display?.[key])) display[key] = Math.max(.1, Math.min(1, input.display[key]));

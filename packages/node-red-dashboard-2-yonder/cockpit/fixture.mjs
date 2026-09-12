@@ -14,6 +14,30 @@ export function fixture() {
  return fixtureLeg(snapshot,2);
 }
 
+// R-FLT-29: a configured, detected camera with a stills frame, shaped like
+// `yonder-core`'s own cockpit camera record (`cockpit/camera.ts`'s
+// `CockpitCamera`) plus the `stillsUrl` field `YonderCockpit.vue`'s own
+// `cameraProps` reads off `snapshot.camera` and hands to `YonderPicture` —
+// never a shape invented fresh here. The stills frame is a small inline
+// SVG: this harness never contacts a device, so there is no lens to
+// photograph.
+const syntheticCamera = {
+ id: 'seekerhd', name: 'SeekerHD', path: 'seekerhd-preview', detected: true, run: null,
+ profileId: 'fixture-only', calibration: null, frameCaptureMs: null, poseTimeMs: null, timeErrorMs: null,
+ registration: { ready: false, reason: 'Camera lens/mount calibration and capture-time alignment have not been verified' },
+ stillsUrl: 'data:image/svg+xml,' + encodeURIComponent('<svg xmlns="http://www.w3.org/2000/svg" width="640" height="360"><rect width="640" height="360" fill="#1c2a33"/><text x="320" y="184" fill="#7f8a95" font-family="sans-serif" font-size="22" text-anchor="middle">SYNTHETIC STILLS FRAME</text></svg>')
+};
+
+// A report with the synthetic camera attached — additive only. `fixture()`
+// itself keeps reporting no camera at all, so every existing check against
+// the camera-unavailable fallback (`guide.mjs`'s own "Data setup" group,
+// `flight-host.component.test.ts`'s own "offers camera fallback" test)
+// still sees exactly what it saw before this camera existed; the default
+// background stays synthetic terrain, so no committed capture moves.
+export function fixtureCamera(report = fixture()) {
+ return { ...report, camera: syntheticCamera, cameras: [syntheticCamera] };
+}
+
 // Consistent synthetic observations for exercising actual leg handoffs in the UI.
 export function fixtureLeg(snapshot,seq,rightOfPathM=20) {
  const list=snapshot.mission.items,index=list.findIndex(i=>i.seq===seq),target=list[index];

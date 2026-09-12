@@ -13,7 +13,7 @@
     <canvas
       ref="canvas"
       class="terrain-canvas"
-      :style="{ visibility: visible ? 'visible' : 'hidden' }"
+      :style="{ visibility: visible && draw ? 'visible' : 'hidden' }"
       style="display: block; width: 100%; height: 100%"
     ></canvas>
     <div
@@ -41,7 +41,7 @@ import { latLonToUtm, evaluateTerrainPath } from "yonder-core/terrain";
 import { loadTerrainPack } from "./terrain-pack-client.mjs";
 import { frameCadence } from "./frame-cadence.mjs";
 import { viewportProjection } from "./terrain-viewport.mjs";
-import { ref, onMounted, onBeforeUnmount, watch } from "vue";
+import { ref, computed, onMounted, onBeforeUnmount, watch } from "vue";
 import {
   TERRAIN_ZOOM,
   tilePosition,
@@ -579,10 +579,20 @@ export default {
     "lookaheadSeconds",
     "dataProvider",
     "viewport",
+    "draw",
   ],
   emits: ["status"],
   setup(props, { emit }) {
     const canvas = ref(null),
+      // R-FLT-29: whether terrain *evaluation* is ready (`visible`, driving
+      // `data-terrain-ready`) and whether this component is the one allowed
+      // to *paint* (`draw`) are separate facts once the flight display can
+      // put a camera over this component instead of unmounting it. `draw`
+      // is an array prop with no declared default (see this file's own
+      // props list above), so `undefined` — nobody passed it — reads as
+      // "draw", matching every other caller that existed before this prop
+      // did.
+      draw = computed(() => props.draw !== false),
       visible = ref(false),
       message = ref("Synthetic vision off"),
       imageryState = ref("disabled"),
@@ -997,7 +1007,14 @@ export default {
           time >= detailFailedUntil
         )
           void loadDetail(pose);
-        if (drawDue(time)) renderer.draw(props.displayPose || pose, origin, props.viewport);
+        // Cadence stays live regardless of `draw`, so painting resumes at
+        // the same rate rather than bursting to catch up: only the actual
+        // `renderer.draw()` call is gated. Tile loading, `clearance` and
+        // `forecast` above are computed either way — R-FLT-29 needs height
+        // above ground and the clearance forecast to keep reporting while
+        // a camera fills the scene, which is exactly what stays true when
+        // this is the only line skipped.
+        if (drawDue(time) && draw.value) renderer.draw(props.displayPose || pose, origin, props.viewport);
         status(
           "ready",
           pack
@@ -1088,6 +1105,7 @@ export default {
     });
     return {
       canvas,
+      draw,
       visible,
       message,
       imageryState,
