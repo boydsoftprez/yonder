@@ -38,7 +38,7 @@ const argv = () => compose(opts);
 const text = () => argv().join(" ");
 
 const MPP = {
-  element: "mpph264enc" as const, h265: "mpph265enc" as const, decoder: "mppjpegdec" as const,
+  element: "mpph264enc" as const, h265: "mpph265enc" as const, decoder: "mppjpegdec" as const, h264Decoder: "mppvideodec" as const,
   device: "/dev/mpp_service", hardware: true,
   detail: "hardware H.264 and H.265 through Rockchip MPP (mpph264enc, mpph265enc)",
 };
@@ -82,6 +82,15 @@ describe('accessory input', () => {
     expect(refuse({ ...input, camera: { ...input.camera, width: 1920 } })).toContain('exceeds native');
     expect(refuse({ ...input, accessory: { ...accessory, native: null } })).toContain('timestamp cadence');
     expect(refuse({ ...input, accessory: { ...accessory, live: false } })).toContain('not live');
+  });
+  it('uses the independently probed MPP H.264 decoder when it is available', () => {
+    const line = compose({ ...input, encoder: MPP }).join(' ');
+    expect(line).toContain('h264parse ! mppvideodec');
+    expect(line).not.toContain('h264parse ! avdec_h264');
+  });
+  it('retains software H.264 decode when no MPP H.264 decoder was probed', () => {
+    const line = compose({ ...input, encoder: { ...MPP, h264Decoder: null } }).join(' ');
+    expect(line).toContain('h264parse ! avdec_h264');
   });
 });
 

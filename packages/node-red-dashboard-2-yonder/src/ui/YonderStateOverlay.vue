@@ -8,7 +8,7 @@
             <span v-if="bitrate" class="y-ov__bitrate">{{ bitrate }}</span>
         </div>
         <div v-if="detail" class="y-ov__detail">{{ detail }}</div>
-        <div v-if="step" class="y-ov__step">{{ step }}</div>
+        <div v-if="step || reserveStep" class="y-ov__step" :class="{ 'y-ov__step--reserved': reserveStep }" :tabindex="reserveStep && step ? 0 : undefined">{{ step }}</div>
         <div v-if="hasCost" class="y-ov__cost">
             <span v-if="cost.view" class="y-ov__cost-f">This view {{ cost.view }}</span>
             <span v-if="cost.encode" class="y-ov__cost-f">Shared encode {{ cost.encode }}</span>
@@ -53,9 +53,10 @@
  * (the plain value colour) rather than guessing.
  *
  * **The step line is a fact about a change, not a permanent fixture**: it
- * shows only when the daemon's own message actually carries one (§8.2,
- * "the last step with its reason"), never an empty line before a camera
- * has stepped at all.
+ * shows text only when the daemon's own message carries it (§8.2, "the
+ * last step with its reason"). Video toolbars reserve its space so transient
+ * messages never move the picture; long reasons remain scrollable. Other
+ * placements omit the empty row.
  *
  * **The cost is three fields, never one sum** (coordinator resolution 5,
  * §8.2's own words): "actual traffic per output/subscriber on each path
@@ -92,6 +93,7 @@ export default {
         bitrate: { type: String, default: '' },
         detail: { type: String, default: '' },
         step: { type: String, default: '' },
+        reserveStep: { type: Boolean, default: false },
         /** `{ view, encode, path }` — this viewer's own delivery, the
          * shared preview encode, and the measured path total. Each is
          * optional and pre-formatted; see this component's own doc
@@ -144,6 +146,14 @@ export default {
 .y-ov__step {
     font-size: 10.5px;
     color: var(--yonder-waiting, #ffcf28);
+}
+/* R-VID-18: status changes must not displace the live picture. */
+.y-ov__step--reserved {
+    line-height: 1.4;
+    block-size: 2.8em;
+    overflow: auto;
+    overflow-wrap: anywhere;
+    pointer-events: auto;
 }
 .y-ov__cost { display: flex; flex-wrap: wrap; gap: 10px; font-size: 10px; color: var(--yonder-label, #7f8a95); }
 .y-ov__cost-f { font-variant-numeric: tabular-nums; }

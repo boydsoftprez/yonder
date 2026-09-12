@@ -22,7 +22,7 @@
                  verbatim from Task 19's own part — see this file's own doc
                  comment on why this is a second, orthogonal fact from the
                  badge above rather than a replacement for it. -->
-            <YonderStateOverlay v-if="previewState" class="y-pic__state" :head="previewState.head" :size="previewState.size" :rate="previewState.rate" :bitrate="previewState.bitrate" :step="previewState.step" />
+            <YonderStateOverlay v-if="previewState" class="y-pic__state" reserve-step :head="previewState.head" :size="previewState.size" :rate="previewState.rate" :bitrate="previewState.bitrate" :step="previewState.step" />
 
             <div v-if="recording" class="y-pic__rec"><i class="y-pic__rec-dot"></i>REC {{ recording.elapsed }}</div>
 
@@ -1863,7 +1863,7 @@ export default {
 .y-pic__toolbar .y-pic__rec, .y-pic__toolbar .y-pic__foot, .y-pic__toolbar .y-pic__osd {
     position: static; inset: auto; max-width: 100%; margin: 0; background: transparent;
 }
-.y-pic__toolbar .y-pic__state { flex: 1 1 260px; }
+.y-pic__toolbar .y-pic__state { flex: 1 1 260px; min-width: 0; }
 .y-pic__toolbar .y-pic__rec { margin-left: auto; }
 .y-pic__toolbar .y-pic__cost { color: var(--yonder-value, #fff); }
 /* R-UI-29: the handle has its own rail, never covering preview controls.

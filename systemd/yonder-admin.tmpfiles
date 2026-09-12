@@ -1,0 +1,3 @@
+# SPDX-License-Identifier: GPL-3.0-or-later
+# OpenSSH needs its privilege-separation directory before policy validation.
+d /run/sshd 0755 root root -

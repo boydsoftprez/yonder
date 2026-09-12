@@ -116,7 +116,9 @@ if [ -f "$YONDER_SRC/systemd/mediamtx.service" ]; then
     # temporary file. See MEDIA_CONFIG_PATH in packages/yonder-core.
     assert_daemon_can_write "$YONDER_SRC/systemd/yonder-core.service" "$mtx_etc/mediamtx.yml"
 
-    if [ "$DRY_RUN" != "1" ] && command -v systemctl >/dev/null 2>&1; then
+    if command -v service_daemon_reload >/dev/null 2>&1; then
+        service_daemon_reload
+    elif [ "$DRY_RUN" != "1" ] && command -v systemctl >/dev/null 2>&1; then
         run systemctl daemon-reload
     else
         log "skipping systemctl daemon-reload (dry run or not a systemd host)"
@@ -143,7 +145,12 @@ if [ -f "$mtx_etc/mediamtx.yml" ]; then
     log "yonder-core owns mediamtx (a camera is configured); leaving it running"
 else
     log "stopping and disabling mediamtx until a camera is configured"
-    try systemctl stop mediamtx
-    disable_unit_offline mediamtx.service
-    assert_unit_disabled mediamtx.service
+    if command -v service_stop >/dev/null 2>&1; then
+        service_stop mediamtx.service
+        service_disable mediamtx.service
+    else
+        try systemctl stop mediamtx
+        disable_unit_offline mediamtx.service
+        assert_unit_disabled mediamtx.service
+    fi
 fi

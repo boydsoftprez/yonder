@@ -1,9 +1,10 @@
 # SPDX-License-Identifier: GPL-3.0-or-later
 [Unit]
 Description=Prepare the SeekerHD CSI camera on Radxa Zero 3
-After=systemd-udev-trigger.service
+After=systemd-modules-load.service systemd-udev-trigger.service
 Before=yonder-core.service
 ConditionPathExists=/boot/overlay-user/seekerhd-imx462.dtbo
+ConditionPathExistsGlob=/sys/bus/i2c/drivers/imx462/*-001a
 
 [Service]
 Type=oneshot

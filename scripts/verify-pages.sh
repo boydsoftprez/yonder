@@ -139,6 +139,7 @@ SOCKET="$RUN/core.sock"
 JOURNAL="$ROOT/journal.log"
 BIN="$ROOT/bin"
 SYSTEMCTL_LOG="$ROOT/systemctl.log"
+ADMIN_FIXTURE="$ROOT/admin-fixture.json"
 
 # `etc/mediamtx` as well as `etc/yonder`: with a camera configured, the media
 # renderer writes the media server's configuration on every apply, and a
@@ -568,6 +569,7 @@ start_daemon() {
     YONDER_PAGES_MAV_HINT="$STATE/mavlink-link.json" \
     YONDER_PAGES_ROUTER_STATE="$ROUTER_STATE" \
     YONDER_PAGES_ROUTER_STATS="$ROUTER_STATS" \
+    YONDER_PAGES_ADMIN_FIXTURE="$ADMIN_FIXTURE" \
     YONDER_CAMERAS_FIXTURE="$CAMERAS_LIVE" \
     YONDER_MEDIA_CONFIG="$ROOT/etc/mediamtx/mediamtx.yml" \
     PATH="$BIN:$PATH" \

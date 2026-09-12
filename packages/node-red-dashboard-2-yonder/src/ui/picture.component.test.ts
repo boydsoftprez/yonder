@@ -1677,7 +1677,7 @@ describe("every overlay is drawn in front of the video (defect 2)", () => {
 });
 
 describe("the picture wears its own state (defect 3)", () => {
-  it("mounts the state overlay from payload.state, and the step line only on a change", async () => {
+  it("keeps the status slot mounted while clearing stale step text", async () => {
     const { wrapper, press } = mountWithRail();
     await settle();
     expect(wrapper.findComponent(YonderStateOverlay).exists()).toBe(false);
@@ -1697,6 +1697,7 @@ describe("the picture wears its own state (defect 3)", () => {
     expect(overlay.props("size")).toBe("854×480");
     expect(wrapper.find(".y-ov__step").exists()).toBe(true);
     expect(wrapper.find(".y-ov__step").text()).toContain("Stepped down");
+    const stepSlot = wrapper.find(".y-ov__step").element;
 
     // The very next message carries no step of its own (§8.2: "the last
     // step with its reason" is a fact about a change, not a permanent
@@ -1704,7 +1705,9 @@ describe("the picture wears its own state (defect 3)", () => {
     // caching the whole object as a unit would leave a stale step line
     // showing forever, on every message after the one that actually stepped.
     await press({ state: { head: "floor", size: "854×480", rate: "10 fps", bitrate: "0.3 Mb/s" } });
-    expect(wrapper.find(".y-ov__step").exists()).toBe(false);
+    expect(wrapper.find(".y-ov__step").element).toBe(stepSlot);
+    expect(wrapper.find(".y-ov__step").text()).toBe("");
+    expect(wrapper.find(".y-ov__step").attributes("tabindex")).toBeUndefined();
     // And the rest of the overlay is unaffected by that same message.
     expect(wrapper.findComponent(YonderStateOverlay).props("head")).toBe("floor");
   });
@@ -1725,6 +1728,7 @@ describe("the picture wears its own state (defect 3)", () => {
     const { wrapper, press } = mountWithRail();
     await settle();
     await press({ state: { head: "floor", step: "Stepped down to 854×480" } });
+    const stepSlot = wrapper.find(".y-ov__step").element;
     expect(wrapper.find(".y-ov__step").exists()).toBe(true);
 
     // Says nothing about `state` at all — correctly falls back to the
@@ -1737,12 +1741,16 @@ describe("the picture wears its own state (defect 3)", () => {
     // replaced as a whole here, or the first message's step would survive
     // merged inside the cached object indefinitely.
     await press({ state: { head: "floor" } });
-    expect(wrapper.find(".y-ov__step").exists()).toBe(false);
+    expect(wrapper.find(".y-ov__step").element).toBe(stepSlot);
+    expect(wrapper.find(".y-ov__step").text()).toBe("");
+    expect(wrapper.find(".y-ov__step").attributes("tabindex")).toBeUndefined();
 
     // And a message that omits `state` again must now read the *replaced*
     // cache, not one still quietly carrying the first message's step.
     await press({ path: "cam1" });
-    expect(wrapper.find(".y-ov__step").exists()).toBe(false);
+    expect(wrapper.find(".y-ov__step").element).toBe(stepSlot);
+    expect(wrapper.find(".y-ov__step").text()).toBe("");
+    expect(wrapper.find(".y-ov__step").attributes("tabindex")).toBeUndefined();
   });
 
   it("draws the REC pill from recording, the foot strip from the descriptor's own label, LINK · DROP from stats", async () => {

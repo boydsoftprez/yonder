@@ -33,13 +33,18 @@ function runner(
   };
 }
 
-it("finds Rockchip's MPP encoders through the GStreamer registry, both codecs and the decoder (R-HW-03)", async () => {
-  const e = await probeEncoder({ runner: runner({}, ["mpph264enc", "mpph265enc", "mppjpegdec"]) });
+it("finds Rockchip's MPP encoders and each decoder through independent registry probes (R-HW-03)", async () => {
+  const e = await probeEncoder({ runner: runner({}, ["mpph264enc", "mpph265enc", "mppjpegdec", "mppvideodec"]) });
   expect(e).toEqual({
-    element: "mpph264enc", h265: "mpph265enc", decoder: "mppjpegdec",
+    element: "mpph264enc", h265: "mpph265enc", decoder: "mppjpegdec", h264Decoder: "mppvideodec",
     device: "/dev/mpp_service", hardware: true,
     detail: "hardware H.264 and H.265 through Rockchip MPP (mpph264enc, mpph265enc)",
   });
+});
+
+it("does not infer the H.264 decoder from MPP encoding or JPEG decoding", async () => {
+  const e = await probeEncoder({ runner: runner({}, ["mpph264enc", "mppjpegdec"]) });
+  expect(e).toMatchObject({ element: "mpph264enc", decoder: "mppjpegdec", h264Decoder: null });
 });
 
 it("reports H.264 alone when the H.265 element is not registered", async () => {

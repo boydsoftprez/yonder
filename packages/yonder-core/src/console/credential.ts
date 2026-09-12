@@ -1,6 +1,7 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 import type { SecretStore } from "../secrets/store.js";
 import { hashPassword, verifyPassword } from "./password.js";
+import type { SecretPatch } from "../state/types.js";
 
 /**
  * The administrator password: where it lives, and the only three questions
@@ -41,6 +42,9 @@ export type SetResult =
   | { ok: true }
   | { ok: false; reason: SetRefusal; message: string };
 
+export type PreparedCredential = { ok: true; secretPatch: SecretPatch }
+  | { ok: false; reason: string; message: string };
+
 export class AdminCredential {
   private readonly secrets: SecretStore;
 
@@ -67,6 +71,23 @@ export class AdminCredential {
    * whatever the browser does with a failed request.
    */
   set(plain: string): SetResult {
+    const prepared = this.prepareSet(plain);
+    if (!prepared.ok) return prepared as SetResult;
+    const hash = prepared.secretPatch[ADMIN_PASSWORD_SECRET];
+    if (typeof hash !== "string") throw new Error("administrator credential patch is invalid");
+    const { created } = this.secrets.ensureValue(ADMIN_PASSWORD_SECRET, hash);
+    if (!created) {
+      return {
+        ok: false,
+        reason: "already-set",
+        message: "an administrator password is already set on this device",
+      };
+    }
+    return { ok: true };
+  }
+
+  /** Validate and hash without writing; the coordinator commits this patch. */
+  prepareSet(plain: string): PreparedCredential {
     // Checked before the hash, so a repeat POST costs no scrypt derivation.
     // The store's ensureValue below is still what makes this safe rather than
     // this check: it will not replace an existing value whatever happens
@@ -93,17 +114,7 @@ export class AdminCredential {
       };
     }
 
-    const { created } = this.secrets.ensureValue(ADMIN_PASSWORD_SECRET, hashPassword(plain));
-    if (!created) {
-      // Something set it between isSet() and here. ensureValue left the first
-      // one in place, which is the whole point of using it.
-      return {
-        ok: false,
-        reason: "already-set",
-        message: "an administrator password is already set on this device",
-      };
-    }
-    return { ok: true };
+    return { ok: true, secretPatch: { [ADMIN_PASSWORD_SECRET]: hashPassword(plain) } };
   }
 
   /**
@@ -121,10 +132,19 @@ export class AdminCredential {
 
   /** R-SEC-14: reauthenticate before replacing a durable credential. */
   change(current: string, password: string): { ok: true } | { ok: false; message: string; reason: string } {
+    const prepared = this.prepareChange(current, password);
+    if (!prepared.ok) return prepared;
+    const hash = prepared.secretPatch[ADMIN_PASSWORD_SECRET];
+    if (typeof hash !== "string") throw new Error("administrator credential patch is invalid");
+    this.secrets.put(ADMIN_PASSWORD_SECRET, hash);
+    return { ok: true };
+  }
+
+  /** Validate a replacement without writing; the coordinator commits this patch. */
+  prepareChange(current: string, password: string): PreparedCredential {
     if (!this.verify(current)) return { ok: false, reason: "incorrect-current", message: "The current password was not accepted." };
     if (!password.trim() || password.length < MIN_PASSWORD_LENGTH || password.length > 1024)
       return { ok: false, reason: "invalid-new", message: "Use a password between 8 and 1024 characters that is not only spaces." };
-    this.secrets.put(ADMIN_PASSWORD_SECRET, hashPassword(password));
-    return { ok: true };
+    return { ok: true, secretPatch: { [ADMIN_PASSWORD_SECRET]: hashPassword(password) } };
   }
 }

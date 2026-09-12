@@ -62,7 +62,9 @@ RULES
     run chmod 0644 "$usb_rules"
 fi
 
-if [ "$DRY_RUN" != "1" ] && command -v udevadm >/dev/null 2>&1; then
+if [ "$IMAGE_MODE" = "1" ]; then
+    log "image mode: udev will read the installed USB power rule on boot; not contacting live udev"
+elif [ "$DRY_RUN" != "1" ] && command -v udevadm >/dev/null 2>&1; then
     run udevadm control --reload-rules
     # `--action=add`, not the default. `udevadm trigger` sends `change` unless
     # told otherwise, and the rules above are `add` rules, so the default

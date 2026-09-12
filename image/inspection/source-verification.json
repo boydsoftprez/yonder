@@ -1,0 +1,40 @@
+{
+  "schemaVersion": 1,
+  "checkedAt": "2026-09-11T01:28:19.138389+00:00",
+  "targets": {
+    "rpi": {
+      "compressedSha256": "acff736ca7945e3b305f07cda4abdb870910e12634991da69783611756e381b3",
+      "compressedBytes": 524875608,
+      "checksumVerified": true,
+      "qualification": "unqualified",
+      "upstreamSignature": {
+        "status": "not-verified",
+        "note": "SHA-256 verified against official HTTPS checksum; download signing key not yet established."
+      }
+    },
+    "radxa-zero3w": {
+      "compressedSha256": "e78de9cb4b2d8ff1710c65c509d08faef1ba88c07fc3276b9dd637597e8234e8",
+      "compressedBytes": 394195116,
+      "checksumVerified": true,
+      "qualification": "unqualified",
+      "upstreamSignature": {
+        "status": "verified",
+        "primaryFingerprint": "DF00FAF1C577104B50BF1D0093D6889F9F0E78D5",
+        "signatureUrl": "https://dl.armbian.com/radxa-zero3/archive/Armbian_26.8.1_Radxa-zero3_trixie_vendor_6.1.115_minimal.img.xz.asc",
+        "fingerprintSource": "https://docs.armbian.com/getting-started/choosing-an-image/"
+      }
+    },
+    "radxa-rock5c": {
+      "compressedSha256": "334300f250802d6f8bb015fb7581da957f176b4b1dd230db3591749367b9dace",
+      "compressedBytes": 404775948,
+      "checksumVerified": true,
+      "qualification": "unqualified",
+      "upstreamSignature": {
+        "status": "verified",
+        "primaryFingerprint": "DF00FAF1C577104B50BF1D0093D6889F9F0E78D5",
+        "signatureUrl": "https://dl.armbian.com/rock-5c/archive/Armbian_26.8.3_Rock-5c_trixie_vendor_6.1.115_minimal.img.xz.asc",
+        "fingerprintSource": "https://docs.armbian.com/getting-started/choosing-an-image/"
+      }
+    }
+  }
+}

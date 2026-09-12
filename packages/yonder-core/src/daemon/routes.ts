@@ -1,4 +1,7 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
+import { ownerToolsRoute, type OwnerToolsClient } from "./owner-tools.js";
+import { recoveryToolsRoute, type RecoveryToolsClient } from "./recovery-tools.js";
+import { storageToolsRoute, type StorageToolsClient } from "./storage-tools.js";
 import type { PipelineRenderer } from "../video/renderer.js";
 import { cockpitCameras } from "../cockpit/camera.js";
 import { cockpitRoute, type CockpitServices } from "../cockpit/routes.js";
@@ -64,8 +67,14 @@ import { pathCheck } from "../mav/check.js";
 import type { LinkState } from "../mav/link.js";
 import { SweepInProgressError, type DetectOutcome } from "../mav/detect.js";
 import { isSeekerHd, ispView, matchingIsp, parseIspCommand, type IspControls } from '../video/isp.js';
+import type { SecretPatch } from "../state/types.js";
 
 export interface RouterDeps {
+  ownerTools?: OwnerToolsClient;
+  recoveryTools?: RecoveryToolsClient;
+  storageTools?: StorageToolsClient;
+  runtimeGeneration?: string;
+  afterRestore?: (result: { operationId: string; generation: string }) => Promise<void>;
   interfaces?: () => Promise<InterfaceSnapshot>;
   diagnosticJobs?: DiagnosticJobs;
   reboot?: () => Promise<void>;
@@ -1865,8 +1874,16 @@ export function createRouter(deps: RouterDeps): Router {
         const password = submittedPassword(body);
         if (password === undefined) return { status: 400, body: { error: "password is required" } };
 
-        const result = deps.credential.set(password);
+        const result = deps.engine.usesDurableState()
+          ? deps.credential.prepareSet(password)
+          : deps.credential.set(password);
         if (result.ok) {
+          if ("secretPatch" in result) {
+            await deps.engine.apply(loadConfig(deps.configPath), {
+              secretPatch: result.secretPatch as SecretPatch,
+              secretOnly: true,
+            });
+          }
           say("an administrator password was set");
           try {
             deps.onProvisioned?.();
@@ -1943,6 +1960,16 @@ export function createRouter(deps: RouterDeps): Router {
         };
       }
 
+      const ownerTool = await ownerToolsRoute({ client: deps.ownerTools, credential: deps.credential, throttle }, method, path, body);
+      if (ownerTool !== null) return ownerTool;
+      const recoveryTool = await recoveryToolsRoute({ client: deps.recoveryTools, credential: deps.credential,
+        throttle, runtimeGeneration: deps.runtimeGeneration, afterRestore: deps.afterRestore,
+        restoreRefusal: deps.rebootRefusal }, method, path, body);
+      if (recoveryTool !== null) return recoveryTool;
+      const storageTool = await storageToolsRoute({ client: deps.storageTools, credential: deps.credential,
+        throttle, reboot: deps.reboot, refusal: deps.rebootRefusal }, method, path, body);
+      if (storageTool !== null) return storageTool;
+
       const cockpit = await cockpitRoute({...deps.cockpit, instruments, cameraState: deps.cockpit?.cameraState ?? cameraState}, method, path, body);
       if (cockpit !== null) return cockpit;
 
@@ -1978,9 +2005,17 @@ export function createRouter(deps: RouterDeps): Router {
           || b.currentPassword.length > 1024 || b.newPassword.length > 1024)
           return { status: 400, body: { error: "Enter the current password and the new password twice." } };
         if (b.newPassword !== b.confirmPassword) return { status: 400, body: { error: "The new passwords do not match." } };
-        const result = deps.credential.change(b.currentPassword, b.newPassword);
+        const result = deps.engine.usesDurableState()
+          ? deps.credential.prepareChange(b.currentPassword, b.newPassword)
+          : deps.credential.change(b.currentPassword, b.newPassword);
         throttle.record(result.ok || result.reason !== "incorrect-current");
         if (!result.ok) return { status: result.reason === "incorrect-current" ? 401 : 400, body: { error: result.message } };
+        if ("secretPatch" in result) {
+          await deps.engine.apply(loadConfig(deps.configPath), {
+            secretPatch: result.secretPatch as SecretPatch,
+            secretOnly: true,
+          });
+        }
         say("The administrator password was changed.");
         deps.onPasswordChanged?.();
         return { status: 200, body: { ok: true, signInAgain: true } };
@@ -2244,9 +2279,14 @@ export function createRouter(deps: RouterDeps): Router {
             body: { error: "the device's secrets could not be read; see the device journal" },
           };
         }
-        const join = joinNetwork(loadConfig(deps.configPath), body as JoinRequest, deps.secrets);
+        const join = joinNetwork(loadConfig(deps.configPath), body as JoinRequest);
         if (!join.ok) return { status: 400, body: { error: join.error } };
-        return { status: 200, body: await deps.engine.apply(join.config) };
+        if (!deps.engine.usesDurableState()) {
+          for (const [name, value] of Object.entries(join.secretPatch)) {
+            if (value !== null) deps.secrets.put(name, value);
+          }
+        }
+        return { status: 200, body: await deps.engine.apply(join.config, { secretPatch: join.secretPatch }) };
       }
 
       // The same shape as /net/join, and for the same reason. A page that
@@ -2338,9 +2378,14 @@ export function createRouter(deps: RouterDeps): Router {
             body: { error: "the device's secrets could not be read; see the device journal" },
           };
         }
-        const wanted = configureModem(loadConfig(deps.configPath), body, deps.secrets);
+        const wanted = configureModem(loadConfig(deps.configPath), body);
         if (!wanted.ok) return { status: 400, body: { error: wanted.error } };
-        return { status: 200, body: await deps.engine.apply(wanted.config) };
+        if (!deps.engine.usesDurableState()) {
+          for (const [name, value] of Object.entries(wanted.secretPatch)) {
+            if (value !== null) deps.secrets.put(name, value);
+          }
+        }
+        return { status: 200, body: await deps.engine.apply(wanted.config, { secretPatch: wanted.secretPatch }) };
       }
 
       // R-CEL-09's "on request", answered by the same ReachMonitor the
@@ -2514,7 +2559,7 @@ export function createRouter(deps: RouterDeps): Router {
       if (method === "POST" && path === "/confirm") {
         const id = (body as { id?: string } | undefined)?.id;
         if (typeof id !== "string") return { status: 400, body: { error: "id is required" } };
-        deps.engine.confirm(id);
+        await deps.engine.confirm(id);
         return { status: 200, body: deps.engine.status() };
       }
       // The other half of the same decision (R-UI-15). A console that can only

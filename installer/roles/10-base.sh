@@ -39,10 +39,16 @@ ensure_pkgs dnsmasq-base
 # project is most careful about.
 ensure_pkgs avahi-daemon
 
-if [ "$DRY_RUN" != "1" ] && command -v systemctl >/dev/null 2>&1; then
-    # Enabled and started, like every other unit here: enabling alone arms the
-    # next boot, and R-CFG-08 says a freshly flashed board is usable with no
-    # operator input.
+# R-CFG-08: hostnamectl changes the hostname without rewriting inherited
+# /etc/hosts aliases. Resolve the current hostname through NSS so sudo and
+# local clients keep working after an operator changes it. Minimal Armbian
+# already names myhostname in nsswitch.conf but omits its shared library.
+ensure_pkgs libnss-myhostname
+
+if command -v service_enable >/dev/null 2>&1; then
+    service_enable avahi-daemon.service
+    service_restart avahi-daemon.service
+elif [ "$DRY_RUN" != "1" ] && command -v systemctl >/dev/null 2>&1; then
     run systemctl enable avahi-daemon.service
     run systemctl restart avahi-daemon.service
 else
@@ -135,6 +141,7 @@ fi
 # world-readable directory still tells anyone with a shell what is in it.
 ensure_dir "$YONDER_ETC" 0750
 ensure_dir /var/lib/yonder 0750
+ensure_dir /etc/mediamtx 0750
 
 # root:yonder, not root:root. The console's own state directory lives under
 # this one, and 0750 root:root is a directory the yonder user cannot even
@@ -150,6 +157,10 @@ if getent group yonder >/dev/null 2>&1 || [ "$DRY_RUN" = "1" ]; then
     run chgrp yonder /var/lib/yonder
 fi
 ensure_dir "$YONDER_PREFIX" 0755
+
+if [ "$IMAGE_MODE" = "1" ]; then
+    target_prepare_network
+fi
 
 # Nothing here creates /etc/NetworkManager/dnsmasq-shared.d, and nothing
 # should. NetworkManager passes --conf-dir at that directory every time it

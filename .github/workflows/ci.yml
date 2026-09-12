@@ -35,6 +35,7 @@ jobs:
           node-version: "24"
           cache: npm
       - run: npm ci
+      - run: node --test image/release/workflow.test.mjs
       - run: npm run version:check
       - run: npm run lint
       # Several jobs share each host. Bound test workers so parallel runs
@@ -76,8 +77,9 @@ jobs:
         run: |
           command -v shellcheck >/dev/null \
             || { sudo apt-get update && sudo apt-get install -y shellcheck; }
-          shellcheck installer/install.sh installer/make-payload.sh \
-            installer/lib/*.sh installer/roles/*.sh scripts/*.sh
+          shellcheck image/bench/*.sh image/pi/*.sh image/prototype/*.sh image/prototype/init-bottom image/prototype/initramfs-hook installer/install.sh installer/make-payload.sh \
+            installer/lib/*.sh installer/roles/*.sh installer/targets/*.sh scripts/*.sh \
+            scripts/spikes/image-storage/*.sh
       - name: Installer dry run
         run: ./installer/install.sh --dry-run
       # The failure paths a dry run cannot reach. `run` short-circuits to a
@@ -86,6 +88,34 @@ jobs:
       # could abort a whole install, passed every check in this file.
       - name: The installer library, executed
         run: ./scripts/verify-installer-lib.sh
+      - name: Image installer isolation
+        run: ./scripts/verify-installer-image.sh
+      - name: SeekerHD provisioning and camera startup
+        run: |
+          ./scripts/verify-installer-seekerhd.sh
+          python3 -m unittest discover -s scripts/spikes/seekerhd -p 'test_*.py'
+          cc -Wall -Wextra -Werror scripts/spikes/seekerhd/test_imx462_hdr2.c -o /tmp/yonder-test-imx462
+          /tmp/yonder-test-imx462
+      - name: Pinned base validation and inspection
+        run: |
+          ./image/test.sh
+          python3 -m unittest discover -s image/prototype -p 'test_*.py'
+
+  # R-STO-06/07: partition mutation tests get their own disposable hosted VM.
+  # Never route privileged loop tests through the persistent CI_RUNNER pool.
+  image-storage:
+    runs-on: ubuntu-24.04-arm
+    timeout-minutes: 15
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+        with:
+          persist-credentials: false
+      - name: Verify media growth, interruption recovery and disk isolation
+        run: ./image/prototype/grow-media-test.sh
+      - name: Verify Pi filesystem preparation and private test account policy
+        run: ./image/pi/test.sh
 
   # R-UI-12: capture every page in both palettes, look at them, and fail when
   # one changed shape without somebody accepting it.
@@ -375,3 +405,47 @@ jobs:
           name: gst-rockchip-arm64
           path: vendor/gst-rockchip
           if-no-files-found: error
+
+  # R-CAM-01 / R-HW-03: fresh ZERO 3W images require this ISP runtime.
+  # Build it independently of a camera-equipped development board.
+  payload-seekerhd:
+    runs-on: ${{ vars.CI_RUNNER || 'ubuntu-latest' }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - name: Check camera payload inputs
+        id: scope
+        env:
+          EVENT_NAME: ${{ github.event_name }}
+          BASE_REF: ${{ github.base_ref }}
+        run: |
+          if [ "$EVENT_NAME" != pull_request ]; then
+            echo "run=true" >> "$GITHUB_OUTPUT"; exit 0
+          fi
+          base=$(git merge-base "origin/$BASE_REF" HEAD)
+          if git diff --name-only "$base"...HEAD | grep -Eq '^(installer/make-payload\.sh|scripts/spikes/seekerhd/|installer/seekerhd/|\.github/workflows/ci\.yml)'; then
+            echo "run=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "run=false" >> "$GITHUB_OUTPUT"
+          fi
+      - uses: docker/setup-qemu-action@v3
+        if: steps.scope.outputs.run == 'true'
+      - name: Build the pinned SeekerHD ISP runtime and profiles
+        if: steps.scope.outputs.run == 'true'
+        run: ./installer/make-payload.sh --arch linux-arm64 --only seekerhd
+      - name: Verify payload integrity and architecture
+        if: steps.scope.outputs.run == 'true'
+        run: |
+          (cd vendor/seekerhd && sha256sum -c SHA256SUMS)
+          for file in vendor/seekerhd/bin/rkaiq_3A_server vendor/seekerhd/lib/librkaiq.so; do
+            machine=$(/bin/sh -c '. ./installer/lib/common.sh; elf_machine "$1"' sh "$file")
+            [ "$machine" = 183 ] || { echo "::error::SeekerHD payload is not ARM64"; exit 1; }
+          done
+      - uses: actions/upload-artifact@v4
+        if: steps.scope.outputs.run == 'true'
+        with:
+          name: seekerhd-arm64
+          path: vendor/seekerhd
+          if-no-files-found: error
+          retention-days: 7

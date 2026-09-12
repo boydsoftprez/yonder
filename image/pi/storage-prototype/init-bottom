@@ -1,0 +1,11 @@
+#!/bin/sh
+set -eu
+PREREQ=""
+prereqs() { echo "$PREREQ"; }
+case "${1:-}" in prereqs) prereqs; exit 0 ;; esac
+# shellcheck disable=SC1091 # initramfs-tools runtime
+. /scripts/functions
+if ! /scripts/yonder-pi-mount-storage "${rootmnt:-/root}"; then
+    panic 'Yonder Pi state storage unavailable. Do not initialize a replacement identity. Reflash/recovery required.'
+    exit 1
+fi

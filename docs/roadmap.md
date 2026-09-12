@@ -505,6 +505,18 @@ GUIDED targets remain outside that verified slice; these do not mark M7 complete
 
 ## M8 — Reproducible images
 
+Implementation started in [issue 11](https://github.com/boydsoftprez/yonder/issues/11),
+following [ADR-0010](adr/0010-image-storage-and-owner-recovery.md). The first scope is
+three pinned Trixie ARM64 images, image-safe installation, protected storage, bounded
+persistent logs, explicit apt maintenance, Linux owner setup and plain backup/restore
+(R-CFG-15, R-SYS-10, R-STO-07). Tag builds remain draft releases. Earlier hardware evidence
+is retained; the new images are not yet built or physically qualified.
+
+R-CFG-05 boot-file import and R-SYS-05 interrupted-update availability remain deferred
+from this scope. Reflash plus owner restore is the accepted maintenance recovery path;
+this does not satisfy R-SYS-05 or complete M8.
+
+
 - CI runs the installer in a chroot over base OS images
 - A published image per board family, per release — R-HW-04
 - Headless setup by dropping a config file on the boot partition — R-CFG-05, R-CFG-07
@@ -514,8 +526,9 @@ GUIDED targets remain outside that verified slice; these do not mark M7 complete
 - Storage and wear behaviour verified — R-STO-01 … R-STO-03, R-STO-05
 - Remaining security posture: no remote root, unprivileged control plane, verified no outbound contact — R-SEC-02, R-SEC-03, R-SEC-06
 
-**Done when:** a tagged commit produces the same images on a clean runner, and a stranger
-can flash one and fly.
+**Done when:** a tagged commit builds all qualified targets from locked inputs on a clean
+runner, with manifests establishing installed-content consistency, and a stranger can
+flash one and fly. Byte-identical image files are not a first-delivery guarantee.
 
 ---
 

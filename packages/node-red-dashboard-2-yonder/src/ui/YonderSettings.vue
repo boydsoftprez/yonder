@@ -23,13 +23,19 @@
       <p v-if="error" class="y-maint__error" role="alert">{{ error }}</p>
       <p v-if="changed" role="status">Password changed. The console is restarting to sign out all sessions. <a href="/login">Sign in with your new password</a>.</p>
     </section>
+    <OwnerAccess class="y-settings__wide" :preview="props?.preview === true" />
+    <RecoveryTools class="y-settings__wide" :preview="props?.preview === true" />
+    <StorageMaintenance class="y-settings__wide" :preview="props?.preview === true" />
   </section>
 </template>
 <script lang="ts">
+import OwnerAccess from './OwnerAccess.vue';
+import RecoveryTools from './RecoveryTools.vue';
+import StorageMaintenance from './StorageMaintenance.vue';
 import { defineComponent } from 'vue';
 import { maintenanceRequest } from './maintenance-api.js';
 export default defineComponent({
-  name: 'YonderSettings', props: { id: String, props: Object, msg: Object },
+  name: 'YonderSettings', components: { OwnerAccess, RecoveryTools, StorageMaintenance }, props: { id: String, props: Object, msg: Object },
   data() { return { theme: '', themeBusy: false, themeMessage: '', currentPassword: '', newPassword: '', confirmPassword: '', passwordBusy: false, error: '', changed: false }; },
   mounted() {
     if (this.props?.preview === true) { this.theme = this.props.theme as string; return; }
@@ -75,6 +81,7 @@ export default defineComponent({
 .y-settings { display: grid; grid-template-columns: minmax(220px, 1fr) minmax(280px, 2fr); gap: 28px; }
 .y-settings > section + section { border-left: 1px solid var(--yonder-divider, #2b333c); padding-left: 28px; }
 .y-settings__passwords { display: grid; gap: 14px; max-width: 560px; }
+.y-settings > .y-settings__wide { grid-column: 1 / -1; border-left: 0; border-top: 1px solid var(--yonder-divider, #2b333c); padding: 24px 0 0; }
 a { color: var(--yonder-select, #2ad4f0); }
-@media(max-width: 700px) { .y-settings { grid-template-columns: 1fr; } .y-settings > section + section { border-left: 0; border-top: 1px solid var(--yonder-divider, #2b333c); padding: 24px 0 0; } }
+@media(max-width: 700px) { .y-settings { grid-template-columns: minmax(0, 1fr); } .y-settings > section + section { border-left: 0; border-top: 1px solid var(--yonder-divider, #2b333c); padding: 24px 0 0; } }
 </style>

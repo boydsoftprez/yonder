@@ -11,6 +11,11 @@ import { TerrainPackService } from "../terrain/service.js";
 import { TerrainRuntime, type TerrainRuntimeOptions } from "../terrain/official/runtime.js";
 import { CockpitData } from "../cockpit/data.js";
 import type { HostInstrumentOptions } from '../cockpit/host-instruments.js';
+import type { OwnerToolsClient } from "./owner-tools.js";
+import type { RecoveryToolsClient } from "./recovery-tools.js";
+import type { StorageToolsClient } from "./storage-tools.js";
+import { finishRecoveryHandoff } from "./recovery-runtime.js";
+import { MAX_RECOVERY_BASE64_BYTES } from "../admin/protocol.js";
 import { createRouter, type CameraProbes, type DiagProbes } from "./routes.js";
 import { AdminCredential } from "../console/credential.js";
 import { ConsoleRenderer } from "../console/renderer.js";
@@ -39,6 +44,7 @@ import { readInterfaces, defaultRouteDevice } from "../net/interfaces.js";
 import { DiagnosticJobs, systemDiagnosticRunner, type DiagnosticRunner } from "../diag/jobs.js";
 import { readRemoteState } from "../remote/state.js";
 import { RemoteRenderer } from "../remote/renderer.js";
+import { zeroTierStateForConfig } from "../recovery/zerotier.js";
 import { MediaRenderer, MEDIA_CONFIG_PATH } from "../media/renderer.js";
 import { Supervisor, systemSpawner, type ProcessSpawner } from "../video/supervisor.js";
 import { PipelineRenderer } from "../video/renderer.js";
@@ -71,6 +77,10 @@ import { ping, reachable } from "../diag/probe.js";
 import { inFlightRunner, redactArgv, systemRunner, type CommandRunner } from "../net/runner.js";
 import { systemClock, type Clock, type Renderer } from "../apply/types.js";
 import { DEFAULT_CONFIG, type Config } from "../schema/config.js";
+import { randomUUID } from "node:crypto";
+import type { DurableState, StateCoordinator } from "../state/types.js";
+import { AdminClient } from "../admin/client.js";
+import { generateSecret } from "../secrets/generate.js";
 
 /**
  * How long after an administrator password is set before the console is
@@ -128,6 +138,12 @@ export function onceAsync<T>(fn: () => Promise<T>): () => Promise<T> {
 }
 
 export interface ServerOptions {
+  ownerTools?: OwnerToolsClient;
+  recoveryTools?: RecoveryToolsClient;
+  storageTools?: StorageToolsClient;
+  restartAfterRestore?: () => Promise<void>;
+  /** Root-owned durable state authority. Production supplies AdminClient. */
+  stateCoordinator?: StateCoordinator;
   /** Test-only terrain filesystem/acquisition injection; production uses persistent state. */
   terrain?: Pick<TerrainRuntimeOptions, "root" | "probe" | "acquire">;
   isp?: import('../video/isp.js').IspControls;
@@ -246,6 +262,8 @@ export interface BuildRenderersOptions {
   accessory?: AccessorySources;
   cameraLayer?: CameraLayer;
   secretsPath: string;
+  /** Legacy-only secret seeding; production seeds through StateCoordinator. */
+  seedSecrets?: boolean;
   runner?: CommandRunner;
   log?: (line: string) => void;
   /**
@@ -287,6 +305,8 @@ export interface BuildRenderersOptions {
    * one would be `/var/lib/yonder`.
    */
   remoteStatePath: string;
+  /** Conventional-install compatibility only. Durable installs use the root projector. */
+  manageRemote?: boolean;
   /**
    * Where the media server's generated configuration goes. **Given, never
    * defaulted**, for the same reason as `console` and `remoteStatePath`:
@@ -410,7 +430,8 @@ export function buildRenderers(opts: BuildRenderersOptions): {
   const secrets = new SecretStore(opts.secretsPath);
   const generated: string[] = [];
   // Only if absent: an operator who has changed the passphrase keeps theirs.
-  if (secrets.ensureValue("ap_psk", DEFAULT_AP_PASSPHRASE).created) generated.push("ap_psk");
+  if (opts.seedSecrets !== false
+    && secrets.ensureValue("ap_psk", DEFAULT_AP_PASSPHRASE).created) generated.push("ap_psk");
   // Two loggers, deliberately. The renderer says things an operator acts on
   // - "bringing the access point up", "the wifi client did not come up" - and
   // those belong in the activity pane. The client says which nmcli command it
@@ -472,6 +493,7 @@ export function buildRenderers(opts: BuildRenderersOptions): {
       runner: opts.runner ?? systemRunner,
       secrets,
       log,
+      allowSecretGeneration: opts.seedSecrets !== false,
     });
   // Last, and deliberately. Telemetry rides on a network that has already
   // settled, and this is the renderer that can take longest — a full sweep is
@@ -604,7 +626,8 @@ export function buildRenderers(opts: BuildRenderersOptions): {
     log,
   });
 
-  const renderers: Renderer[] = [hostname, renderer, remoteRenderer];
+  const renderers: Renderer[] = [hostname, renderer];
+  if (opts.manageRemote !== false) renderers.push(remoteRenderer);
   if (consoleRenderer !== undefined) renderers.push(consoleRenderer);
   if (mediaRenderer !== undefined) renderers.push(mediaRenderer);
   if (mavlinkRenderer !== undefined) renderers.push(mavlinkRenderer);
@@ -695,8 +718,70 @@ export function mavlinkFromEnv(
   };
 }
 
+/**
+ * Seed credentials required by the selected configuration in one durable
+ * generation. The snapshot is released before begin; the expected generation
+ * closes that race without nesting the coordinator mutex.
+ */
+export async function ensureStartupSecrets(
+  coordinator: StateCoordinator,
+  includeMedia: boolean,
+): Promise<string[]> {
+  const lease = await coordinator.beginSnapshot({ id: randomUUID() });
+  const snapshot = lease.snapshot;
+  await lease.release();
+
+  const prepared = prepareRequiredSecrets(snapshot.state, includeMedia);
+  const secrets = prepared.state.secrets;
+  const generated = prepared.generated;
+  if (generated.length === 0) return generated;
+
+  const tx = await coordinator.begin({
+    id: randomUUID(),
+    kind: "bootstrap",
+    expectedActiveGeneration: snapshot.generation,
+  });
+  try {
+    await tx.stage(prepared.state);
+    await tx.activate();
+    try { await tx.commit(); } catch { await tx.commit(); }
+    return generated;
+  } catch (error) {
+    try { await tx.rollback("startup-secret-failed"); } catch { /* recovery owns the journal */ }
+    throw error;
+  }
+}
+
+/** Derive credentials required by a generation without writing any file. */
+export function prepareRequiredSecrets(
+  input: DurableState,
+  includeMedia: boolean,
+): { state: DurableState; generated: string[] } {
+  const secrets = { ...input.secrets };
+  const generated: string[] = [];
+  if (secrets.ap_psk === undefined) {
+    secrets.ap_psk = DEFAULT_AP_PASSPHRASE;
+    generated.push("ap_psk");
+  }
+  if (includeMedia && input.config.cameras.length > 0 && secrets.rtsp_password === undefined) {
+    secrets.rtsp_password = generateSecret("password");
+    generated.push("rtsp_password");
+  }
+  const needsObserver = includeMedia && input.config.cameras.some(camera =>
+    camera.outputs.some(output => output.kind === "rtsp" && output.enabled));
+  if (needsObserver && secrets[MEDIA_OBSERVER_SECRET] === undefined) {
+    secrets[MEDIA_OBSERVER_SECRET] = generateSecret("password");
+    generated.push(MEDIA_OBSERVER_SECRET);
+  }
+  return {
+    state: generated.length === 0 ? input : { ...structuredClone(input), secrets },
+    generated,
+  };
+}
+
 export async function startServer(opts: ServerOptions): Promise<{ close(): Promise<void> }> {
   const clock = opts.clock ?? systemClock;
+  const runtimeGeneration = randomUUID();
   // Fixed before any work: the fallback deadline is measured from here, not
   // from whenever the daemon finally gets round to arming it (R-NET-07).
   const startedAt = clock.now();
@@ -708,6 +793,22 @@ export async function startServer(opts: ServerOptions): Promise<{ close(): Promi
   // crash loop with no socket rather than a device (R-CFG-08). Nothing below
   // may throw out of this function except the bind itself.
 
+  let stateFailure: string | undefined;
+  if (opts.stateCoordinator !== undefined) {
+    try {
+      await opts.stateCoordinator.recover();
+      const status = await opts.stateCoordinator.status();
+      if (status.operation?.kind === "maintenance" || status.operation?.phase === "committed-awaiting-runtime-handoff") {
+        const active = await opts.stateCoordinator.readActiveState();
+        if (prepareRequiredSecrets(active.state, opts.mediaConfigPath !== undefined).generated.length)
+          throw new Error("pending operation lacks required service credentials");
+      } else await ensureStartupSecrets(opts.stateCoordinator, opts.mediaConfigPath !== undefined);
+    } catch (e) {
+      stateFailure = "the root state service could not recover durable state; persistent changes are disabled";
+      warn(`${stateFailure}: ${(e as Error).message}`);
+    }
+  }
+
   // First, before anything reads the configuration: a device that has never
   // been configured has no file to load. The installer seeds the same content
   // on a clean install; this is the half that also covers a hand-installed
@@ -716,12 +817,14 @@ export async function startServer(opts: ServerOptions): Promise<{ close(): Promi
   // an existing file is never touched, whatever is in it — so the steps below
   // still have to survive a config.yaml an operator has hand-edited into
   // nonsense, or one a schema tightening on upgrade has just invalidated.
-  try {
-    if (seedConfigIfAbsent(opts.configPath)) {
-      note(`seeded a default configuration at ${opts.configPath}`);
+  if (opts.stateCoordinator === undefined) {
+    try {
+      if (seedConfigIfAbsent(opts.configPath)) {
+        note(`seeded a default configuration at ${opts.configPath}`);
+      }
+    } catch (e) {
+      warn(`could not seed a default configuration, serving anyway: ${(e as Error).message}`);
     }
-  } catch (e) {
-    warn(`could not seed a default configuration, serving anyway: ${(e as Error).message}`);
   }
 
   // The configuration, read fresh every time rather than captured: an apply
@@ -759,7 +862,7 @@ export async function startServer(opts: ServerOptions): Promise<{ close(): Promi
   // renderer set missing the one that does real work — see
   // ApplyEngineOptions.degraded. GET /config and GET /status do not depend
   // on it, so the device stays reachable and diagnosable either way.
-  let degraded: string | undefined;
+  let degraded: string | undefined = stateFailure;
 
   /**
    * R-NET-13's second half: **traffic moves to the next path that works.**
@@ -839,6 +942,7 @@ export async function startServer(opts: ServerOptions): Promise<{ close(): Promi
       accessory,
       terrain: opts.terrain,
       secretsPath: opts.secretsPath ?? "/etc/yonder/secrets.yaml",
+      seedSecrets: opts.stateCoordinator === undefined,
       runner: opts.runner,
       clock,
       standing,
@@ -846,6 +950,7 @@ export async function startServer(opts: ServerOptions): Promise<{ close(): Promi
       // The same directory the apply journal already lives in — one state
       // directory for this daemon, not a second one this renderer invented.
       remoteStatePath: join(dirname(opts.journalPath), "remote.json"),
+      manageRemote: opts.stateCoordinator === undefined,
       ...(opts.mediaConfigPath === undefined ? {} : { mediaConfigPath: opts.mediaConfigPath }),
       ...(opts.console === undefined ? {} : { console: opts.console }),
       ...(opts.spawner === undefined ? {} : { spawner: opts.spawner }),
@@ -855,8 +960,9 @@ export async function startServer(opts: ServerOptions): Promise<{ close(): Promi
   } catch (e) {
     const message = (e as Error).message;
     warn(`could not assemble the network renderer, serving anyway: ${message}`);
-    degraded = `the network renderer could not be built (${message}); `
+    const rendererFailure = `the network renderer could not be built (${message}); `
       + "fix that and restart yonder-core before applying a network change";
+    degraded = degraded === undefined ? rendererFailure : `${degraded}; ${rendererFailure}`;
   }
   const netRenderers = built?.renderers ?? [];
   // The watchdog still needs a way to talk to NetworkManager even when the
@@ -1130,6 +1236,14 @@ export async function startServer(opts: ServerOptions): Promise<{ close(): Promi
     radioTimeoutMs: windows.radioTimeout * 1000,
     clock,
     degraded,
+    ...(opts.stateCoordinator === undefined ? {} : {
+      stateCoordinator: opts.stateCoordinator,
+      refreshSecrets: () => built?.secrets.reload(),
+      prepareState: (state, previous) => zeroTierStateForConfig(
+        prepareRequiredSecrets(state, opts.mediaConfigPath !== undefined).state,
+        previous,
+      ),
+    }),
     // R-CFG-11: a join confirms itself, because the operator cannot - the
     // console leaves the air with the access point. `client` is the same
     // NmcliClient the watchdog uses, so this asks the radio directly.
@@ -1147,10 +1261,12 @@ export async function startServer(opts: ServerOptions): Promise<{ close(): Promi
   // path that runs after a crash, and a daemon that refuses to start because
   // it could not roll back leaves an operator with no way in at all. The
   // journal is left in place, so the next start tries again.
-  try {
-    await engine.recover();
-  } catch (e) {
-    warn(`recovery failed, serving anyway: ${(e as Error).message}`);
+  if (opts.stateCoordinator === undefined) {
+    try {
+      await engine.recover();
+    } catch (e) {
+      warn(`recovery failed, serving anyway: ${(e as Error).message}`);
+    }
   }
 
   // Armed after recover(), because recovery may roll a config back and the
@@ -1313,8 +1429,10 @@ export async function startServer(opts: ServerOptions): Promise<{ close(): Promi
   // configuration API must come up even when the network cannot. A board
   // whose NetworkManager is wedged is one an operator still has to be able to
   // ask what is wrong.
+  let startupRendered = false;
   try {
     await engine.renderCurrent();
+    startupRendered = true;
   } catch (e) {
     warn(`could not render the current configuration, serving anyway: ${(e as Error).message}`);
   }
@@ -1382,6 +1500,11 @@ export async function startServer(opts: ServerOptions): Promise<{ close(): Promi
   let terrainPolicyApplyId: string | null = null;
   const terrainConfigRevision = (config: Config) => createHash("sha256").update(JSON.stringify(config)).digest("hex");
   const route = createRouter({
+    ownerTools: opts.ownerTools,
+    recoveryTools: opts.recoveryTools,
+    storageTools: opts.storageTools,
+    runtimeGeneration,
+    afterRestore: opts.restartAfterRestore,
     interfaces, diagnosticJobs,
     onPasswordChanged: () => {
       diagnosticJobs.close();
@@ -1553,11 +1676,15 @@ export async function startServer(opts: ServerOptions): Promise<{ close(): Promi
     let cockpitTooLarge = false;
     req.on("data", (c: Buffer) => {
       cockpitLength += c.length;
-      if ((req.url ?? "").startsWith("/cockpit/") && cockpitLength > 512 * 1024) { cockpitTooLarge = true; chunks.length = 0; }
+      const path = (req.url ?? "").split("?")[0];
+      const limit = path === "/recovery/preview" ? MAX_RECOVERY_BASE64_BYTES + 8192
+        : path?.startsWith("/recovery/") || path?.startsWith("/owner/") || path?.startsWith("/storage/") ? 8192
+          : path?.startsWith("/cockpit/") ? 512 * 1024 : Infinity;
+      if (cockpitLength > limit) { cockpitTooLarge = true; chunks.length = 0; }
       if (!cockpitTooLarge) chunks.push(c);
     });
     req.on("end", () => {
-      if (cockpitTooLarge) { res.writeHead(413, {"content-type": "application/json"}); res.end(JSON.stringify({error: "Cockpit request exceeds size limit"})); return; }
+      if (cockpitTooLarge) { res.writeHead(413, {"content-type": "application/json"}); res.end(JSON.stringify({error: "Request exceeds size limit"})); return; }
       let body: unknown;
       if (chunks.length > 0) {
         try {
@@ -1584,7 +1711,7 @@ export async function startServer(opts: ServerOptions): Promise<{ close(): Promi
           res.end(r.body);
           return;
         }
-        res.writeHead(r.status, { "content-type": "application/json" });
+        res.writeHead(r.status, { ...r.headers, "content-type": "application/json" });
         res.end(JSON.stringify(r.body));
       });
     });
@@ -1606,6 +1733,16 @@ export async function startServer(opts: ServerOptions): Promise<{ close(): Promi
     });
   });
   chmodSync(opts.socketPath, 0o660);
+  const finishRestore = async () => {
+    if (!opts.stateCoordinator || !opts.console || stateFailure) return;
+    const paths = consolePaths(opts.console);
+    await finishRecoveryHandoff({ coordinator: opts.stateCoordinator, runtimeGeneration,
+      resetSessions: () => resetConsoleAuth(probeRunner, paths.unit, paths.userDir) });
+  };
+  if (startupRendered) {
+    try { await finishRestore(); }
+    catch { warn("restore activation remains locked; restart the device after resolving service errors"); }
+  }
 
   // The start-up render above ran once, before the socket bound, and on a
   // cold boot it can run before NetworkManager has finished bringing the
@@ -1637,6 +1774,7 @@ export async function startServer(opts: ServerOptions): Promise<{ close(): Promi
       // an apply is in flight, so this cannot push a stale configuration
       // through a renderer mid-apply.
       await engine.renderCurrent();
+      await finishRestore();
     } catch (e) {
       warn(`could not render after waiting for the wifi radio: ${(e as Error).message}`);
     }
@@ -1696,7 +1834,16 @@ export async function startServer(opts: ServerOptions): Promise<{ close(): Promi
 }
 
 async function main(): Promise<void> {
+  const admin = new AdminClient();
   await startServer({
+    stateCoordinator: admin,
+    ownerTools: admin,
+    recoveryTools: admin,
+    storageTools: admin,
+    restartAfterRestore: async () => {
+      const result = await systemRunner(["systemctl", "--no-block", "restart", "yonder-core.service"]);
+      if (result.code !== 0) throw new Error("Could not restart Yonder after restore");
+    },
     accessory: true,
     socketPath: process.env.YONDER_SOCKET ?? "/run/yonder/core.sock",
     configPath: process.env.YONDER_CONFIG ?? "/etc/yonder/config.yaml",

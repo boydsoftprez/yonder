@@ -18,14 +18,19 @@
 # back to a modem whose primary port was ttyUSB2 (at) with wwan0 ignored -
 # which is a modem with no data path but PPP. The control port lives in
 # usbmisc, which a subsystem-filtered trigger does not reach.
-if [ "$DRY_RUN" != "1" ] && command -v udevadm >/dev/null 2>&1; then
+if [ "$IMAGE_MODE" = "1" ]; then
+    log "image mode: udev will discover modem ports on the target's first boot"
+elif [ "$DRY_RUN" != "1" ] && command -v udevadm >/dev/null 2>&1; then
     run udevadm control --reload-rules
     run udevadm trigger
 else
     log "skipping udev trigger (dry run or no udevadm)"
 fi
 
-if [ "$DRY_RUN" != "1" ] && command -v systemctl >/dev/null 2>&1; then
+if command -v service_enable >/dev/null 2>&1; then
+    service_enable ModemManager.service
+    service_restart ModemManager.service
+elif [ "$DRY_RUN" != "1" ] && command -v systemctl >/dev/null 2>&1; then
     run systemctl enable ModemManager.service
     run systemctl restart ModemManager.service
 else

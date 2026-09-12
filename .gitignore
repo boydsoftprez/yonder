@@ -50,3 +50,6 @@ packages/node-red-dashboard-2-yonder/gallery/public/
 # Native cockpit browser captures; geometry checks stay in the test sources.
 .cockpit-artifacts/
 packages/node-red-dashboard-2-yonder/.cockpit-artifacts/
+
+# Private bench images, per-image access files and build manifests.
+image/out/

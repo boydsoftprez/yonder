@@ -57,6 +57,8 @@ if [ "$con_prebuilt" = "1" ]; then
         && run cp "$con_src/package-lock.json" "$con_dest/package-lock.json"
     run cp -r "$con_src/node_modules" "$con_dest/node_modules"
 else
+    [ "$IMAGE_MODE" != "1" ] \
+        || die "image mode requires the complete vendored console dependency tree; refusing npm network fallback"
     # The network route. `npm ci` when there is a lockfile to obey, so two
     # boards imaged a week apart get the same console rather than whatever
     # the registry was serving each day.
@@ -323,13 +325,13 @@ if [ -f "$YONDER_SRC/systemd/yonder-console.service" ]; then
     # says so and the install stops.
     assert_module_graph "$con_state" settings.js "$YONDER_NODE_LINK"
 
-    if [ "$DRY_RUN" != "1" ] && command -v systemctl >/dev/null 2>&1; then
+    if command -v service_enable >/dev/null 2>&1; then
+        service_daemon_reload
+        service_enable yonder-console.service
+        service_restart yonder-console.service
+    elif [ "$DRY_RUN" != "1" ] && command -v systemctl >/dev/null 2>&1; then
         run systemctl daemon-reload
         run systemctl enable yonder-console.service
-        # Enabled *and* started, for the same reason 20-yonder-core.sh starts
-        # the daemon: enabling only arms the next boot, and R-CFG-08 says a
-        # freshly flashed board reaches a usable state with no operator input.
-        # A console nobody can reach until they reboot is not that.
         run systemctl restart yonder-console.service
     else
         log "skipping systemctl (dry run or not a systemd host)"
