@@ -149,15 +149,20 @@ first half of K-68. No new requirement in this task.
 
 - Consumes: nothing from another task.
 - Produces, for Task 2:
-  - `YonderPicture` prop `scene: Boolean` (default `false`). When true the component
-    renders only `.y-pic__fit` containing `.y-pic__frame`; the toolbar, the capture host,
-    the notices and the thumbnail strip are not rendered. The frame fills its parent and
-    the video uses `object-fit: cover`. Session, transport, reconnect, the stills
-    fallback, the adaptive report and the four stale signals are unchanged.
-  - `YonderPicture` emits `stale` with `{ seconds: number|null, text: string }` whenever
-    its staleness changes: `seconds` is whole seconds since the last frame, `null` when
-    the picture is live; `text` is the same wording the toolbar shows. A host displays
-    this itself.
+  - `YonderPicture` prop `scene: Boolean` (default `false`), declared as a fourth entry in
+    the component's existing `props` **object** (`id`, `props`, `state` at lines 564-568) —
+    it is not an array, and `scene` is a sibling of those three, not a key inside the
+    nested `props` object. When true the component renders only `.y-pic__fit` containing
+    `.y-pic__frame`; the toolbar, the capture host, the notices and the thumbnail strip are
+    not rendered. The frame fills its parent and the video uses `object-fit: cover`.
+    Session, transport, reconnect, the stills fallback, the adaptive report and the four
+    stale signals are unchanged.
+  - `YonderPicture` emits `stale` with `{ seconds: number, text: string }` whenever its
+    staleness changes, carrying the component's existing computeds unchanged: `seconds` is
+    `staleFor` (lines 761-764 — whole seconds since the last frame, less a two-second
+    grace, and **`0`, not null, when the picture is live**) and `text` is `ageText` (lines
+    792-795 — `"3 s ago"`, `"1 min 0 s ago"`). Do not invent a parallel convention; a host
+    shows `text` when `seconds` is greater than zero.
   - `TerrainVision` prop `draw: Boolean` (default `true`). When false the component paints
     nothing and everything else it does is unchanged, including the `status` emit and the
     `estimatedAglM`, `groundElevationM` and `forecast` it carries.
@@ -184,7 +189,7 @@ first half of K-68. No new requirement in this task.
 3. With `scene: true` and the picture stale, `.y-pic__hatch` is present, the video's
    `filter` style is the degrade filter, and a `stale` event has been emitted whose
    `seconds` is a positive whole number. With the picture live, the last emitted `stale`
-   carries `seconds: null`.
+   carries `seconds: 0`.
 4. Mounted directly with the harness `terrain-performance.component.test.ts` already
    uses — fake timers, a stubbed `requestAnimationFrame` stepper, a Proxy fake WebGL
    context from a stubbed `HTMLCanvasElement.prototype.getContext`, and a mocked
@@ -207,8 +212,16 @@ first half of K-68. No new requirement in this task.
    (the default), and an absent key gives `true`.
 8. The Camera page and the Cockpit page are unaffected: mounting `YonderPicture` without
    `scene` produces the same DOM as before this task, asserted by the existing
-   `picture.component.test.ts` suite passing unchanged.
-9. None of the above calls the fixture's command collector: `window.cockpitFixture.calls`
+   `picture.component.test.ts` suite passing unchanged — in particular its slot-height
+   test (about line 1563, which asserts `.y-pic`'s `gridTemplateRows` and `.y-pic__fit`'s
+   `containerType`) and its overlay-ordering test (about line 1619, which asserts
+   `.y-pic__hud`, `.y-pic__state`, `.y-pic__rec`, `.y-pic__foot` and `.y-pic__osd` are
+   present). Both assert today's presentation and must keep passing untouched.
+9. Scene mode gets the counterparts those two tests lack: with `scene: true`,
+   `.y-pic`'s `gridTemplateRows` is a single track, and `.y-pic__hud`, `.y-pic__state`,
+   `.y-pic__rec`, `.y-pic__foot`, `.y-pic__osd`, `.y-pic__capture-host`,
+   `.y-pic__notices` and `.y-pic__thumbnails` are all absent from the DOM.
+10. None of the above calls the fixture's command collector: `window.cockpitFixture.calls`
    stays empty, matching the existing "does not send" pattern in
    `flight-host.component.test.ts`.
 
@@ -259,8 +272,14 @@ which modifies the same three files.
       existing position. Verify step 1's test now passes.
 - [ ] **Step 4:** Add the `scene` prop to `YonderPicture.vue`. Wrap the toolbar, the
       capture host, the notices and the thumbnail strip in `v-if="!scene"`. Add a
-      `scene` class binding on `.y-pic`. In the component's CSS add a `.y-pic.scene`
-      block that sets the grid to one row, makes `.y-pic__fit` `position:absolute;inset:0`
+      `scene` class binding on `.y-pic`. Collapsing the grid is not optional: `.y-pic`'s
+      four tracks are `auto minmax(0,1fr) minmax(34px,auto) minmax(80px,max-content)`, so
+      leaving them while the elements are gone still reserves at least 114 px for the two
+      bottom tracks, stealing it from the frame's `1fr` row and shrinking the `100cqh` the
+      frame sizes against. Dropping the capture host is safe because `YonderDeck` teleports
+      into `#nrdb-page-page-camera .y-pic__capture-host` (`YonderDeck.vue:367`), a selector
+      scoped to the Camera page, which never renders in scene mode. In the component's CSS
+      add a `.y-pic.scene` block that sets the grid to one row, makes `.y-pic__fit` `position:absolute;inset:0`
       with `container-type: normal`, makes `.y-pic__frame` `position:absolute;inset:0`
       with `width:auto;height:auto;max-width:none;max-height:none;aspect-ratio:auto`, and
       sets `.y-pic__video { object-fit: cover }`. Extend the file's existing sizing
@@ -295,8 +314,8 @@ which modifies the same three files.
       and a small embedded `stillsUrl` data URI so the harness and the guide can show a
       picture without a stream. Keep the existing default background as terrain so no
       committed capture changes in this task.
-- [ ] **Step 10:** Write the remaining acceptance cases 1, 2, 3, 5, 6, 7 and 8 as tests
-      and make them pass. Then run `npm test -w node-red-dashboard-2-yonder` and
+- [ ] **Step 10:** Write the remaining acceptance cases 1, 2, 3, 6, 7, 8, 9 and 10 as
+      tests and make them pass. Then run `npm test -w node-red-dashboard-2-yonder` and
       `npm run lint` from the repository root and record both results.
 
 ## Task 2: The camera window and the Camera button
