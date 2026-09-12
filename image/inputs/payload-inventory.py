@@ -436,9 +436,13 @@ def capture(args: argparse.Namespace) -> None:
     if selected != required:
         fail(f"selected components do not exactly match {args.target}: {','.join(required)}")
     safe_tree(staging)
-    safe_tree(payload)
+    if not payload.is_dir() or payload.is_symlink():
+        fail(f"required directory is unavailable: {payload}")
     reject_private_inputs(staging / "inputs")
-    present = sorted(path.name for path in payload.iterdir() if path.is_dir() and path.name != ".work")
+    entries = [path for path in payload.iterdir() if path.name != ".work"]
+    if any(not path.is_dir() or path.is_symlink() for path in entries):
+        fail("payload contains a non-directory top-level entry")
+    present = sorted(path.name for path in entries)
     if present != sorted(required):
         missing = [name for name in required if name not in present]
         if missing:

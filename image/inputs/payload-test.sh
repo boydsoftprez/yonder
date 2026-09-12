@@ -125,6 +125,13 @@ record git-source application-source 0123456789abcdef0123456789abcdef01234567 re
 record index application-manifests fixture repository:package-lock.json inputs/npm/application/manifests
 record npm-cache application-npm-cache fixture https://registry.npmjs.org/ inputs/npm/application/cache
 
+# make-payload.sh keeps downloads and extracted package metadata under this
+# transient directory until capture completes. It may contain package-owned
+# absolute symlinks, but none of it is part of the replayed payload.
+mkdir -p "$payload/.work/zerotier-notice/var/lib/zerotier-one"
+ln -s /usr/sbin/zerotier-one \
+    "$payload/.work/zerotier-notice/var/lib/zerotier-one/zerotier-one"
+
 python3 -I "$helper" capture --staging "$staging" --payload "$payload" \
     --output "$work/capture" --target rpi --arch linux-arm64 \
     --selected node,zerotier,mediamtx,mavlink-router,console,application \
@@ -168,7 +175,7 @@ for item in manifest['files']:
 PY
 
 python3 -I "$helper" replay --input "$work/capture" --output "$work/replayed"
-diff -r "$payload" "$work/replayed"
+diff -r -x .work "$payload" "$work/replayed"
 
 cp "$staging/records.tsv" "$work/rpi-records.tsv"
 mkdir -p "$payload/gst-rockchip" "$staging/inputs/sources/rockchip-mpp" \
