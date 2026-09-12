@@ -164,8 +164,10 @@ first half of K-68. No new requirement in this task.
     792-795 — `"3 s ago"`, `"1 min 0 s ago"`). Do not invent a parallel convention; a host
     shows `text` when `seconds` is greater than zero.
   - `TerrainVision` prop `draw: Boolean` (default `true`). When false the component paints
-    nothing and everything else it does is unchanged, including the `status` emit and the
-    `estimatedAglM`, `groundElevationM` and `forecast` it carries.
+    nothing, its canvas shows nothing, and everything else it does is unchanged, including
+    the `status` emit and the `estimatedAglM`, `groundElevationM` and `forecast` it
+    carries. `data-terrain-ready` keeps reporting readiness in both modes, because terrain
+    is still being evaluated and a CSS rule in `cockpit.css` keys off it.
   - `PrimaryFlightDisplay` option `horizonLine: Boolean` in its `options` object. When the
     background is a camera (`backgroundReady` true and the host says the background is not
     terrain), the `.pfd-horizon` group draws its white line at full opacity and omits the
@@ -198,36 +200,46 @@ first half of K-68. No new requirement in this task.
    stepped frames, while its last emitted `status` still carries a finite `estimatedAglM`
    and a non-null `forecast`. The same mount with `draw: true` calls `clear` at the
    existing cadence and emits the same `estimatedAglM`.
-5. In `YonderCockpit` with a camera selected and terrain enabled, the `TerrainVision`
+5. Painting terrain, then setting `draw: false`, leaves no fossil: the canvas's computed
+   `visibility` is `hidden` while `draw` is false, and the component's
+   `data-terrain-ready` attribute still reads `true`. Setting `draw` back to `true` makes
+   the canvas visible again and calls `clear` on the next stepped frame. (Without this the
+   canvas keeps whatever was last rasterized: `gl.clear` runs only inside `draw()` at line
+   452, and the canvas's visibility binds to the same `visible` ref that `status()` sets
+   true whenever terrain is ready, line 619. A camera that then failed to stream would
+   show the unavailable banner over a frozen terrain image that reads as live.)
+6. In `YonderCockpit` with a camera selected and terrain enabled, the `TerrainVision`
    component is still present in the component tree and receives `draw: false`; with
    terrain as the background it receives `draw: true`. (This is the host-level half of
    case 4: choosing a camera today unmounts it, which is the regression this task exists
-   to prevent.)
-6. In `YonderCockpit` with a camera selected, `.cockpit-background` has no
+   to prevent. Most host tests stub `TerrainVision`, and a stub is enough here: the
+   assertion is on the prop it was handed, not on what it did with it.)
+7. In `YonderCockpit` with a camera selected, `.cockpit-background` has no
    `linear-gradient`, and the PFD's sky and earth rects are at opacity 0 while the white
    horizon line is at full opacity. Turning `horizonLine` off hides the line and leaves
    the fills hidden. With terrain as the background, the line stays hidden as today.
-7. `validatePfdPreferences({display:{horizonLine:false}}).display.horizonLine` is `false`;
+8. `validatePfdPreferences({display:{horizonLine:false}}).display.horizonLine` is `false`;
    `validatePfdPreferences({display:{horizonLine:'no'}}).display.horizonLine` is `true`
    (the default), and an absent key gives `true`.
-8. The Camera page and the Cockpit page are unaffected: mounting `YonderPicture` without
+9. The Camera page and the Cockpit page are unaffected: mounting `YonderPicture` without
    `scene` produces the same DOM as before this task, asserted by the existing
    `picture.component.test.ts` suite passing unchanged — in particular its slot-height
    test (about line 1563, which asserts `.y-pic`'s `gridTemplateRows` and `.y-pic__fit`'s
    `containerType`) and its overlay-ordering test (about line 1619, which asserts
    `.y-pic__hud`, `.y-pic__state`, `.y-pic__rec`, `.y-pic__foot` and `.y-pic__osd` are
    present). Both assert today's presentation and must keep passing untouched.
-9. Scene mode gets the counterparts those two tests lack: with `scene: true`,
+10. Scene mode gets the counterparts those two tests lack: with `scene: true`,
    `.y-pic`'s `gridTemplateRows` is a single track, and `.y-pic__hud`, `.y-pic__state`,
    `.y-pic__rec`, `.y-pic__foot`, `.y-pic__osd`, `.y-pic__capture-host`,
    `.y-pic__notices` and `.y-pic__thumbnails` are all absent from the DOM.
-10. None of the above calls the fixture's command collector: `window.cockpitFixture.calls`
+11. None of the above calls the fixture's command collector: `window.cockpitFixture.calls`
    stays empty, matching the existing "does not send" pattern in
    `flight-host.component.test.ts`.
 
 **Verification:** ordinary feature with one load-bearing invariant (terrain evaluation
-must survive), so: test the new behaviour, and write acceptance case 4 **first** because
-it is the regression this task exists to prevent. Layer: unit and component tests on this
+must survive), so: test the new behaviour, and write acceptance cases **6 then 4 first**,
+in that order. Case 6 is the actual regression — today the host unmounts the terrain
+component the moment a camera is chosen — and case 4 is the new split it depends on. Layer: unit and component tests on this
 machine. Commands, from the repository root:
 
 ```
@@ -242,7 +254,7 @@ worth six minutes of gate. No hardware evidence in this task.
 **Execution note (advisory):** sonnet. No prerequisite. Not parallelisable with Task 2,
 which modifies the same three files.
 
-- [ ] **Step 1:** Write `camera-scene.component.test.ts` with acceptance case 5 as its
+- [ ] **Step 1:** Write `camera-scene.component.test.ts` with acceptance case 6 as its
       first test, mounting `YonderCockpit` from `cockpit/fixture.mjs` the way
       `flight-host.component.test.ts` does, with `global.provide` stubs for `$socket`
       (`{on(){},off(){},emit(){}}`) and `$dataTracker` (`() => {}`) so `YonderPicture`
@@ -262,6 +274,14 @@ which modifies the same three files.
       task adds no new failure mode. Record in a comment beside the change that the
       renderer is still created when `draw` is false, deliberately, so the terrain view
       resumes instantly and the evaluation path is identical in both modes.
+      Then change the canvas's visibility binding on template line 15 from
+      `visible ? 'visible' : 'hidden'` so it is also hidden whenever `draw` is false, and
+      say in the same comment why: `gl.clear` runs only inside `draw()` (line 452) and
+      `status()` sets `visible` true whenever terrain is ready (line 619), so a canvas left
+      visible with painting stopped holds the last frame it drew for as long as the camera
+      is up. Leave `data-terrain-ready` bound to `visible` alone: it reports whether
+      terrain is being evaluated, which is still true, and `cockpit.css` keys a background
+      rule off it.
 - [ ] **Step 3:** In `YonderCockpit.vue`'s `#background` slot, restructure so the terrain
       component is mounted whenever `onlineTerrain` is true regardless of `background`,
       with `:draw="background==='terrain'"`, and the picture is mounted whenever
@@ -314,8 +334,9 @@ which modifies the same three files.
       and a small embedded `stillsUrl` data URI so the harness and the guide can show a
       picture without a stream. Keep the existing default background as terrain so no
       committed capture changes in this task.
-- [ ] **Step 10:** Write the remaining acceptance cases 1, 2, 3, 6, 7, 8, 9 and 10 as
-      tests and make them pass. Then run `npm test -w node-red-dashboard-2-yonder` and
+- [ ] **Step 10:** Write the remaining acceptance cases 1, 2, 3, 5, 7, 8, 9, 10 and 11 as
+      tests and make them pass. Case 5 extends the fake-GL harness from step 1's second
+      test rather than starting a new one. Then run `npm test -w node-red-dashboard-2-yonder` and
       `npm run lint` from the repository root and record both results.
 
 ## Task 2: The camera window and the Camera button
