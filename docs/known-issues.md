@@ -2554,7 +2554,7 @@ frame rates. Hardware evidence and remaining acceptance work are recorded in
 
 ### K-68 · ~~The PFD's camera background is the Camera page's picture box, not the scene~~ — CLOSED
 
-**Status:** Closed in software; hardware confirmation pending · **Requirements:** R-FLT-09,
+**Status:** Closed in software; hardware confirmation pending (the board was reached on 2026-09-12 but its camera never started, so the live picture in the PFD is still unseen; see [what the board can say](hardware/2026-09-12-seekerhd-registration.md)) · **Requirements:** R-FLT-09,
 R-FLT-01, R-FLT-29 · **Found:** 2026-09-11, by the operator on a deployed console with a
 streaming camera
 
