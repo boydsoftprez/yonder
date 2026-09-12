@@ -6,19 +6,20 @@
 
 /**
  * The window's home position and default width, as fractions of
- * `.cockpit-body` — the measured geometry of the approved render
+ * the PFD camera scene — the measured geometry of the approved render
  * `instrument-library/flight.camera.window.night.png`, clear of the
  * airspeed tape and the forecast notice at laptop size (design decision 6).
  *
  * No `h`: the window's height is never stored. It is always derived from
- * `w` and the picture's own aspect ratio — CSS `aspect-ratio` in
- * `CameraWindow.vue` — the same way the scene presentation
+ * `w` and the picture's own aspect ratio — CSS `aspect-ratio` on
+ * `CameraWindow.vue`'s picture body — plus the fixed window header. The
+ * scene presentation
  * (`YonderPicture.vue`'s `scene` prop) leaves height to the box rather than
  * to a stored number.
  */
 export const cameraWindowHome = Object.freeze({ x: 0.13, y: 0.12, w: 0.17 })
 
-/** Width bounds, as fractions of `.cockpit-body`'s width (design decision
+/** Width bounds, as fractions of the PFD camera scene's width (design decision
  * 6: "between one eighth and one half of the scene's width"). */
 const MIN_WIDTH = 1 / 8
 const MAX_WIDTH = 1 / 2
@@ -51,20 +52,31 @@ const MAX_WIDTH = 1 / 2
  * reach; on a box wider than the picture's shape it guessed low and let a
  * stored `y` leave the window's bottom outside the scene. So without an
  * aspect only the horizontal extent is bounded and `y` is merely held in
- * `[0, 1]`; `CameraWindow.vue` re-clamps against the box it actually
+ * `[0, 1]`. A positive width narrower than the normal minimum is preserved:
+ * it may be the safe result of a portrait source's earlier measured clamp,
+ * and re-expanding it before the next measurement would put pixels back
+ * outside the scene. `CameraWindow.vue` re-clamps against the box it actually
  * measures, on mount and whenever that box is resized. That also makes this
  * function idempotent on geometry a gesture already clamped — the value
  * `YonderCockpit`'s `setOption` hands straight back through here — instead
  * of shrinking it a second time against a ratio nobody measured.
  */
-export function clampCameraWindow (input, aspect) {
+export function clampCameraWindow (input, aspect, header = 0) {
   if (!input || typeof input !== 'object' ||
     !Number.isFinite(input.x) || !Number.isFinite(input.y) || !Number.isFinite(input.w)) {
     return { ...cameraWindowHome }
   }
-  const w = Math.max(MIN_WIDTH, Math.min(MAX_WIDTH, input.w))
   const measured = Number.isFinite(aspect) && aspect > 0
-  const h = measured ? w * aspect : 0
+  const headerFraction = Number.isFinite(header) && header >= 0 ? header : 0
+  // A portrait source can be taller than the PFD at the normal minimum
+  // width. Containment wins in that exceptional case: shrink below the
+  // normal minimum rather than leave any part of the picture or header off
+  // scene. For usual sources this is simply MAX_WIDTH.
+  const heightLimitedWidth = measured ? Math.max(0, (1 - headerFraction) / aspect) : MAX_WIDTH
+  const maxWidth = Math.min(MAX_WIDTH, heightLimitedWidth)
+  const minWidth = measured || input.w <= 0 ? MIN_WIDTH : 0
+  const w = Math.min(maxWidth, Math.max(minWidth, input.w))
+  const h = measured ? w * aspect + headerFraction : 0
   const x = Math.max(0, Math.min(input.x, Math.max(0, 1 - w)))
   const y = Math.max(0, Math.min(input.y, Math.max(0, 1 - h)))
   return { x, y, w }

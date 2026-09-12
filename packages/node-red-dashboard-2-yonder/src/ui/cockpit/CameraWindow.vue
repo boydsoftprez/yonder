@@ -19,7 +19,7 @@
       @click="$emit('maximize')"
     >⤢</button>
   </header>
-  <div class="camera-window__body">
+  <div class="camera-window__body" :style="{ aspectRatio: String(aspect) }">
     <slot/>
   </div>
   <div
@@ -48,7 +48,7 @@ export default {
    * window is the camera's, only"). This file never imports `YonderPicture`
    * or knows its props; the host composes it.
    *
-   * **Holds no state of its own.** `geometry` is owned by the host
+   * **Holds no persisted state of its own.** `geometry` is owned by the host
    * (`YonderCockpit.vue`, persisted with the other display preferences,
    * R-FLT-25) and only ever changes through the `update:geometry` this
    * component emits — already clamped, so the host trusts it without
@@ -67,18 +67,19 @@ export default {
    * own doc comment gives for its identical guard.
    *
    * **The box is measured fresh at the start of every gesture**, not
-   * cached across them: `getBoundingClientRect()` on `.cockpit-body`, the
-   * same positioning context the mission and map insets already use
-   * (`cockpit.css`), found via `closest()` rather than assumed to be a
-   * direct parent. A window resize, an orientation change or entering full
-   * screen between two gestures is always current; nothing here reacts to
-   * one mid-gesture, since a gesture's own duration is a fraction of a
-   * second and its own committed geometry is re-measured against next time.
+   * cached across them: `getBoundingClientRect()` on `.pfd-camera-overlay`,
+   * the PFD's dedicated scene layer, found via `closest()` rather than
+   * assumed to be a direct parent. A `ResizeObserver` also re-clamps the
+   * existing geometry when this scene changes because an MFD opens, closes,
+   * stacks, or changes its split — events that do not necessarily resize the
+   * browser window. The transient observer and gesture fields are local UI
+   * state only; persisted geometry remains entirely host-owned.
    */
   props: {
     /** The picture's own aspect ratio (width/height) — the shape the
      * window keeps while it is resized. Not measured here: this component
-     * never inspects its own slotted content, the same "holds no state"
+     * never inspects its own slotted content, the same "holds no persisted
+     * state"
      * boundary that keeps it ignorant of what the picture even is. */
     aspect: { type: Number, default: 16 / 9 },
     /** `{x,y,w}` as fractions of the containing box — see
@@ -98,7 +99,9 @@ export default {
       gestureStartX: 0,
       gestureStartY: 0,
       gestureStartGeometry: null,
-      gestureBoxRect: null
+      gestureBoxRect: null,
+      gestureChromeFraction: 0,
+      boxObserver: null
     }
   },
   computed: {
@@ -106,21 +109,50 @@ export default {
       return {
         left: (this.geometry.x * 100) + '%',
         top: (this.geometry.y * 100) + '%',
-        width: (this.geometry.w * 100) + '%',
-        aspectRatio: String(this.aspect)
+        width: (this.geometry.w * 100) + '%'
       }
+    }
+  },
+  watch: {
+    // A stream can decode a different shape without changing the PFD's
+    // dimensions. Re-clamp after Vue applies the new picture-body ratio, so
+    // a window that was legal at the bottom in 16:9 remains wholly visible
+    // when a 4:3 or portrait source arrives.
+    aspect () {
+      this.$nextTick(() => this.clampToBox())
     }
   },
   mounted () {
     this.clampToBox()
     window.addEventListener('resize', this.clampToBox)
+    this.$nextTick(() => {
+      const box = this.box()
+      if (!box || typeof ResizeObserver === 'undefined') return
+      this.boxObserver = new ResizeObserver(() => this.clampToBox())
+      this.boxObserver.observe(box)
+    })
   },
   beforeUnmount () {
     window.removeEventListener('resize', this.clampToBox)
+    this.boxObserver?.disconnect()
   },
   methods: {
     box () {
-      return this.$el.closest('.cockpit-body')
+      return this.$el.closest('.pfd-camera-overlay')
+    },
+    chromeFraction (rect) {
+      const header = this.$el.querySelector('.camera-window__header')
+      const body = this.$el.querySelector('.camera-window__body')
+      const outerHeight = this.$el.getBoundingClientRect?.().height
+      const bodyHeight = body?.getBoundingClientRect?.().height
+      // Use the rendered outer-minus-body height where available: it counts
+      // the fixed header *and* the window border, so containment means no
+      // visible pixel is clipped. jsdom has no layout, where the header-only
+      // fallback still gives focused geometry tests a useful measurement.
+      const height = Number.isFinite(outerHeight) && Number.isFinite(bodyHeight) && outerHeight > bodyHeight
+        ? outerHeight - bodyHeight
+        : header?.getBoundingClientRect?.().height
+      return Number.isFinite(height) && height > 0 ? height / rect.height : 0
     },
     /** The box the stored fractions actually have to fit, measured rather
      * than guessed (I4 of the whole-branch review). `clampCameraWindow` is
@@ -135,7 +167,11 @@ export default {
     clampToBox () {
       const rect = this.box()?.getBoundingClientRect()
       if (!rect?.width || !rect?.height) return
-      const clamped = clampCameraWindow(this.geometry, (rect.width / rect.height) / (this.aspect || 1))
+      const clamped = clampCameraWindow(
+        this.geometry,
+        (rect.width / rect.height) / (this.aspect || 1),
+        this.chromeFraction(rect)
+      )
       if (clamped.x !== this.geometry.x || clamped.y !== this.geometry.y || clamped.w !== this.geometry.w) {
         this.$emit('update:geometry', clamped)
       }
@@ -162,6 +198,7 @@ export default {
       this.gestureStartY = event.clientY
       this.gestureStartGeometry = { ...this.geometry }
       this.gestureBoxRect = rect
+      this.gestureChromeFraction = this.chromeFraction(rect)
       try { event.currentTarget?.setPointerCapture?.(event.pointerId) } catch { /* Leaving an uncaptured gesture stops. */ }
     },
     moveGesture (event) {
@@ -181,7 +218,7 @@ export default {
       // computed fresh from the gesture's own captured box rather than a
       // second DOM read.
       const combinedAspect = (rect.width / rect.height) / (this.aspect || 1)
-      this.$emit('update:geometry', clampCameraWindow(candidate, combinedAspect))
+      this.$emit('update:geometry', clampCameraWindow(candidate, combinedAspect, this.gestureChromeFraction))
     },
     endGesture (event) {
       if (event?.pointerId !== undefined && this.gesturePointerId !== null && event.pointerId !== this.gesturePointerId) return
@@ -190,6 +227,7 @@ export default {
       this.gesturePointerId = null
       this.gestureStartGeometry = null
       this.gestureBoxRect = null
+      this.gestureChromeFraction = 0
       try { if (pointerId !== null && event?.currentTarget?.hasPointerCapture?.(pointerId)) event.currentTarget.releasePointerCapture(pointerId) } catch { /* Already released. */ }
     }
   }

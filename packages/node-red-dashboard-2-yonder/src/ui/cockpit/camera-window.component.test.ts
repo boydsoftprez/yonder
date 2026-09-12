@@ -2,7 +2,7 @@
 // R-FLT-29/K-68: the camera window and the top-row Camera control
 // (acceptance cases 4-9). Case 6's drag/resize gestures follow
 // `CameraWindow.vue`'s own doc comment on mirroring `YonderPicture.vue`'s
-// pointer-capture shape; `.cockpit-body`'s bounding box is stubbed the way
+// pointer-capture shape; the PFD camera scene's bounding box is stubbed the way
 // `picture.component.test.ts`/`aimpad.component.test.ts` already stub
 // geometry, since jsdom performs no layout.
 import { mount } from '@vue/test-utils'
@@ -78,12 +78,12 @@ function pointerEvent (type, { pointerId = 1, clientX = 0, clientY = 0, button =
   return new PointerEvent(type, { pointerId, clientX, clientY, button, bubbles: true })
 }
 
-/** `.cockpit-body`'s bounding box, stubbed exactly the way
+/** The PFD camera scene's bounding box, stubbed exactly the way
  * `aimpad.component.test.ts`/`picture.component.test.ts` stub a specific
  * element's own `getBoundingClientRect` — jsdom performs no layout, so
  * these fractions have no other way to get a known box to clamp against. */
 function stubBody (wrapper, rect = { left: 0, top: 0, width: 1000, height: 600 }) {
-  wrapper.get('.cockpit-body').element.getBoundingClientRect = () => ({ ...rect, right: rect.left + rect.width, bottom: rect.top + rect.height } as DOMRect)
+  wrapper.get('.pfd-camera-overlay').element.getBoundingClientRect = () => ({ ...rect, right: rect.left + rect.width, bottom: rect.top + rect.height } as DOMRect)
 }
 
 describe('the Camera window and control (R-FLT-29, K-68)', () => {
@@ -184,6 +184,47 @@ describe('the Camera window and control (R-FLT-29, K-68)', () => {
     w.unmount()
   })
 
+  it('owns the camera window inside the PFD scene when a side-by-side MFD is open', async () => {
+    const { wrapper: w } = host()
+    // The PFD and MFD are separate grid columns in this arrangement. The
+    // window's coordinate system must remain the PFD scene, never the wider
+    // cockpit body that contains both displays.
+    w.vm.layout = 'map'
+    await w.vm.$nextTick()
+
+    const scene = w.get('.pfd-camera-overlay')
+    const window = w.get('.camera-window')
+    expect(scene.element.contains(window.element)).toBe(true)
+    expect(window.element.closest('.pfd-camera-overlay')).toBe(scene.element)
+    w.unmount()
+  })
+
+  it('uses the scene picture\'s decoded aspect for the window body rather than a fixed 16:9 ratio', async () => {
+    const { wrapper: w } = host()
+    const picture = w.findComponent({ name: 'YonderPicture' })
+    picture.vm.$emit('aspect', 4 / 3)
+    await w.vm.$nextTick()
+
+    const window = w.findComponent({ name: 'CameraWindow' })
+    expect(window.props('aspect')).toBeCloseTo(4 / 3)
+    expect(w.get('.camera-window__body').attributes('style')).toContain('aspect-ratio: 1.3333333333333333')
+    w.unmount()
+  })
+
+  it('re-clamps a bottom window after decoded aspect changes without requiring a browser resize', async () => {
+    const { wrapper: w } = host()
+    w.vm.setOption('cameraWindow', { x: 0.1, y: 0.85, w: 0.2 })
+    stubBody(w)
+
+    w.findComponent({ name: 'YonderPicture' }).vm.$emit('aspect', 4 / 3)
+    await w.vm.$nextTick()
+    await w.vm.$nextTick()
+
+    // The PFD scene is 1000x600, so a 4:3 body has h=0.25 at w=0.2.
+    expect(w.vm.preferences.display.cameraWindow.y).toBeCloseTo(0.75)
+    w.unmount()
+  })
+
   // ---------------------------------------------------------------------
   // Case 6
   // ---------------------------------------------------------------------
@@ -209,7 +250,7 @@ describe('the Camera window and control (R-FLT-29, K-68)', () => {
 
     // Drag the grip: w changes, x/y are exactly what the header drag left.
     const beforeResize = { ...w.vm.preferences.display.cameraWindow }
-    const aspectBefore = w.get('.camera-window').attributes('style')
+    const aspectBefore = w.get('.camera-window__body').attributes('style')
     await grip.element.dispatchEvent(pointerEvent('pointerdown', { pointerId: 2, clientX: 100, clientY: 100 }))
     await grip.element.dispatchEvent(pointerEvent('pointermove', { pointerId: 2, clientX: 150, clientY: 100 }))
     await grip.element.dispatchEvent(pointerEvent('pointerup', { pointerId: 2, clientX: 150, clientY: 100 }))
@@ -217,8 +258,8 @@ describe('the Camera window and control (R-FLT-29, K-68)', () => {
     expect(w.vm.preferences.display.cameraWindow.x).toBeCloseTo(beforeResize.x)
     expect(w.vm.preferences.display.cameraWindow.y).toBeCloseTo(beforeResize.y)
     expect(w.vm.preferences.display.cameraWindow.w).toBeGreaterThan(beforeResize.w)
-    expect(w.get('.camera-window').attributes('style')).toContain('aspect-ratio')
-    expect(w.get('.camera-window').attributes('style')?.match(/aspect-ratio:\s*([^;]+)/)?.[1])
+    expect(w.get('.camera-window__body').attributes('style')).toContain('aspect-ratio')
+    expect(w.get('.camera-window__body').attributes('style')?.match(/aspect-ratio:\s*([^;]+)/)?.[1])
       .toBe(aspectBefore?.match(/aspect-ratio:\s*([^;]+)/)?.[1])
 
     // A drag far past the box's own edge stays inside it.

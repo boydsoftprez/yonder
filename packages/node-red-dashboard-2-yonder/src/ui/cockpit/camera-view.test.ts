@@ -37,6 +37,19 @@ it('clampCameraWindow keeps the whole window inside the box on every edge', () =
   expect(tall.y + tall.w * 2).toBeLessThanOrEqual(1)
 })
 
+  it('clampCameraWindow reserves the fixed header when bounding the bottom edge', () => {
+  // `aspect` is the picture body's height per width and `header` is the
+  // header's measured fraction of the scene height. Both are part of the
+  // displayed window, so a drag may not leave either below the PFD scene.
+  expect(clampCameraWindow({ x: 0.1, y: 0.85, w: 0.2 }, 0.5, 0.1))
+      .toEqual({ x: 0.1, y: 0.8, w: 0.2 })
+  })
+
+  it('shrinks a portrait source below the usual minimum width when that is required to keep its body and header in the scene', () => {
+    expect(clampCameraWindow({ x: 0.1, y: 0.1, w: 0.5 }, 4, 0.1))
+      .toEqual({ x: 0.1, y: 0, w: 0.225 })
+  })
+
 it('clampCameraWindow returns home for null, non-numeric or malformed input', () => {
   for (const input of [null, undefined, {}, 'window', 42, { x: 0.2, y: 0.2 }, { x: 'a', y: 0.2, w: 0.2 }, { x: NaN, y: 0.2, w: 0.2 }, { x: 0.2, y: 0.2, w: Infinity }]) {
     expect(clampCameraWindow(input, 1)).toEqual(cameraWindowHome)
@@ -56,6 +69,13 @@ it('clampCameraWindow bounds only the horizontal extent when it is given no meas
     expect(clampCameraWindow({ x: 0.1, y: -2, w: 0.2 }, aspect).y).toBe(0)
     expect(clampCameraWindow({ x: 0.1, y: 4, w: 0.2 }, aspect).y).toBe(1)
   }
+})
+
+it('preserves a positive narrow stored width until the scene has measured the aspect that required it', () => {
+  // A portrait camera can have been clamped below the usual eighth-width
+  // minimum. Preference validation has no scene aspect, so it must not
+  // re-expand that safe geometry and put the window back out of bounds.
+  expect(clampCameraWindow({ x: 0.1, y: 0, w: 0.1 })).toEqual({ x: 0.1, y: 0, w: 0.1 })
 })
 
 it('clampCameraWindow applied twice with the same measured aspect changes nothing the second time (I4)', () => {

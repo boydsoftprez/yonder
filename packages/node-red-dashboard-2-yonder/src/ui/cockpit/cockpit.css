@@ -133,7 +133,16 @@
   flex: 1;
   min-height: 0;
   display: block;
+  position: relative;
   background: transparent
+}
+
+.y-cockpit .pfd-camera-overlay {
+  position: absolute;
+  inset: 0;
+  z-index: 6;
+  overflow: hidden;
+  pointer-events: none
 }
 
 .y-cockpit .pfd-instrument-canvas {
@@ -214,10 +223,9 @@
   height: 100%
 }
 
-/* R-FLT-29/K-68 (design decision 6): the camera's other form. Positioned
-   exactly like .cockpit-mission/.cockpit-map-pane below (absolute within
-   .cockpit-body, same z-index) because it is a peer of those insets, drawn
-   above the instruments for the identical reason: the operator placed it. */
+/* R-FLT-29/K-68 (design decision 6): the camera's other form. It is
+   absolutely positioned in PrimaryFlightDisplay's PFD-scene overlay, so its
+   coordinates and containment remain the attitude scene's when an MFD opens. */
 .y-cockpit .camera-window {
   position: absolute;
   z-index: 5;
@@ -228,7 +236,8 @@
   border-radius: 7px;
   overflow: hidden;
   background: var(--cockpit-pane);
-  box-shadow: 0 2px 12px #0008
+  box-shadow: 0 2px 12px #0008;
+  pointer-events: auto
 }
 
 .y-cockpit .camera-window__header {
@@ -239,6 +248,7 @@
   min-height: 28px;
   padding: 3px 4px 3px 8px;
   background: #10232ddd;
+  color: #dbe8ed;
   font-size: 10px;
   letter-spacing: 1px;
   cursor: grab;
@@ -270,12 +280,16 @@
 
 .y-cockpit .camera-window__body {
   position: relative;
-  flex: 1;
+  /* Keep the picture's video/notice layers below the window's resize grip. */
+  z-index: 0;
+  flex: none;
+  width: 100%;
   min-height: 0
 }
 
 .y-cockpit .camera-window__grip {
   position: absolute;
+  z-index: 1;
   right: 0;
   bottom: 0;
   width: 16px;

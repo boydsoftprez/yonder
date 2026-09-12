@@ -160,6 +160,7 @@
     <PfdWindDisplay v-if="options.windDisplay!=='off'" :telemetry="telemetry" :mode="options.windDisplay||'components'" :speed-unit="selectedUnits.speedUnit" :style="hit([130-viewport.edgeShift,302,128,86])" @open="open('wind')"/>
     <div v-if="!flight.live" class="pfd-loss" role="status">Flight instruments unavailable</div>
     </div>
+    <div class="pfd-camera-overlay"><slot name="camera-overlay"/></div>
     </div>
     <nav v-if="options.menuStrip!==false" class="pfd-menu-strip" aria-label="PFD touch menu"><button @click="open('menu')">PFD settings</button><button @click="$emit('navigate','mission')">Flight plan</button><button @click="open('director')">FD</button><button @click="$emit('navigate','settings')">Display</button></nav>
     <footer class="display-foot"><span>Touch an instrument · cyan = local reference</span><span>{{backgroundLabel||'Conventional horizon'}}<template v-if="staleLabel"> · {{staleLabel}}</template></span></footer>

@@ -96,9 +96,8 @@
               @status="terrainStatus=$event"
             />
           </slot>
-          <!-- The window (mounted as a peer of the insets, in .cockpit-body
-               below) takes the camera out of this scene entirely: only the
-               `full` state ever draws the picture here. -->
+          <!-- The window has its own PFD-scene layer below, so only the
+               `full` state draws the picture in this background slot. -->
           <template v-if="background!=='terrain'">
             <template v-if="cameraPath">
               <!-- `reason-line` only here, not on the window's copy below:
@@ -111,6 +110,7 @@
                 :reason-line="true"
                 class="cockpit-camera"
                 @stale="pictureStale=$event"
+                @aspect="setPictureAspect"
               />
               <CameraTerrainOverlay
                 v-if="background==='camera-overlay'"
@@ -152,6 +152,32 @@
             @select="selectedTraffic=trafficTracks.find(t=>t.id===$event);panel='traffic'"
           />
         </slot>
+      </template>
+      <template #camera-overlay>
+        <!-- The window is constrained by the PFD scene itself. It must never
+             use the wider cockpit grid as a positioning box when an MFD is
+             adjacent or stacked beside this display. -->
+        <CameraWindow
+          v-if="cameraPath&&cameraView==='window'"
+          :aspect="pictureAspect"
+          :geometry="preferences.display.cameraWindow"
+          label="CAMERA"
+          :stale="pictureStale"
+          @update:geometry="value=>setOption('cameraWindow',value)"
+          @maximize="showCameraFull"
+        >
+          <!-- `unavailable-mark`, not `reason-line`: this box is too small
+               for a sentence, so a window with no picture reads as one more
+               instrument with no data. -->
+          <YonderPicture
+            :id="id+'-camera'"
+            :props="cameraProps"
+            :scene="true"
+            :unavailable-mark="true"
+            @stale="pictureStale=$event"
+            @aspect="setPictureAspect"
+          />
+        </CameraWindow>
       </template>
     </PrimaryFlightDisplay>
     <section
@@ -232,35 +258,6 @@
         >Mission actions</button></footer>
     </section>
     <div v-if="background!=='terrain'&&!cameraPath" class="cockpit-camera-fallback" role="status"><span>Selected camera unavailable</span><button aria-label="Use synthetic terrain" @click="background='terrain';onlineTerrain=true">Use synthetic terrain</button></div>
-    <!-- R-FLT-29/K-68: the camera's other form (design decision 6) — a peer
-         of the mission and map insets below, positioned the identical way
-         (absolute within .cockpit-body, z-index 5) because the operator
-         placed it, drawn above the instruments the same way those are.
-         The window *is* the `terrain` background with a camera configured
-         (cameraPath) — the design's own second state, not a third one.
-         Registered terrain is never drawn in the window (design decision 8)
-         — only the plain picture, never CameraTerrainOverlay. -->
-    <CameraWindow
-      v-if="cameraPath&&cameraView==='window'"
-      :aspect="16/9"
-      :geometry="preferences.display.cameraWindow"
-      label="CAMERA"
-      :stale="pictureStale"
-      @update:geometry="value=>setOption('cameraWindow',value)"
-      @maximize="showCameraFull"
-    >
-      <!-- `unavailable-mark`, not `reason-line`: this box is too small for a
-           sentence, so a window with no picture reads as one more instrument
-           with no data (the operator's ruling of 2026-09-12). See
-           `YonderPicture`'s own `unavailableMark` doc comment. -->
-      <YonderPicture
-        :id="id+'-camera'"
-        :props="cameraProps"
-        :scene="true"
-        :unavailable-mark="true"
-        @stale="pictureStale=$event"
-      />
-    </CameraWindow>
     <div
       v-if="background==='camera-overlay'&&!registration.ready"
       class="cockpit-registration"
@@ -865,6 +862,9 @@ export default {
       // 11: the age moves between the footer label and the window header,
       // it does not appear in both).
       pictureStale: { seconds: 0, text: '' },
+      // `YonderPicture` starts from a safe 16:9 layout then reports video
+      // metadata or a loaded still's intrinsic ratio through `@aspect`.
+      pictureAspect: 16 / 9,
       aircraftDatum: 'UNKNOWN',
       calibrationCandidate: null,
       trafficRange: 10,
@@ -1117,6 +1117,7 @@ export default {
     // R-FLT-29/K-68: see `cameraBackgroundChoice` and `picturePresent`.
     background(value) { if (value !== 'terrain') this.cameraBackgroundChoice = value },
     picturePresent(value) { if (!value) this.pictureStale = { seconds: 0, text: '' } },
+    cameraPath () { this.pictureAspect = 16 / 9 },
     headerDocked(){this.$nextTick(this.fitViewport)},
     telemetryRate(value){if(telemetryRates.includes(value))try{localStorage.setItem('yonder-telemetry-rate-v1',String(value))}catch{}},
     palette(value) { if(['day','night'].includes(value)){try{localStorage.setItem('yonder-cockpit-palette-v1',value)}catch{}} },
@@ -1368,6 +1369,9 @@ export default {
       });
       this.persist();
       if(['altitudeUnit','speedUnit','verticalSpeedUnit'].includes(key))this.rescaleInstrumentUnits(previous)
+    },
+    setPictureAspect (value) {
+      if (Number.isFinite(value) && value > 0) this.pictureAspect = value
     },
     // R-FLT-29/K-68: the camera fills the scene. The window's own maximize
     // control and the top-row Camera control both arrive here, and both

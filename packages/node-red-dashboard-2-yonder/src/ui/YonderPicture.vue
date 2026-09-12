@@ -61,7 +61,7 @@
                 playsinline
                 @pause="onPlaybackPause"
             ></video>
-            <img v-if="mode === 'stills' && stillSrc" class="y-pic__video" :src="stillSrc" alt="" />
+            <img v-if="mode === 'stills' && stillSrc" class="y-pic__video" :src="stillSrc" alt="" @load="onStillMetadata" />
             <div v-if="staleFor > 0" class="y-pic__hatch"></div>
 
             <!-- L-18: a still landed. The flash is the confirmation that
@@ -662,7 +662,7 @@ export default {
          */
         unavailableMark: { type: Boolean, default: false }
     },
-    emits: ['stale'],
+    emits: ['stale', 'aspect'],
     data () {
         return {
             mode: 'live',
@@ -1029,6 +1029,17 @@ export default {
         }
     },
     watch: {
+        // Hosts that place a scene picture in a separately sized surface
+        // (the PFD camera window) need the decoded source ratio as well as
+        // the picture itself. This same value is updated by either video
+        // metadata or a loaded still below; emitting its initial 16:9 value
+        // lets the host make a sensible first layout before either arrives.
+        videoAspect: {
+            immediate: true,
+            handler (value) {
+                this.$emit('aspect', value)
+            }
+        },
         /**
          * R-FLT-29: a host that draws this picture in the scene
          * presentation has taken the toolbar — and the age reading inside
@@ -1312,6 +1323,13 @@ export default {
         onMetadata () {
             const v = this.$refs.video
             if (v && v.videoWidth && v.videoHeight) this.videoAspect = v.videoWidth / v.videoHeight
+        },
+        // The still fallback has no video metadata event. Its intrinsic size
+        // is the equally authoritative decoded source ratio, so report it
+        // through the same host-facing value as live video.
+        onStillMetadata (event) {
+            const image = event.target
+            if (image?.naturalWidth && image?.naturalHeight) this.videoAspect = image.naturalWidth / image.naturalHeight
         },
         /**
          * Nothing in flight: the session, and the handshake that was setting

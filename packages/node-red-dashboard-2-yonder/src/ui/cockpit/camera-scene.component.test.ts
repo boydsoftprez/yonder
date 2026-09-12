@@ -6,7 +6,7 @@
 // host (`YonderCockpit`) keeping terrain mounted under a camera instead of
 // unmounting it — K-68's actual regression.
 import { mount, flushPromises } from '@vue/test-utils'
-import { markRaw } from 'vue'
+import { markRaw, nextTick } from 'vue'
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest'
 import YonderPicture from '../YonderPicture.vue'
 import YonderCockpit from '../YonderCockpit.vue'
@@ -80,6 +80,26 @@ describe('YonderPicture scene presentation (R-FLT-29)', () => {
     // R-CMD-04/case 10: none of this asked the aircraft or the device for
     // anything — mounting and reading the DOM sent no command.
     expect(emit).not.toHaveBeenCalled()
+  })
+
+  it('emits a still image\'s intrinsic aspect after it loads, so a scene host can size a camera window without cropping it', async () => {
+    const { wrapper } = mountScenePicture({ scene: true })
+    wrapper.vm.mode = 'stills'
+    await nextTick()
+    // The mode watcher refreshes its thumbnail source on its first tick.
+    // Set the fixture source after that normal refresh has settled.
+    wrapper.vm.stillSrc = 'fixture-camera.svg'
+    await nextTick()
+
+    const image = wrapper.get('img')
+    Object.defineProperties(image.element, {
+      naturalWidth: { value: 4 },
+      naturalHeight: { value: 3 }
+    })
+    await image.trigger('load')
+
+    expect(wrapper.emitted('aspect')?.at(-1)?.[0]).toBeCloseTo(4 / 3)
+    wrapper.unmount()
   })
 
   it('never renders the stream-start control in the scene, while the Camera page keeps it (C1, R-FLT-29, R-CMD-04)', async () => {
