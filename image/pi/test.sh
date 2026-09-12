@@ -12,8 +12,9 @@ trap cleanup EXIT INT TERM
 
 command -v docker >/dev/null
 [[ $(docker info --format '{{.OSType}}') == linux ]]
-docker run -d --name "$container" --platform linux/arm64 --cap-add SYS_ADMIN \
-    --device-cgroup-rule 'b 7:* rwm' --device-cgroup-rule 'c 10:237 rwm' \
+# Loop-backed filesystem mounts require the same unrestricted container
+# boundary as the Radxa integration fixture on GitHub's Linux runners.
+docker run -d --name "$container" --platform linux/arm64 --privileged \
     "$image" sleep infinity >/dev/null
 docker exec "$container" mkdir -p /tmp/yonder-pi /tmp/bench
 docker cp "$here/." "$container:/tmp/yonder-pi/"
