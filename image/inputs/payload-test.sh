@@ -35,7 +35,7 @@ printf 'cached npm source\n' >"$staging/inputs/npm/cache/content-v2/package"
 printf 'workspace npm source\n' >"$staging/inputs/npm/application/cache/workspace/content-v2/package"
 printf 'core npm source\n' >"$staging/inputs/npm/application/cache/core/content-v2/package"
 cat >"$staging/inputs/npm/manifests/package-lock.json" <<'JSON'
-{"name":"fixture","lockfileVersion":3,"packages":{},"dependencies":{}}
+{"name":"fixture","lockfileVersion":3,"packages":{"node_modules/yonder-core":{"resolved":"packages/yonder-core"}},"dependencies":{}}
 JSON
 printf '{"name":"fixture","private":true}\n' >"$staging/inputs/npm/manifests/package.json"
 cp "$staging/inputs/npm/manifests/package-lock.json" \

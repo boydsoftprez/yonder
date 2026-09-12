@@ -62,6 +62,7 @@ APPLICATION_PACKAGES = [
     "node-red-contrib-yonder-video", "node-red-contrib-yonder-mavlink",
     "node-red-dashboard-2-yonder",
 ]
+APPLICATION_WORKSPACE_RESOLUTIONS = {f"packages/{name}" for name in APPLICATION_PACKAGES}
 APPLICATION_OFFLINE_BUILD = {
     "status": "verified",
     "network": "none",
@@ -254,8 +255,9 @@ def validate_npm_inputs(staging: Path) -> None:
             resolved = value.get("resolved")
             if isinstance(resolved, str):
                 url = urlsplit(resolved)
-                if url.scheme != "https" or url.hostname != "registry.npmjs.org" \
-                        or url.username or url.password or url.query or url.fragment:
+                public_registry = url.scheme == "https" and url.hostname == "registry.npmjs.org" \
+                    and not url.username and not url.password and not url.query and not url.fragment
+                if not public_registry and resolved not in APPLICATION_WORKSPACE_RESOLUTIONS:
                     fail("package-lock.json contains a non-public or credential-bearing resolved URL")
             for child in value.values():
                 visit(child)
