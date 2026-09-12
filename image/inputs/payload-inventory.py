@@ -521,7 +521,8 @@ def replay(args: argparse.Namespace) -> None:
     regular = {
         path.relative_to(source).as_posix()
         for path in source.rglob("*")
-        if path.is_file() and not path.is_symlink() and path.name != "SHA256SUMS"
+        if path.is_file() and not path.is_symlink()
+        and path.relative_to(source).as_posix() != "SHA256SUMS"
     }
     if set(sums) != regular:
         fail("SHA256SUMS does not exactly cover retained regular files")

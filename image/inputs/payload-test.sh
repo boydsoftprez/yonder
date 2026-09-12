@@ -48,6 +48,7 @@ printf 'application source\n' >"$staging/inputs/sources/application/source.tar"
 for component in node zerotier mediamtx mavlink-router console; do
     printf '%s payload\n' "$component" >"$payload/$component/artifact"
 done
+printf 'nested component checksums\n' >"$payload/node/SHA256SUMS"
 app_packages=(yonder-core node-red-contrib-yonder-system node-red-contrib-yonder-network \
   node-red-contrib-yonder-remote node-red-contrib-yonder-modem \
   node-red-contrib-yonder-video node-red-contrib-yonder-mavlink \
