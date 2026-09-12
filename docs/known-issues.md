@@ -2152,8 +2152,14 @@ unlike `lsof` and `ss`, neither of which is present on both platforms this runs 
 refuses the run with the `pgrep` line and the `vendor/verify-pages.pids` path if anything
 holds it. `wait_for_console` no longer accepts any HTTP reply either: it requires the body
 to be a Yonder console, which both the sign-in and the first-run setup page satisfy. The
-probe was checked against a free port and an occupied one and reports each correctly. The
-gate has not been run end to end since the change; that is the next run's evidence.
+probe was checked against a free port and an occupied one and reports each correctly.
+
+Verified end to end on 2026-09-11, on darwin. With the port deliberately held the gate
+refuses in under a second, before the build, naming the `pgrep` line and the pids file.
+With it free the full run reported **218 passed, 0 failed**, exit 0, no committed shape
+moved, and the `--press Night` end-to-end check still passed. The fail-fast copy of the
+check sits with the other preflight checks so a held console costs nothing rather than a
+build and a payload staging; the one at the launch is the one that has to be true.
 
 **The fix is to make the run own the port rather than share it:** fail immediately when
 `$PORT` is already listening (naming the stale process), or bind an ephemeral port and

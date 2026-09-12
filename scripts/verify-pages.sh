@@ -62,6 +62,31 @@ die()  { printf 'error: %s\n' "$*" >&2; exit 1; }
 
 command -v curl >/dev/null 2>&1 || die "curl is needed"
 command -v node >/dev/null 2>&1 || die "node is needed"
+
+# K-57. Node binds the port rather than `lsof` or `ss`, because this script
+# already depends on node and neither of those is present on both platforms
+# this runs on.
+port_is_free() {
+    node -e '
+        const net = require("net"), port = Number(process.argv[1]);
+        const probe = net.createServer();
+        probe.once("error", () => process.exit(1));
+        probe.once("listening", () => probe.close(() => process.exit(0)));
+        probe.listen(port, "127.0.0.1");
+    ' "$PORT"
+}
+port_in_use_advice() {
+    printf '\n'
+    echo "port $PORT is already in use, so this run cannot prove whose console it would photograph."
+    echo "a HOLD=1 run leaves its pids in vendor/verify-pages.pids; a finished run can leave an"
+    echo "orphaned daemon whose argv is this repository path. check with:"
+    echo "    pgrep -fl 'verify-pages.sh|yonder-pages|dist/daemon/server.js'"
+    echo "then kill what is left, or run this gate on another port with PORT=..."
+}
+# Asked twice on purpose: here so a held console costs nothing instead of a
+# build and a payload staging, and again at the launch, which is the one that
+# has to be true.
+port_is_free || { port_in_use_advice; die "port $PORT is in use"; }
 [ -f "$CORE/dist/daemon/server.js" ] || die "no built daemon; run: npm run build"
 [ -f "$REPO/packages/node-red-contrib-yonder-system/dist/status.js" ] \
     || die "the contrib packages are not built; run: npm run build"
@@ -543,19 +568,8 @@ wait_for_socket() {
 # because this script already depends on it and `lsof`/`ss` are not both
 # present on both platforms this runs on.
 assert_port_free() {
-    node -e '
-        const net = require("net"), port = Number(process.argv[1]);
-        const probe = net.createServer();
-        probe.once("error", () => process.exit(1));
-        probe.once("listening", () => probe.close(() => process.exit(0)));
-        probe.listen(port, "127.0.0.1");
-    ' "$PORT" && return 0
-    printf '\n'
-    echo "port $PORT is already in use, so this run cannot prove whose console it would photograph."
-    echo "a HOLD=1 run leaves its pids in vendor/verify-pages.pids; a finished run can leave an"
-    echo "orphaned daemon whose argv is this repository path. check with:"
-    echo "    pgrep -fl 'verify-pages.sh|yonder-pages|dist/daemon/server.js'"
-    echo "then kill what is left, or run this gate on another port with PORT=..."
+    port_is_free && return 0
+    port_in_use_advice
     give_up "refusing to capture against a console this run did not start"
 }
 
