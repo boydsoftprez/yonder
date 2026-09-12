@@ -73,7 +73,7 @@ boot_mount() {
     rm /prototype/usr/.yonder-write-precondition
     /bin/sh /prototype/usr/lib/yonder/storage-prototype/mount-storage.sh /prototype
     options=$(findmnt -n -T /prototype -o OPTIONS)
-    case "$expected_mode:$options" in
+    case "$expected_mode:,$options," in
         protected:*,ro,*) ;;
         maintenance:*,rw,*) ;;
         *) return 1 ;;

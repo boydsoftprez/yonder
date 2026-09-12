@@ -37,6 +37,13 @@ test('production snapshot contains the finalizer, offline adapter and target sto
   }
 });
 
+test('storage verifiers recognize a leading ro or rw mount option', async () => {
+  const radxa = await readFile(join(import.meta.dirname, 'prototype', 'verify-mounts.sh'), 'utf8');
+  const pi = await readFile(join(import.meta.dirname, 'pi', 'storage-prototype', 'verify-mounts.sh'), 'utf8');
+  assert.match(radxa, /case "\$expected_mode:,\$options," in/);
+  assert.match(pi, /case "\$expected_mode:,\$root_options,:\$boot_options," in/);
+});
+
 test('captured first-party packages must match the exact image source revision', multifn);
 
 async function multifn() {

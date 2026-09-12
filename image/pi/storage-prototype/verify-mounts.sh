@@ -100,7 +100,7 @@ boot_mount() {
     /bin/sh "$prototype/usr/lib/yonder/storage-prototype/mount-storage.sh" "$prototype"
     root_options=$(findmnt -n -T "$prototype" -o OPTIONS)
     boot_options=$(findmnt -n -T "$prototype/boot/firmware" -o OPTIONS)
-    case "$expected_mode:$root_options:$boot_options" in
+    case "$expected_mode:,$root_options,:$boot_options," in
         protected:*,ro,*:*,ro,*) ;;
         maintenance:*,rw,*:*,rw,*) ;;
         *) return 1 ;;
