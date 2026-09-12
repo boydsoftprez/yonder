@@ -385,5 +385,13 @@ mv /prototype/var/lib/yonder-state/seed-test-held /prototype/var/lib/yonder-stat
 [[ ! -e /prototype/var/lib/yonder-state/machine-id ]]
 sync
 unmount_prototype
+# Maintenance mode writes the simulated identity into the persistent /etc.
+# Restore the factory-empty file after the proof so the card creates its own
+# identity only on the physical board's first boot.
+mount -o rw "$root_loop" /prototype
+: >/prototype/etc/machine-id
+chmod 0444 /prototype/etc/machine-id
+sync -f /prototype/etc/machine-id
+umount /prototype
 printf '%s\n' 'PASS: actual protected mounts, one-shot maintenance, persistent apt install/removal, durable coordinator bootstrap/commit/restart, separate state/log/media, persistent identity/data, volatile reset, and incomplete-state refusal.'
 printf '%s\n' 'LIMIT: namespace mount test, not a board boot or electrical power-cut test.'

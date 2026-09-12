@@ -449,6 +449,18 @@ boot_mount
 [[ $(findmnt -n -T "$prototype/var/lib/yonder/captures" -o FSTYPE) == tmpfs ]]
 unmount_prototype
 tune2fs -U "$LOG_UUID" "$log_device" >/dev/null
+# Simulated maintenance and fallback boots create identity in persistent root
+# and state. Remove it after the proof so the released card remains factory
+# fresh and generates identity on its physical first boot.
+mount -o rw "$root_device" "$prototype"
+: >"$prototype/etc/machine-id"
+chmod 0444 "$prototype/etc/machine-id"
+sync -f "$prototype/etc/machine-id"
+umount "$prototype"
+mount -o rw "$state_device" "$prototype"
+rm -f "$prototype/machine-id"
+sync -f "$prototype"
+umount "$prototype"
 e2fsck -fn "$state_device" >/dev/null
 e2fsck -fn "$log_device" >/dev/null
 e2fsck -fn "$media_device" >/dev/null
