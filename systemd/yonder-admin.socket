@@ -1,0 +1,15 @@
+# SPDX-License-Identifier: GPL-3.0-or-later
+[Unit]
+Description=Yonder root administration socket
+Documentation=https://github.com/boydsoftprez/yonder
+
+[Socket]
+ListenStream=/run/yonder-admin/control.sock
+SocketUser=root
+SocketGroup=root
+SocketMode=0600
+DirectoryMode=0700
+RemoveOnStop=yes
+
+[Install]
+WantedBy=sockets.target

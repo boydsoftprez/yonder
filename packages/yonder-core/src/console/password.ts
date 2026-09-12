@@ -122,6 +122,11 @@ function parseStored(stored: string): StoredForm | undefined {
   return { n, r, p, salt, hash };
 }
 
+/** Validate imported credentials without deriving a key or exposing the stored hash. */
+export function isSupportedPasswordHash(stored: unknown): stored is string {
+  return typeof stored === "string" && stored.length <= 1024 && parseStored(stored) !== undefined;
+}
+
 /**
  * Derive a key, or return undefined if scrypt itself refuses.
  *

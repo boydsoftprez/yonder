@@ -1,0 +1,24 @@
+# SPDX-License-Identifier: GPL-3.0-or-later
+[Unit]
+Description=Yonder first Linux owner setup on the attached console
+Requires=yonder-admin.socket
+After=yonder-admin.socket systemd-tmpfiles-setup.service
+Before=getty@tty1.service
+ConditionPathExists=/dev/tty1
+ConditionPathExists=!/etc/yonder/bench-image
+
+[Service]
+Type=oneshot
+ExecStart=/usr/local/bin/yonder-node /opt/yonder/packages/yonder-core/dist/owner-access/cli.js --first-boot
+StandardInput=tty
+StandardOutput=tty
+StandardError=tty
+TTYPath=/dev/tty1
+TTYReset=yes
+TTYVHangup=yes
+TimeoutStartSec=infinity
+RemainAfterExit=yes
+UMask=0077
+
+[Install]
+WantedBy=multi-user.target

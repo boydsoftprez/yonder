@@ -1,0 +1,31 @@
+{
+  "compressedSha256": "334300f250802d6f8bb015fb7581da957f176b4b1dd230db3591749367b9dace",
+  "imageFileName": "334300f250802d6f8bb015fb7581da957f176b4b1dd230db3591749367b9dace-Armbian_26.8.3_Rock-5c_trixie_vendor_6.1.115_minimal.img.xz",
+  "partitionTable": "gpt",
+  "partitions": [
+    {
+      "attributes": "0x0",
+      "filesystem": {
+        "blockCount": 563968,
+        "blockSize": 4096,
+        "defaultMountOptions": "0x0000006c",
+        "features": {
+          "compatible": "0x0000003c",
+          "incompatible": "0x000022c2",
+          "readOnlyCompatible": "0x0000046b"
+        },
+        "type": "ext4",
+        "uuid": "61407a87-9bf1-4d50-b7ea-ab09cb19d413"
+      },
+      "number": 1,
+      "partitionUuid": "6aef0688-ab0e-4956-b558-9d76d0e557b7",
+      "sectorCount": 4511744,
+      "startSector": 32768,
+      "typeGuid": "b921b045-1df0-41c3-af44-4c6f280d3fae"
+    }
+  ],
+  "rawSha256": "638aa4ea7b792cef4ae8d1c00a740c56a3b2adbb8fa237885ae40dc70108f485",
+  "schemaVersion": 1,
+  "target": "radxa-rock5c",
+  "uncompressedBytes": 2327838720
+}

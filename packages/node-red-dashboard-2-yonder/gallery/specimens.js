@@ -3,6 +3,9 @@ import YonderCockpit from "../src/ui/YonderCockpit.vue";
 import YonderInterfaces from "../src/ui/YonderInterfaces.vue";
 import YonderDiagnostics from "../src/ui/YonderDiagnostics.vue";
 import YonderSettings from "../src/ui/YonderSettings.vue";
+import OwnerAccess from "../src/ui/OwnerAccess.vue";
+import RecoveryTools from "../src/ui/RecoveryTools.vue";
+import StorageMaintenance from "../src/ui/StorageMaintenance.vue";
 import {fixture as cockpitFixture} from "../cockpit/fixture.mjs";
 import YonderAim from "../src/ui/YonderAim.vue";
 import YonderAimPad from "../src/ui/YonderAimPad.vue";
@@ -328,6 +331,27 @@ export const SPECIMENS = [
     note: "R-UI-30 / R-SEC-14. Day selected and empty masked password fields. Gallery preview never sends a password or changes a device.",
     component: YonderSettings,
     props: { preview: true, theme: "day" },
+  },
+  {
+    title: "Linux owner access",
+    note: "The first-session Linux account form with SSH initially disabled. Preview mode renders the real controls without changing a device.",
+    component: OwnerAccess,
+    props: { preview: true },
+    part: true,
+  },
+  {
+    title: "Recovery backup and restore",
+    note: "The supported backup and restore boundary, including the credential warning and exclusions. Preview mode keeps every action local.",
+    component: RecoveryTools,
+    props: { preview: true },
+    part: true,
+  },
+  {
+    title: "Protected storage maintenance",
+    note: "A healthy protected device with an owner configured and no operation in progress. Preview mode cannot schedule a reboot.",
+    component: StorageMaintenance,
+    props: { preview: true },
+    part: true,
   },
   {
     title: "Cockpit — cove mission, synthetic telemetry",

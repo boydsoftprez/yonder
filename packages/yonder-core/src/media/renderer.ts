@@ -5,6 +5,7 @@ import { systemRunner, type CommandRunner } from "../net/runner.js";
 import type { SecretStore } from "../secrets/store.js";
 import type { Config } from "../schema/config.js";
 import type { Renderer } from "../apply/types.js";
+import { ConfigError } from "../config/errors.js";
 import { mediamtxConfig, MEDIA_OBSERVER_SECRET } from "./config.js";
 
 const UNIT = "mediamtx";
@@ -75,17 +76,20 @@ export class MediaRenderer implements Renderer {
   private readonly runner: CommandRunner;
   private readonly secrets: SecretStore;
   private readonly log: (line: string) => void;
+  private readonly allowSecretGeneration: boolean;
 
   constructor(opts: {
     path?: string;
     runner?: CommandRunner;
     secrets: SecretStore;
     log?: (line: string) => void;
+    allowSecretGeneration?: boolean;
   }) {
     this.path = opts.path ?? MEDIA_CONFIG_PATH;
     this.runner = opts.runner ?? systemRunner;
     this.secrets = opts.secrets;
     this.log = opts.log ?? (() => {});
+    this.allowSecretGeneration = opts.allowSecretGeneration ?? true;
   }
 
   /**
@@ -136,9 +140,17 @@ export class MediaRenderer implements Renderer {
     // Only now. A device with no camera generates no credential, which is what
     // makes R-SEC-07 true of a published image without anything having to
     // remember to strip one.
-    const { value: rtspPassword } = this.secrets.ensure("rtsp_password", "password");
+    const rtspPassword = this.allowSecretGeneration
+      ? this.secrets.ensure("rtsp_password", "password").value
+      : this.secrets.get("rtsp_password");
+    if (rtspPassword === undefined) throw new ConfigError("the media credential is unavailable");
     const observerPassword = config.cameras.some(camera => camera.outputs.some(output => output.kind === 'rtsp' && output.enabled))
-      ? this.secrets.ensure(MEDIA_OBSERVER_SECRET, "password").value : undefined;
+      ? this.allowSecretGeneration
+        ? this.secrets.ensure(MEDIA_OBSERVER_SECRET, "password").value
+        : this.secrets.get(MEDIA_OBSERVER_SECRET)
+      : undefined;
+    if (config.cameras.some(camera => camera.outputs.some(output => output.kind === 'rtsp' && output.enabled))
+      && observerPassword === undefined) throw new ConfigError("the media observer credential is unavailable");
     const next = mediamtxConfig({ config, rtspPassword, observerPassword });
     const current = existsSync(this.path) ? readFileSync(this.path, "utf8") : null;
     if (current === next) {

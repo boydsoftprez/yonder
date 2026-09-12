@@ -20,14 +20,14 @@
         "x": 285,
         "y": 93,
         "w": 614,
-        "h": 708
+        "h": 707
       }
     },
     {
       "key": "nrdb-ui-widget.nrdb-ui-yonder-holdkey.yonder-content-height",
       "box": {
         "x": 285,
-        "y": 813,
+        "y": 812,
         "w": 614,
         "h": 54
       }

@@ -20,6 +20,7 @@ import type { Clock, Renderer } from "../apply/types.js";
 import type { Config } from "../schema/config.js";
 import type { CommandRunner } from "../net/runner.js";
 import type { CounterReader } from "../net/reach/counters.js";
+import type { StateCoordinator } from "../state/types.js";
 
 let dir: string, configPath: string, journalPath: string;
 const noopRenderer: Renderer = { name: "noop", async render() {} };
@@ -229,6 +230,42 @@ async function flushMicrotasks(): Promise<void> {
 describe("startServer", () => {
   let socketPath: string;
   beforeEach(() => { socketPath = join(dir, "core.sock"); });
+
+  it("serves diagnostics but denies every persistent route when the root helper fails", async () => {
+    const secretsPath = join(dir, "secrets.yaml");
+    new SecretStore(secretsPath).ensureValue("ap_psk", DEFAULT_AP_PASSPHRASE);
+    const beforeConfig = readFileSync(configPath, "utf8");
+    const beforeSecrets = readFileSync(secretsPath, "utf8");
+    const unavailable: StateCoordinator = {
+      async recover() { throw new Error("helper failed"); },
+      async status() { throw new Error("unused"); },
+      async begin() { throw new Error("unused"); },
+      async beginSnapshot() { throw new Error("unused"); },
+    };
+    const server = await startServer({
+      socketPath, configPath, journalPath, secretsPath,
+      stateCoordinator: unavailable,
+      renderers: [noopRenderer], runner: noopRunner,
+    });
+    try {
+      const status = await call(socketPath, "GET", "/status");
+      expect(status.status).toBe(200);
+      expect((status.body as { degraded: string }).degraded).toMatch(/persistent changes are disabled/);
+      expect((await call(socketPath, "POST", "/apply", changed())).status).toBe(400);
+      expect((await call(socketPath, "POST", "/net/join", {
+        ssid: "flight-line", psk: "new-client-secret",
+      })).status).toBe(400);
+      expect((await call(socketPath, "POST", "/admin/change-password", {
+        currentPassword: ADMIN_PASSWORD,
+        newPassword: "replacement password",
+        confirmPassword: "replacement password",
+      })).status).toBe(400);
+      expect(readFileSync(configPath, "utf8")).toBe(beforeConfig);
+      expect(readFileSync(secretsPath, "utf8")).toBe(beforeSecrets);
+    } finally {
+      await server.close();
+    }
+  });
 
   it("binds a Unix socket, group-accessible and nothing wider", async () => {
     const server = await startServer({ socketPath, configPath, journalPath, renderers: [noopRenderer], secretsPath: join(dir, "secrets.yaml"), runner: noopRunner });

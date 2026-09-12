@@ -66,3 +66,9 @@ board, and it is the same trade every router on the market makes.
 Mitigations exist — restricting setup to a period after boot, or requiring physical access —
 and none is worth building now. If field experience shows it matters, the fix is small and
 this ADR gets a successor.
+
+## Linux owner access and recovery — 2026-09-10
+
+[ADR-0010](0010-image-storage-and-owner-recovery.md) adds an independent Linux owner
+account, optional SSH password/key authentication and reauthenticated plain owner recovery
+archives. The public AP and first-console-password boundary above remain unchanged.

@@ -1,13 +1,8 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 import { describe, it, expect } from "vitest";
 import { MODEM_PASSWORD_SECRET, ModemRequest, configureModem } from "./configure.js";
-import type { SecretSink } from "../join.js";
 import { ConfigSchema, DEFAULT_CONFIG, type Config } from "../../schema/config.js";
 
-function sink(): SecretSink & { stored: Record<string, string> } {
-  const stored: Record<string, string> = {};
-  return { stored, put: (name, value) => { stored[name] = value; } };
-}
 
 /** A device that already has a credential stored and referenced. */
 function withStoredPassword(): Config {
@@ -28,15 +23,13 @@ describe("configureModem", () => {
    * APN beside it was discarded too.
    */
   it("stores a typed password and puts a reference in the configuration", () => {
-    const secrets = sink();
     const result = configureModem(
       DEFAULT_CONFIG,
       { enabled: true, apn: "ereseller", username: "sim-user", password: "hunter2" },
-      secrets,
     );
     expect(result.ok).toBe(true);
     if (!result.ok) return;
-    expect(secrets.stored[MODEM_PASSWORD_SECRET]).toBe("hunter2");
+    expect(result.secretPatch).toEqual({ [MODEM_PASSWORD_SECRET]: "hunter2" });
     expect(result.config.network.modem.password).toEqual({ secret: MODEM_PASSWORD_SECRET });
     expect(result.config.network.modem.apn).toBe("ereseller");
     expect(result.config.network.modem.username).toBe("sim-user");
@@ -50,7 +43,7 @@ describe("configureModem", () => {
 
   it("leaves everything else exactly as it was", () => {
     const before = structuredClone(DEFAULT_CONFIG);
-    const result = configureModem(before, { enabled: true, apn: "ereseller" }, sink());
+    const result = configureModem(before, { enabled: true, apn: "ereseller" });
     expect(result.ok).toBe(true);
     if (!result.ok) return;
     expect(result.config.network.ap).toEqual(before.network.ap);
@@ -70,13 +63,12 @@ describe("configureModem", () => {
     ["absent", {}],
     ["empty", { password: "" }],
   ])("leaves a stored credential alone when the password is %s", (_case, extra) => {
-    const secrets = sink();
-    const result = configureModem(withStoredPassword(), { apn: "another", ...extra }, secrets);
+    const result = configureModem(withStoredPassword(), { apn: "another", ...extra });
     expect(result.ok).toBe(true);
     if (!result.ok) return;
     expect(result.config.network.modem.password).toEqual({ secret: MODEM_PASSWORD_SECRET });
     expect(result.config.network.modem.apn).toBe("another");
-    expect(secrets.stored).toEqual({});
+    expect(result.secretPatch).toEqual({});
   });
 
   /**
@@ -85,14 +77,14 @@ describe("configureModem", () => {
    * to be said rather than being spelled the same as "I did not touch it".
    */
   it("clears the reference on an explicit null", () => {
-    const result = configureModem(withStoredPassword(), { password: null }, sink());
+    const result = configureModem(withStoredPassword(), { password: null });
     expect(result.ok).toBe(true);
     if (!result.ok) return;
     expect(result.config.network.modem.password).toBeNull();
   });
 
   it("refuses a body that is not a modem configuration, without echoing it", () => {
-    const result = configureModem(DEFAULT_CONFIG, { apn: 42, password: "hunter2" }, sink());
+    const result = configureModem(DEFAULT_CONFIG, { apn: 42, password: "hunter2" });
     expect(result.ok).toBe(false);
     if (result.ok) return;
     expect(result.error).not.toContain("hunter2");
@@ -114,9 +106,7 @@ describe("configureModem", () => {
 
   /** Nothing is stored for a body that was refused. */
   it("stores nothing at all when the body is refused", () => {
-    const secrets = sink();
-    configureModem(DEFAULT_CONFIG, { apn: 42, password: "hunter2" }, secrets);
-    expect(secrets.stored).toEqual({});
+    expect(configureModem(DEFAULT_CONFIG, { apn: 42, password: "hunter2" }).ok).toBe(false);
   });
 });
 
@@ -135,7 +125,6 @@ describe("an appliance the operator has not named", () => {
     const result = configureModem(
       DEFAULT_CONFIG,
       { enabled: true, mode: "appliance" },
-      sink(),
     );
     expect(result.ok).toBe(true);
     if (!result.ok) return;
@@ -150,7 +139,6 @@ describe("an appliance the operator has not named", () => {
     const result = configureModem(
       DEFAULT_CONFIG,
       { enabled: true, mode: "appliance", interface: "usb0" },
-      sink(),
     );
     expect(result.ok).toBe(true);
     if (!result.ok) return;

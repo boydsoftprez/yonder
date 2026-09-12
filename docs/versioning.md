@@ -55,13 +55,20 @@ configuration changes. Creating a release artifact is a separate action.
 
 1. Record the installed version from **Status**, and read the target’s notes.
 2. Export local Flight plans and note browser-only display/data settings.
-3. Back up `/etc/yonder` securely on the board: it contains device credentials.
-   Never put it in Git, a support issue, or a public artifact.
+3. In **Settings → Recovery backup and restore**, choose **Download backup** and
+   store the JSON file securely. It includes supported device settings,
+   credentials, Linux owner access and mesh identity. Never put it in Git, a
+   support issue, or a public artifact.
 4. Build the complete target version using the [installation guide](getting-started.md#4-build-yonder-on-your-computer).
-5. Install during a bench maintenance session. Use the normal installer and
-   check core, console, networking, telemetry, and video afterward.
+5. For a protected image, use **Settings → Storage protection and maintenance**
+   to reboot into writable maintenance. Install during that bench session,
+   then choose **Return to protection**. Check core, console, networking,
+   telemetry, and video after the protected reboot.
 
 The installer preserves an existing device configuration. That is not a promise
 that every older version can read a newer configuration: downgrades need the
 matching saved configuration and the corresponding complete application build.
 Apply/Keep/Revert protects configuration transactions, not software upgrades.
+The recovery restore screen previews hardware compatibility and the identities
+it will replace before it accepts confirmation. Do not run the original and
+restored boards concurrently when they share the restored mesh identity.

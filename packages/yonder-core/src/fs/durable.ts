@@ -63,8 +63,11 @@ export function writeFileDurable(path: string, data: string, mode: number): void
 export function unlinkDurable(path: string): void {
   try {
     unlinkSync(path);
-  } catch {
-    return; // already gone — there is no directory change to force
+  } catch (error) {
+    if ((error as NodeJS.ErrnoException).code === "ENOENT") return;
+    // A failed unlink leaves the rollback record alive. Treating EIO/EROFS
+    // as absence would acknowledge confirmation and then revert it on boot.
+    throw error;
   }
   fsyncDir(dirname(path));
 }

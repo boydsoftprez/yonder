@@ -7,6 +7,31 @@ There is currently no published Yonder disk image. The primary path is a
 **Raspberry Pi 4 with 64-bit Raspberry Pi OS Lite**. Radxa Zero 3W notes are
 included where its setup differs.
 
+## When a ready-to-flash image is published
+
+A published release may include `rpi`, `radxa-zero3w`, and `radxa-rock5c`
+ARM64 images. Download the `.img.xz` whose target matches the board and its
+adjacent `.sha256` file. Verify the compressed download before flashing; for
+example on Linux or macOS:
+
+```sh
+shasum -a 256 -c yonder-VERSION-TARGET-arm64.sha256
+```
+
+Use Raspberry Pi Imager, Armbian Imager, or another verified raw-image writer
+to write the `.img.xz` to the intended card. On first boot, join the **yonder**
+Wi-Fi network with the published initial passphrase **yonder1234**, open
+`http://yonder.local:3000`, and create the console password. The setup console
+then lets you join the board to the normal Wi-Fi network and create the Linux
+owner account, including password and SSH-key access. Change the access-point
+passphrase after setup.
+
+GitHub draft releases are build candidates and are deliberately withheld from
+ordinary downloads. A candidate's static verification does not claim that its
+board, camera, encoder, UART, or power-cut behavior has passed physical
+qualification. Until a matching image is published for the target, continue
+with the base-OS installation below.
+
 You will use two terminals: one on your **build computer**, and one connected
 to the **board over SSH**. Commands below identify which machine runs them.
 Start on the bench, with propellers removed and the aircraft disarmed.

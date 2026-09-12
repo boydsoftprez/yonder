@@ -246,6 +246,7 @@ Parameter writes are vehicle commands. R-CMD applies to every requirement here.
 | R-SYS-07 | Provide an NTRIP client for RTK corrections | 3 |
 | R-SYS-08 | Support Remote ID where regulation requires it | 3 |
 | R-SYS-09 | Report supply-voltage state where the board exposes it, distinguishing *now* from *has happened since boot*, and record an occurrence in the log. An undervoltage event restarts the board, and a restart in flight presents as an aircraft that went quiet with nothing to explain it | 1 |
+| R-SYS-10 | Provision one Linux owner account through authenticated/re-authenticated Settings or local first-boot console, independent of console-password setup. Keep the service account separate, require the Linux password for sudo, and persist owner access and explicit SSH policy | 1 |
 
 ## R-CFG — Configuration
 
@@ -254,7 +255,7 @@ Parameter writes are vehicle commands. R-CMD applies to every requirement here.
 | R-CFG-01 | Hold all device state in a single declarative file, from which every other configuration file is generated | 1 |
 | R-CFG-02 | Validate against a published schema, rejecting invalid configuration without disturbing the running system | 1 |
 | R-CFG-03 | Apply changes behind a confirmation timer, reverting to the last known good configuration if unconfirmed. **Confirmation is evidence that the device is still reachable, not necessarily a human saying so** — where the device can establish that itself, it does, and the operator is not made to prove it (see R-CFG-11) | 1 |
-| R-CFG-04 | Keep secrets in a separate file that is never included in an image, a backup or a support bundle | 1 |
+| R-CFG-04 | Keep secrets in a separate file excluded from images and support bundles; include them only in an explicitly requested, reauthenticated owner recovery archive (R-CFG-15) | 1 |
 | R-CFG-05 | Configure a device fully headless by placing a configuration file on the boot partition | 1 |
 | R-CFG-06 | Seed any credential the system needs but the operator has not supplied — from a published default where one is defined (R-SEC-01), otherwise generated per device and retrievable through the console rather than only from a log. **Never leave a device unusable for want of a credential.** See [ADR-0007](adr/0007-credential-boundary.md) | 1 |
 | R-CFG-07 | Never require a vendor tool, an imaging wizard or a network service to configure a device | 1 |
@@ -265,6 +266,7 @@ Parameter writes are vehicle commands. R-CMD applies to every requirement here.
 | R-CFG-12 | **A change that cannot cost reachability is kept, not held.** The confirmation timer is the price of R-CFG-03's guarantee that a device comes back by itself; a change that touches nothing reachable has nothing to guarantee, and holding it means an operator watches their own choice undo itself. Everything is treated as reachable until proven otherwise, so a field nobody has considered is load-bearing by default. **Each exemption is earned individually and named leaf by leaf.** `ui.theme` earned it by reverting a palette an operator had watched take. `remote.zerotier`'s two fields earned it on a board, where a join added exactly one route and the client refused a controller-pushed route that overlapped the device's own network. `mavlink.endpoints`, `mavlink.autocast` and `mavlink.tcp_server.enabled` earn it by construction: none of them touches an interface, a route or a radio, and the window's own remedy — revert *and reboot* — would take the video, the telemetry and the mesh off a flying aircraft in exchange for protecting nothing. `mavlink.serial`, `mavlink.ingest` and `mavlink.tcp_server.port` are deliberately not exempt — the port because a value the schema accepts in full can still be one another service on the device already holds, and R-MAV-14 checks that collision against only `ui.port` | 1 |
 | R-CFG-14 | **At daemon startup, initialize every subsystem from the saved configuration even when another subsystem fails.** Bound each renderer, retain and report each failure, and continue to telemetry and camera startup when a modem or other dependency is unavailable. This restoration writes no replacement configuration and does not bypass the ordinary apply/confirm/rollback transaction | 1 |
 | R-CFG-13 | **What is generated matches the configuration, including what the configuration no longer says.** A setting an operator has cleared is *removed* from the generated file, not left standing at its old value — an omitted setting and an absent one are the same thing to the single declarative file and are not the same thing to the tool that writes the device, so the removal is stated rather than implied. Where a generated object cannot be changed into the shape now wanted, it is replaced rather than modified into something it cannot become. A generated file still carrying a value the configuration has dropped is a setting an operator believes they have cleared and which is still in force, with nothing anywhere saying which of the two is true | 1 |
+| R-CFG-15 | Provide reauthenticated plain owner backup/restore for supported configuration, secrets, Linux owner access and ZeroTier identity. Validate version/compatibility before changes and recover interrupted restore consistently; exclude media, OS/packages and custom Node-RED flows | 1 |
 
 ## R-HW — Hardware support
 
@@ -283,18 +285,19 @@ Parameter writes are vehicle commands. R-CMD applies to every requirement here.
 | ID | Requirement | P |
 |---|---|---|
 | R-STO-01 | Keep volatile runtime state in RAM, not on the storage medium | 1 |
-| R-STO-02 | Bound log growth so a long flight cannot fill the card | 1 |
+| R-STO-02 | Retain bounded diagnostic logs across boots, isolated from configuration/media capacity. Synchronize ordinary journal records every 10 seconds, with critical/alert/emergency records synchronized immediately; allow an unsynchronized tail on power loss. Prevent log growth from filling the card | 1 |
 | R-STO-03 | Survive loss of power at any moment without corrupting configuration | 1 |
-| R-STO-04 | Provide a read-only or overlay root option for operators who want it | 3 |
+| R-STO-04 | Protect system and boot filesystems by default in distributed images; keep normal transient writes bounded in RAM and durable owner state separate, with explicit apt maintenance (R-STO-07) | 1 |
 | R-STO-05 | Ship no periodic background task that writes to the card without a stated reason | 2 |
 | R-STO-06 | **Recording on the device's own medium stops before it fills it.** A reserve is kept that recording may not consume, the remaining time is shown against that reserve, and recording ends by itself when it is reached rather than by exhausting the card. R-STO-02 bounds what logging may take; this bounds what video may | 2 |
+| R-STO-07 | Report observed protected/maintenance state. Explicit maintenance makes the actual persistent system and boot writable for standard apt; return to protection afterward. Interrupted maintenance may require reflash and owner backup restore | 1 |
 
 ## R-SEC — Security
 
 | ID | Requirement | P |
 |---|---|---|
 | R-SEC-01 | Ship no shared default credential **that protects the vehicle or its configuration**. The setup access point may carry a published default passphrase, documented and never presented as a secret; every other credential is per device. See [ADR-0007](adr/0007-credential-boundary.md) | 1 |
-| R-SEC-02 | Disable remote root login; administrative access is by key | 1 |
+| R-SEC-02 | Disable remote root login. A freshly flashed image starts with SSH disabled; the Linux owner may explicitly enable public-key and/or password authentication. A conventional-install upgrade preserves its existing OS SSH setup until a first Linux owner operation durably commits. A failed or interrupted first-owner operation restores the pre-operation root-login and SSH service state. After the first owner commits, durable owner state remains the explicit SSH policy, including after owner removal. | 1 |
 | R-SEC-03 | Run the control plane as a dedicated unprivileged user, using narrowly scoped helpers for privileged operations | 2 |
 | R-SEC-04 | Expose no unauthenticated write path to configuration or to the vehicle from a non-loopback interface by default | 1 |
 | R-SEC-05 | Gate any code-execution surface behind a password set during setup, and expose it on no public-facing interface by default | 1 |

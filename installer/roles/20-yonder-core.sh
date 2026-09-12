@@ -4,6 +4,7 @@
 
 # A vendored Node avoids the network entirely; ensure_pkgs nodejs is only
 # needed when there is none.
+ensure_pkgs whois sudo openssh-server
 install_bundled_node || ensure_pkgs nodejs
 command -v npm >/dev/null 2>&1 || ensure_pkgs npm
 require_node 20
@@ -17,13 +18,15 @@ link_node
 yc_src="$YONDER_SRC/packages/yonder-core"
 yc_dest="$YONDER_PREFIX/packages/yonder-core"
 
+# Check the helper's unit inputs while the installed generation is still
+# running. A failed upgrade must not take a working core offline merely to
+# discover that its replacement payload is incomplete.
+for yc_admin_unit in yonder-admin.service yonder-admin.socket yonder-admin.tmpfiles yonder-owner-setup.service yonder-owner-getty.conf; do
+    [ -f "$YONDER_SRC/systemd/$yc_admin_unit" ] \
+        || die "required administration unit is missing: $yc_admin_unit"
+done
+
 log "installing yonder-core into $yc_dest"
-ensure_dir "$YONDER_PREFIX/packages" 0755
-ensure_dir "$yc_dest" 0755
-run rm -rf "$yc_dest/src"
-run cp "$yc_src/package.json" "$yc_dest/package.json"
-run cp "$yc_src/package-lock.json" "$yc_dest/package-lock.json"
-run cp "$yc_src/tsconfig.json" "$yc_dest/tsconfig.json"
 
 # A prebuilt tree needs both dist/ (the compiled daemon) and a node_modules/
 # that actually holds its production dependencies - either alone cannot run,
@@ -38,11 +41,31 @@ run cp "$yc_src/tsconfig.json" "$yc_dest/tsconfig.json"
 yc_prebuilt=0
 if [ -f "$yc_src/dist/daemon/server.js" ]; then
     if prebuilt_deps_present "$yc_src"; then
+        [ -f "$yc_src/dist/admin/main.js" ] \
+            || die "prebuilt yonder-core is missing dist/admin/main.js; refusing to replace the running administration helper"
         yc_prebuilt=1
     fi
 else
     log "no compiled daemon at $yc_src/dist/daemon/server.js"
 fi
+[ "$yc_prebuilt" = "1" ] || [ "$IMAGE_MODE" != "1" ] \
+    || die "image mode requires a prebuilt yonder-core dist/ with standalone production dependencies; refusing npm/source fallback"
+
+# A socket restart alone leaves an already activated yonder-admin.service
+# running from the old files. Stop core first so it cannot issue another
+# request, then stop the helper and its activation socket before replacing
+# either entry point. A failed stop aborts the upgrade; continuing would leave
+# an old privileged process serving requests against newly replaced files.
+service_stop_for_replacement yonder-core.service
+service_stop_for_replacement yonder-admin.socket
+service_stop_for_replacement yonder-admin.service
+
+ensure_dir "$YONDER_PREFIX/packages" 0755
+ensure_dir "$yc_dest" 0755
+run rm -rf "$yc_dest/src"
+run cp "$yc_src/package.json" "$yc_dest/package.json"
+run cp "$yc_src/package-lock.json" "$yc_dest/package-lock.json"
+run cp "$yc_src/tsconfig.json" "$yc_dest/tsconfig.json"
 
 if [ "$yc_prebuilt" = "1" ]; then
     log "prebuilt dist/ and a complete node_modules/ found in $yc_src; using them, skipping install and build"
@@ -88,6 +111,8 @@ fi
 # start rather than anything visible here. So the entry point is loaded, with
 # the node the unit names, from the tree systemd will read.
 assert_module_graph "$yc_dest" dist/daemon/server.js "$YONDER_NODE_LINK"
+assert_module_graph "$yc_dest" dist/admin/main.js "$YONDER_NODE_LINK"
+assert_module_graph "$yc_dest" dist/owner-access/cli.js "$YONDER_NODE_LINK"
 
 # A board with no configuration has nothing for the daemon to load: it throws
 # before it can listen, and Restart=always turns that into a restart loop
@@ -103,9 +128,41 @@ elif [ -f "$yc_default_config" ]; then
     log "seeding $YONDER_ETC/config.yaml from the shipped default"
     run cp "$yc_default_config" "$YONDER_ETC/config.yaml"
     run chmod 0644 "$YONDER_ETC/config.yaml"
+    # Fresh installs need a readable empty secret bag before the root helper
+    # can atomically seed the first generation. Never replace existing secrets.
+    if [ ! -e "$YONDER_ETC/secrets.yaml" ]; then
+        run install -m 0600 /dev/null "$YONDER_ETC/secrets.yaml"
+    fi
 else
     die "no default configuration at $yc_default_config"
 fi
+
+# Core's persistent mutations go through this private socket. Missing helper
+# files must fail installation, rather than produce a daemon that cannot boot.
+ensure_dir /var/lib/yonder-state 0700
+ensure_dir /usr/lib/tmpfiles.d 0755
+run cp "$YONDER_SRC/systemd/yonder-admin.tmpfiles" /usr/lib/tmpfiles.d/yonder-admin.conf
+# Needed before live socket activation; boot recreates it through tmpfiles.
+ensure_dir /run/sshd 0755
+for yc_admin_unit in yonder-admin.service yonder-admin.socket; do
+    run cp "$YONDER_SRC/systemd/$yc_admin_unit" "/etc/systemd/system/$yc_admin_unit"
+done
+if [ "$DRY_RUN" = "1" ]; then
+    yc_admin_service="$YONDER_SRC/systemd/yonder-admin.service"
+else
+    yc_admin_service=/etc/systemd/system/yonder-admin.service
+fi
+assert_unit_exec "$yc_admin_service" "$YONDER_NODE_LINK"
+assert_unit_accounts "$yc_admin_service"
+# A conventional upgrade can carry the pre-generation rollback journal at
+# /var/lib/yonder/apply.json. yonder-admin consumes and clears it after the
+# imported state is durable; under ProtectSystem=strict that exact legacy
+# directory must be writable or every activation retries on EROFS.
+assert_daemon_can_write "$yc_admin_service" /var/lib/yonder/apply.json
+run cp "$YONDER_SRC/systemd/yonder-owner-setup.service" /etc/systemd/system/yonder-owner-setup.service
+ensure_dir /etc/systemd/system/getty@tty1.service.d 0755
+run cp "$YONDER_SRC/systemd/yonder-owner-getty.conf" /etc/systemd/system/getty@tty1.service.d/70-yonder-owner.conf
+run install -m 0755 "$YONDER_SRC/installer/payload/yonder-owner-setup" /usr/local/sbin/yonder-owner-setup
 
 if [ -f "$YONDER_SRC/systemd/yonder-core.service" ]; then
     run cp "$YONDER_SRC/systemd/yonder-core.service" /etc/systemd/system/yonder-core.service
@@ -132,14 +189,19 @@ if [ -f "$YONDER_SRC/systemd/yonder-core.service" ]; then
     # account; this is the check that it did.
     assert_unit_accounts "$yc_unit"
 
-    if [ "$DRY_RUN" != "1" ] && command -v systemctl >/dev/null 2>&1; then
+    if command -v service_enable >/dev/null 2>&1; then
+        service_daemon_reload
+        service_enable yonder-owner-setup.service
+        service_enable yonder-admin.socket
+        service_restart yonder-admin.socket
+        service_enable yonder-core.service
+        service_restart yonder-core.service
+    elif [ "$DRY_RUN" != "1" ] && command -v systemctl >/dev/null 2>&1; then
         run systemctl daemon-reload
+        run systemctl enable yonder-owner-setup.service
+        run systemctl enable yonder-admin.socket
+        run systemctl restart yonder-admin.socket
         run systemctl enable yonder-core.service
-        # Enabling only arms the next boot. Without a start, a freshly flashed
-        # board sits there running nothing until someone reboots it, and the
-        # access point never appears. `restart` rather than `start` so
-        # re-running the installer also picks up the daemon just rebuilt
-        # above, instead of leaving the previous process in place.
         run systemctl restart yonder-core.service
     else
         log "skipping systemctl (dry run or not a systemd host)"

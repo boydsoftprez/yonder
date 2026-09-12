@@ -8,7 +8,7 @@ import { describe, it, expect, beforeEach, afterEach, vi } from "vitest";
  * write that lands in the page cache and a write that reaches the platter
  * produce identical files right up until the power goes.
  */
-const rec = vi.hoisted(() => ({ ops: [] as string[], paths: new Map<number, string>() }));
+const rec = vi.hoisted(() => ({ ops: [] as string[], paths: new Map<number, string>(), unlinkError: undefined as string | undefined }));
 
 vi.mock("node:fs", async (importOriginal) => {
   const actual = await importOriginal<typeof import("node:fs")>();
@@ -36,6 +36,7 @@ vi.mock("node:fs", async (importOriginal) => {
     },
     unlinkSync: (path: string) => {
       rec.ops.push(`unlink ${String(path)}`);
+      if (rec.unlinkError) throw Object.assign(new Error("injected filesystem failure"), { code: rec.unlinkError });
       return actual.unlinkSync(path);
     },
   };
@@ -77,7 +78,7 @@ function expectDurableWrite(ops: string[], path: string): void {
   expect(syncedDir).toBeGreaterThan(renamed);
 }
 
-beforeEach(() => { dir = mkdtempSync(join(tmpdir(), "yonder-dur-")); });
+beforeEach(() => { rec.unlinkError = undefined; dir = mkdtempSync(join(tmpdir(), "yonder-dur-")); });
 afterEach(() => { rmSync(dir, { recursive: true, force: true }); });
 
 describe("writeFileDurable", () => {
@@ -115,6 +116,18 @@ describe("saveConfig", () => {
 });
 
 describe("Journal", () => {
+  it("does not report a confirmed change when the rollback journal could not be removed", () => {
+    const path = join(dir, "apply.json");
+    const journal = new Journal(path);
+    journal.write({ id: "abc", previous: DEFAULT_CONFIG, startedAt: 0, previousIsDefault: false });
+    rec.unlinkError = "EIO";
+    expect(() => journal.clear()).toThrow("injected filesystem failure");
+    expect(existsSync(path)).toBe(true);
+    rec.unlinkError = undefined;
+    journal.clear();
+    expect(existsSync(path)).toBe(false);
+  });
+
   it("forces the entry to media before write() returns", () => {
     const p = join(dir, "apply.json");
     const ops = watch();
