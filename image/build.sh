@@ -24,7 +24,10 @@ case "$target" in rpi|radxa-zero3w|radxa-rock5c) ;; *) usage; exit 2 ;; esac
 inputs_root=${YONDER_INPUTS_ROOT:-$repo/image/out/input-sets}
 input_set=$inputs_root/$target
 
-mapfile -t resolved < <(node --input-type=module - "$repo" "$input_set" "$target" <<'NODE'
+resolved=()
+while IFS= read -r value; do
+    resolved[${#resolved[@]}]=$value
+done < <(node --input-type=module - "$repo" "$input_set" "$target" <<'NODE'
 import { pathToFileURL } from 'node:url';
 const { resolveInputSet } = await import(pathToFileURL(`${process.argv[2]}/image/lib/input-set.mjs`));
 const value = await resolveInputSet(process.argv[3], process.argv[4]);
