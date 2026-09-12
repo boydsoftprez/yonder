@@ -1,0 +1,316 @@
+// SPDX-License-Identifier: GPL-3.0-or-later
+// R-FLT-29/K-68: the camera window and the top-row Camera control
+// (acceptance cases 4-9). Case 6's drag/resize gestures follow
+// `CameraWindow.vue`'s own doc comment on mirroring `YonderPicture.vue`'s
+// pointer-capture shape; `.cockpit-body`'s bounding box is stubbed the way
+// `picture.component.test.ts`/`aimpad.component.test.ts` already stub
+// geometry, since jsdom performs no layout.
+import { mount } from '@vue/test-utils'
+import { markRaw } from 'vue'
+import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest'
+import YonderCockpit from '../YonderCockpit.vue'
+import PfdControlPanel from './PfdControlPanel.vue'
+import { validatePfdPreferences } from './pfd-controls.mjs'
+import { cameraWindowHome } from './camera-view.mjs'
+import { fixture, fixtureCamera } from '../../../cockpit/fixture.mjs'
+
+/** Enough of the browser's own WebRTC surface that a real `YonderPicture`
+ * does not throw in jsdom — identical to `camera-scene.component.test.ts`'s
+ * own `InertPeerConnection`. The connection itself is not under test here:
+ * these cases are about the window and the control around the picture. */
+class InertPeerConnection {
+  addTransceiver () {}
+  createOffer () { return Promise.resolve({ sdp: 'offer' }) }
+  setLocalDescription () { return Promise.resolve() }
+  close () {}
+}
+
+/** Stands in for `TerrainVision` through the `terrainComponent` seam
+ * (`YonderCockpit`'s own `<component :is="terrainComponent">`, never a
+ * registered name `global.stubs` could reach) — see
+ * `camera-scene.component.test.ts`'s own top-of-file account of why
+ * `global.stubs` does not intercept this path. */
+const RecordingTerrain = markRaw({
+  name: 'RecordingTerrain',
+  props: ['flight', 'telemetry', 'enabled', 'displayPose', 'imageryEnabled', 'lookaheadSeconds', 'dataProvider', 'viewport', 'draw', 'snapshot'],
+  template: '<div class="recording-terrain" :data-draw="draw"></div>'
+})
+
+/** A camera with a real path but no active stream, so `YonderPicture`'s own
+ * `cameraRunState` reads `stopped` (`running:false` reaches it through
+ * `cameraProps.report`, the lowest-priority tier `fromPayload` already
+ * falls back to when no message/store is present) — R-FLT-29 acceptance
+ * case 7's "camera selected but not streaming". */
+function stoppedCameraReport () {
+  const report = fixtureCamera()
+  const camera = { ...report.camera, running: false }
+  return { ...report, camera, cameras: [camera] }
+}
+
+function host (report = fixtureCamera(), extraProps = {}) {
+  const command = vi.fn(async () => ({ accepted: true, operationId: 'one' }))
+  const wrapper = mount(YonderCockpit, {
+    props: {
+      id: 'camera-window-host',
+      report,
+      api: { command },
+      terrainComponent: RecordingTerrain,
+      ...extraProps
+    },
+    global: {
+      // A real YonderPicture mounts under both the scene and the window in
+      // these cases (case 7 needs its own genuine stopped-state rendering),
+      // so it needs the same injects `camera-scene.component.test.ts`'s own
+      // `mountScenePicture` provides when mounting it directly.
+      provide: { $socket: { emit: vi.fn(), on: vi.fn(), off: vi.fn() }, $dataTracker: () => {} },
+      stubs: { YonderCockpitMap: true }
+    }
+  })
+  return { wrapper, command }
+}
+
+function pointerEvent (type, { pointerId = 1, clientX = 0, clientY = 0, button = 0 } = {}) {
+  return new PointerEvent(type, { pointerId, clientX, clientY, button, bubbles: true })
+}
+
+/** `.cockpit-body`'s bounding box, stubbed exactly the way
+ * `aimpad.component.test.ts`/`picture.component.test.ts` stub a specific
+ * element's own `getBoundingClientRect` — jsdom performs no layout, so
+ * these fractions have no other way to get a known box to clamp against. */
+function stubBody (wrapper, rect = { left: 0, top: 0, width: 1000, height: 600 }) {
+  wrapper.get('.cockpit-body').element.getBoundingClientRect = () => ({ ...rect, right: rect.left + rect.width, bottom: rect.top + rect.height } as DOMRect)
+}
+
+describe('the Camera window and control (R-FLT-29, K-68)', () => {
+  beforeEach(() => {
+    localStorage.clear()
+    vi.stubGlobal('RTCPeerConnection', InertPeerConnection)
+    vi.stubGlobal('fetch', () => new Promise(() => {}))
+  })
+  afterEach(() => {
+    vi.unstubAllGlobals()
+  })
+
+  // ---------------------------------------------------------------------
+  // Case 4
+  // ---------------------------------------------------------------------
+  it('full has no window and fills the scene; the Camera control opens exactly one window at home with terrain behind it, and maximize or the control again both return to full', async () => {
+    const { wrapper: w, command } = host()
+    w.vm.background = 'camera'
+    await w.vm.$nextTick()
+
+    expect(w.find('.camera-window').exists()).toBe(false)
+    expect(w.findComponent({ name: 'YonderPicture' }).props('scene')).toBe(true)
+    expect(w.find('.cockpit-camera').exists()).toBe(true)
+
+    const cameraButton = w.get('button[aria-label="Camera view"]')
+    expect(cameraButton.attributes('aria-pressed')).toBe('false')
+    await cameraButton.trigger('click')
+
+    expect(w.findAll('.camera-window')).toHaveLength(1)
+    expect(w.vm.preferences.display.cameraWindow).toEqual(cameraWindowHome)
+    expect(w.find('.cockpit-camera').exists()).toBe(false)
+    expect(w.findComponent(RecordingTerrain).props('draw')).toBe(true)
+    expect(cameraButton.attributes('aria-pressed')).toBe('true')
+
+    await w.get('.camera-window__maximize').trigger('click')
+    expect(w.find('.camera-window').exists()).toBe(false)
+    expect(w.find('.cockpit-camera').exists()).toBe(true)
+    expect(w.findComponent(RecordingTerrain).props('draw')).toBe(false)
+
+    await cameraButton.trigger('click')
+    expect(w.find('.camera-window').exists()).toBe(true)
+    await cameraButton.trigger('click')
+    expect(w.find('.camera-window').exists()).toBe(false)
+    expect(w.find('.cockpit-camera').exists()).toBe(true)
+
+    expect(command).not.toHaveBeenCalled()
+    w.unmount()
+  })
+
+  // ---------------------------------------------------------------------
+  // Case 5
+  // ---------------------------------------------------------------------
+  it('the Camera control sits beside full screen, reports its state, and is disabled/unavailable with no camera selected, doing nothing when pressed', async () => {
+    const { wrapper: w, command } = host(fixture()) // no camera at all
+    const cameraButton = w.get('button[aria-label="Camera view"]')
+    const fullscreenButton = w.get('.cockpit-fullscreen')
+    expect(cameraButton.element.nextElementSibling).toBe(fullscreenButton.element)
+    expect(cameraButton.attributes('disabled')).toBeDefined()
+    expect(cameraButton.text()).toContain('unavailable')
+
+    await cameraButton.trigger('click')
+    expect(w.vm.cameraView).toBe('full')
+    expect(w.find('.camera-window').exists()).toBe(false)
+
+    w.vm.toggleCameraView() // direct call bypasses the DOM's own disabled guard
+    expect(w.vm.cameraView).toBe('full')
+
+    expect(command).not.toHaveBeenCalled()
+    w.unmount()
+  })
+
+  it('the Camera control is available and reports window/full once a camera is selected', async () => {
+    const { wrapper: w } = host()
+    w.vm.background = 'camera'
+    await w.vm.$nextTick()
+    const cameraButton = w.get('button[aria-label="Camera view"]')
+    expect(cameraButton.attributes('disabled')).toBeUndefined()
+    expect(cameraButton.text()).toContain('Full · tap for window')
+    await cameraButton.trigger('click')
+    expect(cameraButton.text()).toContain('Window · tap for full')
+    w.unmount()
+  })
+
+  // ---------------------------------------------------------------------
+  // Case 6
+  // ---------------------------------------------------------------------
+  it('dragging the header moves the window, dragging the grip resizes its width only, both persist across a remount, and the settings reset returns to home without touching cameraView', async () => {
+    const report = fixtureCamera()
+    const { wrapper: w, command } = host(report)
+    w.vm.background = 'camera'
+    w.vm.toggleCameraView() // full -> window
+    await w.vm.$nextTick()
+    stubBody(w)
+
+    const header = w.get('.camera-window__header')
+    const grip = w.get('.camera-window__grip')
+
+    // Drag the header: x/y move together, w is untouched.
+    await header.element.dispatchEvent(pointerEvent('pointerdown', { pointerId: 1, clientX: 100, clientY: 100 }))
+    await header.element.dispatchEvent(pointerEvent('pointermove', { pointerId: 1, clientX: 150, clientY: 130 }))
+    await header.element.dispatchEvent(pointerEvent('pointerup', { pointerId: 1, clientX: 150, clientY: 130 }))
+    await w.vm.$nextTick()
+    expect(w.vm.preferences.display.cameraWindow.x).toBeCloseTo(0.18)
+    expect(w.vm.preferences.display.cameraWindow.y).toBeCloseTo(0.17)
+    expect(w.vm.preferences.display.cameraWindow.w).toBeCloseTo(0.17)
+
+    // Drag the grip: w changes, x/y are exactly what the header drag left.
+    const beforeResize = { ...w.vm.preferences.display.cameraWindow }
+    const aspectBefore = w.get('.camera-window').attributes('style')
+    await grip.element.dispatchEvent(pointerEvent('pointerdown', { pointerId: 2, clientX: 100, clientY: 100 }))
+    await grip.element.dispatchEvent(pointerEvent('pointermove', { pointerId: 2, clientX: 150, clientY: 100 }))
+    await grip.element.dispatchEvent(pointerEvent('pointerup', { pointerId: 2, clientX: 150, clientY: 100 }))
+    await w.vm.$nextTick()
+    expect(w.vm.preferences.display.cameraWindow.x).toBeCloseTo(beforeResize.x)
+    expect(w.vm.preferences.display.cameraWindow.y).toBeCloseTo(beforeResize.y)
+    expect(w.vm.preferences.display.cameraWindow.w).toBeGreaterThan(beforeResize.w)
+    expect(w.get('.camera-window').attributes('style')).toContain('aspect-ratio')
+    expect(w.get('.camera-window').attributes('style')?.match(/aspect-ratio:\s*([^;]+)/)?.[1])
+      .toBe(aspectBefore?.match(/aspect-ratio:\s*([^;]+)/)?.[1])
+
+    // A drag far past the box's own edge stays inside it.
+    await header.element.dispatchEvent(pointerEvent('pointerdown', { pointerId: 3, clientX: 0, clientY: 0 }))
+    await header.element.dispatchEvent(pointerEvent('pointermove', { pointerId: 3, clientX: 5000, clientY: 5000 }))
+    await header.element.dispatchEvent(pointerEvent('pointerup', { pointerId: 3, clientX: 5000, clientY: 5000 }))
+    await w.vm.$nextTick()
+    const pushed = w.vm.preferences.display.cameraWindow
+    expect(pushed.x + pushed.w).toBeLessThanOrEqual(1)
+    expect(pushed.x).toBeGreaterThanOrEqual(0)
+    expect(pushed.y).toBeGreaterThanOrEqual(0)
+
+    const dragged = { ...w.vm.preferences.display.cameraWindow }
+    w.unmount()
+
+    // Survives a remount: the same browser's localStorage, a fresh instance.
+    const { wrapper: w2 } = host(report)
+    expect(w2.vm.preferences.display.cameraWindow).toEqual(dragged)
+    expect(w2.vm.cameraView).toBe('window') // cameraView itself round-trips too
+
+    // The settings reset: home geometry, cameraView untouched.
+    w2.vm.setOption('cameraWindow', { ...cameraWindowHome })
+    await w2.vm.$nextTick()
+    expect(w2.vm.preferences.display.cameraWindow).toEqual(cameraWindowHome)
+    expect(w2.vm.cameraView).toBe('window')
+
+    expect(command).not.toHaveBeenCalled()
+    w2.unmount()
+  })
+
+  it('PfdControlPanel\'s reset control emits home geometry verbatim, without emitting cameraView', async () => {
+    const panel = mount(PfdControlPanel, {
+      props: { kind: 'attitude', flight: { live: false }, guidance: {}, telemetry: {}, references: {}, options: validatePfdPreferences().display, mission: { items: [] } }
+    })
+    const reset = panel.findAll('.pfd-wide-button').find(b => b.text() === 'Reset camera window position')
+    expect(reset).toBeTruthy()
+    await reset!.trigger('click')
+    expect(panel.emitted('option')?.at(-1)).toEqual(['cameraWindow', cameraWindowHome])
+    expect(panel.emitted('option')?.some(call => call[0] === 'cameraView')).toBe(false)
+    panel.unmount()
+  })
+
+  // ---------------------------------------------------------------------
+  // Case 7
+  // ---------------------------------------------------------------------
+  it('with a selected camera that is not streaming: full keeps today\'s unavailable banner and its terrain switch, and the control still flips; window shows the reason inside itself with no scene banner', async () => {
+    const { wrapper: w, command } = host(stoppedCameraReport())
+    w.vm.background = 'camera'
+    await w.vm.$nextTick()
+
+    // Full: cameraPath is truthy (a real path exists), so today's
+    // "Selected camera unavailable" fallback does not apply; the picture
+    // itself, still mounted, carries its own stopped-state message.
+    expect(w.find('.cockpit-camera-fallback').exists()).toBe(false)
+    expect(w.find('.cockpit-empty-background').exists()).toBe(false)
+    expect(w.find('.cockpit-camera').exists()).toBe(true)
+    expect(w.vm.cameraPath).toBeTruthy()
+
+    const cameraButton = w.get('button[aria-label="Camera view"]')
+    expect(cameraButton.attributes('disabled')).toBeUndefined()
+    await cameraButton.trigger('click')
+    expect(w.find('.camera-window').exists()).toBe(true)
+    expect(w.find('.cockpit-camera-fallback').exists()).toBe(false)
+    expect(w.find('.cockpit-empty-background').exists()).toBe(false)
+
+    expect(command).not.toHaveBeenCalled()
+    w.unmount()
+  })
+
+  it('with no camera path at all, today\'s fallback and its synthetic-terrain switch are unaffected by cameraView', async () => {
+    const { wrapper: w } = host(fixture()) // no camera fixture attached at all: cameraPath is falsy
+    w.vm.background = 'camera'
+    await w.vm.$nextTick()
+    expect(w.find('.cockpit-camera-fallback').exists()).toBe(true)
+    await w.get('.cockpit-camera-fallback button').trigger('click')
+    expect(w.vm.background).toBe('terrain')
+    w.unmount()
+  })
+
+  // ---------------------------------------------------------------------
+  // Case 8
+  // ---------------------------------------------------------------------
+  it('shows the stale age in the footer label in full, in the window header in window, and in neither while live', async () => {
+    const { wrapper: w } = host()
+    w.vm.background = 'camera'
+    await w.vm.$nextTick()
+
+    const emitStale = (seconds, text) => w.findComponent({ name: 'YonderPicture' }).vm.$emit('stale', { seconds, text })
+
+    emitStale(0, '')
+    await w.vm.$nextTick()
+    expect(w.get('.display-foot').text()).not.toMatch(/ago/)
+
+    emitStale(42, '42 s ago')
+    await w.vm.$nextTick()
+    expect(w.get('.display-foot').text()).toContain('42 s ago')
+    expect(w.find('.camera-window__age').exists()).toBe(false)
+
+    await w.get('button[aria-label="Camera view"]').trigger('click')
+    await w.vm.$nextTick()
+    expect(w.get('.display-foot').text()).not.toContain('42 s ago')
+
+    emitStale(7, '7 s ago')
+    await w.vm.$nextTick()
+    expect(w.get('.camera-window__age').text()).toBe('7 s ago')
+
+    emitStale(0, '')
+    await w.vm.$nextTick()
+    expect(w.find('.camera-window__age').exists()).toBe(false)
+
+    w.unmount()
+  })
+
+  // ---------------------------------------------------------------------
+  // Case 9 is asserted inline (command not called) in every case above.
+  // ---------------------------------------------------------------------
+})

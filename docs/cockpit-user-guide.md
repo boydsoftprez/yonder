@@ -437,7 +437,7 @@ recorder or send a flight command.*
 | Traffic is enabled but empty | Read the traffic-status message and selected range. A browser-access error may require **Display → Map, terrain & data → ADS-B relay origin → Apply ADS-B relay**; this changes only traffic sourcing. HTTP 429 waits for cooldown. No targets does not establish clear airspace. |
 | Traffic appears only on the map | Geometric height/geoid conversion, ownship datum or forward field of view may be missing. Import the EGM96 grid through Traffic data setup when applicable. |
 | Skid ball, wind or director disappears | Open its settings for the missing/stale-data reason. Visibility can also be restored from **Display → PFD settings**. |
-| Camera is unavailable / registration unavailable | Select a detected camera and start its stream in Cameras. Use **Use synthetic terrain** for the terrain background. Registered annotations also require physical calibration and capture-time pose; those are not supplied by these screenshots. |
+| Camera is unavailable / registration unavailable | Select a detected camera and start its stream in Cameras. In the full picture, **Use synthetic terrain** switches the background; in the camera window, the window states the reason itself. The top-row **Camera** control switches between the full picture and the window whenever a camera is selected, and is disabled and reads **unavailable** when none is. Registered annotations also require physical calibration and capture-time pose; those are not supplied by these screenshots. |
 
 The [walkthrough verification record](console/evidence/2026-09-08-cockpit-telemetry-layouts.md)
 lists the checks performed, fixes found and limits that still need hardware or
@@ -1143,6 +1143,37 @@ A validated geometry file cannot manufacture frame timestamps or prove a capture
 clock relationship. When those inputs are unavailable, the cockpit states the
 reason and keeps the screen-fixed instruments. Physical camera registration has
 not been established by the synthetic browser tests.
+
+## Fill the flight display with the camera
+
+Choosing **Camera** as the background (Display → Map, terrain & data) puts the
+selected camera's configured preview across the whole attitude scene, screen-fixed
+instruments over it, in place of the fixed split that used to sit behind a bordered
+picture box (K-68). None of the picture's own toolbar, badges, notices or thumbnail
+strip appears inside the PFD; the Camera page keeps all of them. The attitude line
+stays drawn over the picture by default — **PFD settings → Attitude & display →
+Horizon line over camera** turns it off. Height above ground and the forward-clearance
+forecast keep reporting while the camera fills the scene: [`camera-full.png`](images/cockpit/camera-full.png),
+also shown in the day palette at [`camera-full-day.png`](images/cockpit/camera-full-day.png).
+
+A **Camera** button sits in the top row beside full screen, reading the current state
+and what a tap does — *Full · tap for window* or *Window · tap for full* — and is
+disabled and reads *unavailable* with no camera selected. It never starts or stops a
+stream. Pressing it shrinks the picture into a small window over synthetic terrain
+([`camera-window.png`](images/cockpit/camera-window.png), and at tablet size in
+[`camera-window-tablet.png`](images/cockpit/camera-window-tablet.png)): drag the
+window's header to move it, drag its corner grip to resize it between one eighth and
+one half of the scene's width while it keeps the picture's own shape. Place and size
+are remembered in this browser with the other display preferences and reset from
+**PFD settings → Attitude & display → Reset camera window position**, which does not
+change whether the camera is full or windowed. The window's own maximize control, or
+the Camera button again, returns to the full picture.
+
+While the selected camera is not streaming: the full picture keeps today's message
+and its **Use synthetic terrain** switch; the window states the reason inside itself.
+Either way, a picture that goes quiet still desaturates, darkens and takes the hatch,
+and its running age appears in the PFD's footer label while full or the window's own
+header while windowed — never both, and never while the picture is live.
 
 ## Development verification
 

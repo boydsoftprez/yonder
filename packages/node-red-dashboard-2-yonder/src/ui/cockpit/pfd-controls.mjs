@@ -1,6 +1,7 @@
 // Display references and settings. These values never become aircraft commands.
 // SPDX-License-Identifier: GPL-3.0-or-later
 import {units} from './flight-units.mjs';
+import {cameraViewSettings, clampCameraWindow, cameraWindowHome} from './camera-view.mjs';
 export const referenceFields = Object.freeze({
   airspeed: {
     title: 'Airspeed reference',
@@ -57,6 +58,12 @@ export const displayDefaults = Object.freeze({
   // mount is level and the picture is clear; the switch in PFD settings is
   // for the operator who finds it distracting, not a default choice.
   horizonLine: true,
+  // R-FLT-29/K-68: the camera's other presentation. `full` is the default
+  // so the Flight page's default capture — no camera chosen, background
+  // already `terrain` — draws nothing new (`camera-view.mjs`'s own doc
+  // comment on `cameraViewSettings`).
+  cameraView: 'full',
+  cameraWindow: cameraWindowHome,
   ...units(),
   stripPlacement: 'mfd',
   layout: 'split'
@@ -102,6 +109,12 @@ export function validatePfdPreferences(input = {}) {
   if (['pfd', 'mfd', 'hidden'].includes(input?.display?.stripPlacement)) display.stripPlacement = input.display
     .stripPlacement;
   if (['split', 'pfd-wide', 'mfd-wide', 'swap'].includes(input?.display?.layout)) display.layout = input.display.layout;
+  display.cameraView = cameraViewSettings(input?.display?.cameraView);
+  // No live `aspect` at load time — nothing has rendered yet. See
+  // `clampCameraWindow`'s own doc comment on why its fallback is harmless
+  // here: the next real drag or resize gesture re-clamps with the actual
+  // box and picture shape.
+  display.cameraWindow = clampCameraWindow(input?.display?.cameraWindow);
   Object.assign(display,units(input?.display));
   return {
     references,

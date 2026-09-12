@@ -162,7 +162,7 @@
     </div>
     </div>
     <nav v-if="options.menuStrip!==false" class="pfd-menu-strip" aria-label="PFD touch menu"><button @click="open('menu')">PFD settings</button><button @click="$emit('navigate','mission')">Flight plan</button><button @click="open('director')">FD</button><button @click="$emit('navigate','settings')">Display</button></nav>
-    <footer class="display-foot"><span>Touch an instrument · cyan = local reference</span><span>{{backgroundLabel||'Conventional horizon'}}</span></footer>
+    <footer class="display-foot"><span>Touch an instrument · cyan = local reference</span><span>{{backgroundLabel||'Conventional horizon'}}<template v-if="staleLabel"> · {{staleLabel}}</template></span></footer>
     <PfdControlPanel v-if="panel" :key="panel" :kind="panel" :flight="flight" :guidance="guidance" :telemetry="telemetry" :references="references" :options="options" :mission="mission" :terrain-status="terrainStatus" @close="panel=null" @panel="open" @reference="(key,value)=>$emit('reference',key,value)" @option="(key,value)=>$emit('option',key,value)" @navigate="$emit('navigate',$event)"/>
   </section>
 </template>
@@ -216,7 +216,13 @@ export default {
     PfdTurnRate
   },
   props: ['flight', 'guidance', 'telemetry', 'cdiScale', 'references', 'options', 'mission', 'trafficTracks', 'homeNavigation', 'reportedFlightState',
-    'trafficOptions', 'trafficSelected', 'trafficNow', 'backgroundReady', 'backgroundLabel', 'terrainReport', 'snapshot', 'cameraBackground'
+    'trafficOptions', 'trafficSelected', 'trafficNow', 'backgroundReady', 'backgroundLabel', 'terrainReport', 'snapshot', 'cameraBackground',
+    // R-FLT-29/K-68, design decision 11: the picture's own stale age, shown
+    // in the footer only while the camera fills the scene by itself — the
+    // host (YonderCockpit.vue) already decides that boundary and hands
+    // over pre-formatted text or '', so this file adds no new condition of
+    // its own for when to show it.
+    'staleLabel'
   ],
   emits: ['reference', 'option', 'navigate', 'traffic-select', 'flight-controls'],
   setup(props, {

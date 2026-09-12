@@ -24,6 +24,7 @@
      <button class="utility-display" aria-label="Display menu" @click="panel='display-menu'">Display</button>
      <button class="utility-extra" aria-label="Aircraft and command status" @click="panel='status'">Aircraft<small>{{flight.live?(telemetry.mode||'MAVLink'):'No data'}}<template v-if="connectionStats&&Number.isFinite(connectionStats.flightHz)"> · {{connectionStats.flightHz.toFixed(1)}} Hz</template></small></button>
      <button v-if="instrumentAlerts.length" class="cockpit-alert-summary" aria-label="Show aircraft notices" @click="panel='alerts'">{{instrumentAlerts.length}} !</button>
+     <button class="utility-extra cockpit-camera-toggle" aria-label="Camera view" :aria-pressed="cameraView==='window'" :disabled="!cameraPath" @click="toggleCameraView"><span class="cockpit-camera-glyph" aria-hidden="true">⟲</span>Camera<small>{{cameraToggleState}}</small></button>
      <button class="utility-extra cockpit-fullscreen" :aria-label="fullscreen?'Exit full screen':'Enter full screen'" :title="fullscreen?'Exit full screen':'Full screen'" :aria-pressed="fullscreen" :disabled="fullscreenBusy" @click="toggleFullscreen">{{fullscreen?'↙':'⛶'}}</button>
      <button class="utility-more" aria-label="Cockpit menu" @click="panel='cockpit-menu'">Menu</button>
     </nav>
@@ -55,7 +56,8 @@
       :background-ready="backgroundReady"
       :background-label="backgroundLabel"
       :terrain-report="terrainReport"
-      :camera-background="background!=='terrain'"
+      :camera-background="background!=='terrain'&&cameraView==='full'"
+      :stale-label="footerStaleLabel"
       @flight-controls="openFlightControls"
       @reference="setReference"
       @option="setOption"
@@ -67,8 +69,12 @@
                background is chosen, so height above ground and the
                clearance forecast keep reporting while a camera fills the
                scene (design decision 9) — only `draw` changes with the
-               choice. The picture (below) is a later sibling, so it paints
-               over this on an equal z-index without either needing one. -->
+               choice. It also paints whenever the camera window is open
+               (`cameraView==='window'`): the window's own scene is always
+               synthetic terrain, independent of what the Background
+               chooser separately says (cameraView's own doc comment). The
+               picture (below) is a later sibling, so it paints over this
+               on an equal z-index without either needing one. -->
           <slot
             name="terrain"
             :snapshot="snapshot"
@@ -87,17 +93,21 @@
               :enabled="onlineTerrain"
               :imagery-enabled="onlineMap"
               :lookahead-seconds="predicted.seconds||predictionSeconds"
-              :draw="background==='terrain'"
+              :draw="background==='terrain'||cameraView==='window'"
               @status="terrainStatus=$event"
             />
           </slot>
-          <template v-if="background!=='terrain'">
+          <!-- The window (mounted as a peer of the insets, in .cockpit-body
+               below) takes the camera out of this scene entirely: only the
+               `full` state ever draws the picture here. -->
+          <template v-if="background!=='terrain'&&cameraView==='full'">
             <template v-if="cameraPath">
               <YonderPicture
                 :id="id+'-camera'"
                 :props="cameraProps"
                 :scene="true"
                 class="cockpit-camera"
+                @stale="pictureStale=$event"
               />
               <CameraTerrainOverlay
                 v-if="background==='camera-overlay'"
@@ -218,6 +228,30 @@
         >Mission actions</button></footer>
     </section>
     <div v-if="background!=='terrain'&&!cameraPath" class="cockpit-camera-fallback" role="status"><span>Selected camera unavailable</span><button aria-label="Use synthetic terrain" @click="background='terrain';onlineTerrain=true">Use synthetic terrain</button></div>
+    <!-- R-FLT-29/K-68: the camera's other form (design decision 6) — a peer
+         of the mission and map insets below, positioned the identical way
+         (absolute within .cockpit-body, z-index 5) because the operator
+         placed it, drawn above the instruments the same way those are.
+         Independent of `background`: reachable from `terrain` too, as long
+         as a camera is actually configured (cameraPath). Registered terrain
+         is never drawn in the window (design decision 8) — only the plain
+         picture, never CameraTerrainOverlay. -->
+    <CameraWindow
+      v-if="cameraPath&&cameraView==='window'"
+      :aspect="16/9"
+      :geometry="preferences.display.cameraWindow"
+      label="CAMERA"
+      :stale="pictureStale"
+      @update:geometry="value=>setOption('cameraWindow',value)"
+      @maximize="setOption('cameraView','full')"
+    >
+      <YonderPicture
+        :id="id+'-camera'"
+        :props="cameraProps"
+        :scene="true"
+        @stale="pictureStale=$event"
+      />
+    </CameraWindow>
     <div
       v-if="background==='camera-overlay'&&!registration.ready"
       class="cockpit-registration"
@@ -631,6 +665,7 @@ import {
 import coveDemo from './cockpit/data/cove-demo.json'
 import coveVtolDemo from './cockpit/data/cove-vtol-demo.mjs'
 import CameraTerrainOverlay from './cockpit/CameraTerrainOverlay.vue'
+import CameraWindow from './cockpit/CameraWindow.vue'
 import TrafficVision from './cockpit/TrafficVision.vue'
 import TerrainVision from './cockpit/TerrainVision.vue'
 import TelemetryStrip from './cockpit/TelemetryStrip.vue'
@@ -703,6 +738,7 @@ export default {
     TelemetryStrip,
     NavigationDeviation,
     CameraTerrainOverlay,
+    CameraWindow,
     TrafficVision,
     PrimaryFlightDisplay,
     FlightControlPanel,
@@ -781,6 +817,12 @@ export default {
         message: 'Traffic feed off'
       },
       cameraId: null,
+      // R-FLT-29/K-68: `YonderPicture`'s own `stale` payload, from whichever
+      // instance is currently mounted (full scene or the window) — there is
+      // only ever one at a time, so one field covers both (design decision
+      // 11: the age moves between the footer label and the window header,
+      // it does not appear in both).
+      pictureStale: { seconds: 0, text: '' },
       aircraftDatum: 'UNKNOWN',
       calibrationCandidate: null,
       trafficRange: 10,
@@ -916,12 +958,43 @@ export default {
         message: 'Terrain data unavailable · conventional horizon'
       }
     },
+    // R-FLT-29/K-68: whenever the window is showing (regardless of which
+    // background the operator separately chose), the *scene* is synthetic
+    // terrain — so both facts below follow terrain's own readiness/message,
+    // exactly as they do when background is literally 'terrain'. Only a
+    // camera filling the scene by itself (full, camera-type background)
+    // reads from the camera. See cameraView's own doc comment for why the
+    // window is independent of `background`.
     backgroundReady() {
-      return this.background === 'terrain' ? this.terrainReport.state === 'ready' : !!this.cameraPath
+      return (this.background === 'terrain' || this.cameraView === 'window')
+        ? this.terrainReport.state === 'ready' : !!this.cameraPath
     },
     backgroundLabel() {
-      return this.background === 'terrain' ? (this.terrainReport.message || 'Synthetic terrain') : (this.cameraPath ? (
+      return (this.background === 'terrain' || this.cameraView === 'window')
+        ? (this.terrainReport.message || 'Synthetic terrain') : (this.cameraPath ? (
         this.snapshot.camera?.name || 'Selected camera') : 'Camera unavailable')
+    },
+    // R-FLT-29/K-68: `full` or `window` — a display preference like
+    // `horizonLine`, read through the same `preferences.display` object so
+    // `setOption`/`persist()` already cover it. Independent of `background`
+    // by design (decision 7): the top-row control and the Display panel's
+    // own Background chooser are two separate ways to reach the same two
+    // states, not two states that must always agree with each other.
+    cameraView() {
+      return this.preferences.display.cameraView
+    },
+    // Design's own states table, verbatim, for the button's second line.
+    cameraToggleState() {
+      if (!this.cameraPath) return 'unavailable'
+      return this.cameraView === 'window' ? 'Window · tap for full' : 'Full · tap for window'
+    },
+    // R-VID-03/design decision 11: the age lives in the footer label only
+    // while the picture is filling the scene by itself (full) and actually
+    // mounted (`cameraPath`) — the window carries its own copy in its own
+    // header instead, never both at once.
+    footerStaleLabel() {
+      return (this.cameraView === 'full' && this.cameraPath && this.pictureStale.seconds > 0)
+        ? this.pictureStale.text : ''
     },
     registration() {
       return this.cameraRegistration || cameraOverlayGate(this.snapshot.camera)
@@ -1189,6 +1262,16 @@ export default {
       });
       this.persist();
       if(['altitudeUnit','speedUnit','verticalSpeedUnit'].includes(key))this.rescaleInstrumentUnits(previous)
+    },
+    // R-FLT-29/K-68: the top-row Camera control and the window's own
+    // maximize both flip/settle `cameraView` through this — see
+    // `cameraView`'s own doc comment for why nothing here touches
+    // `background`. Guarded again here, defensively, alongside the
+    // button's own `:disabled` (R-CMD-04: never a control that does
+    // something when it reads unavailable).
+    toggleCameraView() {
+      if (!this.cameraPath) return
+      this.setOption('cameraView', this.cameraView === 'window' ? 'full' : 'window')
     },
     navigate(target) {
       if(target==='instrument-layout'){this.panel='display-setup';return}

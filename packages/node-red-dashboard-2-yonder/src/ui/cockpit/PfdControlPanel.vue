@@ -30,6 +30,8 @@
         <label class="pfd-option"><span>Pitch ladder</span><input type="checkbox" :checked="options.pitchLadder" @change="$emit('option','pitchLadder',$event.target.checked)"></label>
         <label class="pfd-option"><span>Secondary readouts<small>Pitch / bank and desired track</small></span><input type="checkbox" :checked="options.secondary" @change="$emit('option','secondary',$event.target.checked)"></label>
         <label class="pfd-option"><span>Horizon line over camera<small>Attitude line drawn over the picture when a camera is the flight display's background</small></span><input type="checkbox" :checked="options.horizonLine!==false" @change="$emit('option','horizonLine',$event.target.checked)"></label>
+        <button class="pfd-wide-button" @click="$emit('option','cameraWindow',{...cameraWindowHome})">Reset camera window position</button>
+        <p class="pfd-control-note">Returns the camera window to its top-left home and default size. Does not change whether the camera is full or windowed.</p>
         <button class="pfd-wide-button" @click="navigate('instrument-layout')">Instrument panel &amp; PFD/MFD layout</button>
         <button class="pfd-wide-button" @click="navigate('sources')">Map, terrain &amp; data →</button>
         <button class="pfd-wide-button" @click="$emit('panel','director')">Flight director settings →</button>
@@ -106,6 +108,7 @@ import {
   parseReference,
   missionAltitudeFt
 } from './pfd-controls.mjs';
+import { cameraWindowHome } from './camera-view.mjs';
 export default {
   components:{CockpitOverlay,FlightUnits},
   props: ['kind', 'flight', 'guidance', 'telemetry', 'references', 'options', 'mission', 'terrainStatus'],
@@ -222,7 +225,8 @@ export default {
       set,
       keyboard,
       navigate,
-      shown,referenceFields:displayFields
+      shown,referenceFields:displayFields,
+      cameraWindowHome
     };
   }
 }

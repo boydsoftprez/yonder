@@ -18,6 +18,10 @@ configurable production instruments and layouts using demonstration readings:
 | `cockpit-telemetry.png` | Source inspector, provenance, pinning and recent numeric history |
 | `cockpit-split.png` | Optional PFD beside MFD arrangement |
 | `cockpit-stacked.png` | Optional PFD above MFD arrangement |
+| `camera-full.png` | R-FLT-29/K-68: a fixture camera filling the PFD's attitude scene, instruments over it, the attitude line drawn over the picture |
+| `camera-full-day.png` | The same full state in the day palette |
+| `camera-window.png` | The camera's other form: a small window at its top-left home, synthetic terrain filling the scene behind it |
+| `camera-window-tablet.png` | The camera window at tablet size (768×1024) |
 
 These examples demonstrate local display configuration. A selected source is not
 proof that its sensor exists, and example display bands are not aircraft limits.

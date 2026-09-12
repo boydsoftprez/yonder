@@ -214,6 +214,91 @@
   height: 100%
 }
 
+/* R-FLT-29/K-68 (design decision 6): the camera's other form. Positioned
+   exactly like .cockpit-mission/.cockpit-map-pane below (absolute within
+   .cockpit-body, same z-index) because it is a peer of those insets, drawn
+   above the instruments for the identical reason: the operator placed it. */
+.y-cockpit .camera-window {
+  position: absolute;
+  z-index: 5;
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
+  border: 1px solid #b8c7c980;
+  border-radius: 7px;
+  overflow: hidden;
+  background: var(--cockpit-pane);
+  box-shadow: 0 2px 12px #0008
+}
+
+.y-cockpit .camera-window__header {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  flex: none;
+  min-height: 28px;
+  padding: 3px 4px 3px 8px;
+  background: #10232ddd;
+  font-size: 10px;
+  letter-spacing: 1px;
+  cursor: grab;
+  touch-action: none;
+  user-select: none
+}
+
+.y-cockpit .camera-window__label {
+  white-space: nowrap
+}
+
+.y-cockpit .camera-window__age {
+  color: #ffc786;
+  font-size: 9px;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis
+}
+
+.y-cockpit .camera-window__maximize {
+  margin-left: auto;
+  min-height: 22px;
+  min-width: 22px;
+  padding: 0;
+  font-size: 13px;
+  line-height: 1;
+  border-radius: 3px
+}
+
+.y-cockpit .camera-window__body {
+  position: relative;
+  flex: 1;
+  min-height: 0
+}
+
+.y-cockpit .camera-window__grip {
+  position: absolute;
+  right: 0;
+  bottom: 0;
+  width: 16px;
+  height: 16px;
+  min-height: 0;
+  border: 0;
+  border-radius: 3px 0 7px 0;
+  background: linear-gradient(135deg, transparent 0 45%, #b8c7c980 45% 55%, transparent 55% 100%);
+  cursor: nwse-resize;
+  touch-action: none
+}
+
+/* The top-row control (Step 4): the glyph is sized in `em` — 1, the row's
+   own scale, not larger — so it never inflates the line box past what
+   `.utility-extra`'s shared base already gives every other two-line button
+   in this row (confirmed against the real rendered Aircraft button: a
+   larger glyph measurably grows the button past its neighbours, one `em`
+   does not). */
+.y-cockpit .cockpit-camera-glyph {
+  font-size: 1em;
+  margin-right: 3px
+}
+
 .y-cockpit .pfd-menu-strip {
   position: relative;
   z-index: 7;

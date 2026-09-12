@@ -2516,10 +2516,11 @@ runs the actual pipeline argv, checks concurrent RTSP delivery and can enforce m
 frame rates. Hardware evidence and remaining acceptance work are recorded in
 [`rockchip-video-shipped.md`](hardware/rockchip-video-shipped.md).
 
-### K-68 · The PFD's camera background is the Camera page's picture box, not the scene — OPEN
+### K-68 · ~~The PFD's camera background is the Camera page's picture box, not the scene~~ — CLOSED
 
-**Status:** Open · **Requirements:** R-FLT-09, R-FLT-01, R-FLT-29 · **Found:** 2026-09-11, by the
-operator on a deployed console with a streaming camera
+**Status:** Closed in software; hardware confirmation pending · **Requirements:** R-FLT-09,
+R-FLT-01, R-FLT-29 · **Found:** 2026-09-11, by the operator on a deployed console with a
+streaming camera
 
 Choosing **Camera** as the flight display's background mounts the Camera page's picture
 component whole into the PFD's background slot. The picture keeps its own shape inside a
@@ -2541,5 +2542,21 @@ background was never captured with a picture in it by any gate or guide; the onl
 this path exercises the camera-unavailable fallback (F-16).
 
 **Design:** [the camera in the flight display](superpowers/specs/2026-09-11-flight-camera-in-pfd-design.md).
-Closes when the camera fills the scene as that design specifies and a person has seen it on
-the Radxa with the SeekerHD streaming.
+
+**Closed by** the camera filling the attitude scene edge to edge with the instruments over
+it and none of the picture's own chrome inside the PFD, the fixed split replaced by the
+display's own dark ground colour, and the attitude line kept available over the picture
+(R-FLT-29). The camera's other form — a movable, resizable window over synthetic terrain,
+opened and closed by one Camera control beside full screen — is the same requirement's
+second half: height above ground and the forward-clearance forecast keep reporting with the
+camera filling the scene either way, because terrain evaluation no longer depends on terrain
+drawing. `YonderPicture.vue`'s `scene` prop, `TerrainVision.vue`'s `draw` prop,
+`PrimaryFlightDisplay.vue`, `CameraWindow.vue`, `camera-view.mjs` and `YonderCockpit.vue`
+carry it; `camera-scene.component.test.ts` and `camera-window.component.test.ts` cover the
+acceptance cases, and the cockpit guide captures both states, both palettes and tablet size
+against a fixture camera (`docs/images/cockpit/`).
+
+**Pending:** a person has not yet seen this on the Radxa with the SeekerHD streaming. Until
+then, the live preview filling the PFD, the window and control behaving as tested, stopping
+the stream showing the unavailable states, and height above ground continuing while the
+camera is full are software-verified only, not hardware-confirmed.
