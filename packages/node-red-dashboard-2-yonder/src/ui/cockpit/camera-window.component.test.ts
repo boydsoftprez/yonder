@@ -150,6 +150,11 @@ describe('the Camera window and control (R-FLT-29, K-68)', () => {
     expect(cameraButton.element.nextElementSibling).toBe(fullscreenButton.element)
     expect(cameraButton.attributes('disabled')).toBeDefined()
     expect(cameraButton.text()).toContain('unavailable')
+    // Disabled and reading "unavailable" must never also announce itself as
+    // pressed (Minor 1, whole-branch re-review): the default background is
+    // `terrain`, which derives `cameraView==='window'`, so the control needs
+    // `cameraPath` gating too or it claims to be pressed with no camera.
+    expect(cameraButton.attributes('aria-pressed')).toBe('false')
 
     // Pressing it changes nothing at all: no window, and the background it
     // would otherwise move stays where it was (the design's third row —
@@ -259,7 +264,7 @@ describe('the Camera window and control (R-FLT-29, K-68)', () => {
   // ---------------------------------------------------------------------
   // Case 7
   // ---------------------------------------------------------------------
-  it('with a selected camera that is not streaming: full keeps today\'s unavailable banner and its terrain switch, and the control still flips; window shows the reason inside itself with no scene banner', async () => {
+  it('with a selected camera that is not streaming: full shows the picture\'s own stopped message instead of today\'s unavailable banner, and the control still flips; window shows the cockpit\'s unavailable mark with no scene banner', async () => {
     const { wrapper: w, command } = host(stoppedCameraReport())
     w.vm.background = 'camera'
     await w.vm.$nextTick()

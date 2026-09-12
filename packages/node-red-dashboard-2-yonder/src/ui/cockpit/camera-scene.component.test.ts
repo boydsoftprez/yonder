@@ -397,6 +397,15 @@ describe('TerrainVision draw prop (R-FLT-29)', () => {
 // ---------------------------------------------------------------------------
 
 describe('YonderCockpit keeps terrain mounted under a camera (R-FLT-29, K-68)', () => {
+  // Minor 7, whole-branch re-review: `background` is now a persisted display
+  // preference (R-FLT-29/C2), so a test here that sets `camera` and does not
+  // restore `terrain` leaves it for the next one to read. Clearing first
+  // makes every case here independent of ordering, matching
+  // `camera-window.component.test.ts`'s own `beforeEach`.
+  beforeEach(() => {
+    localStorage.clear()
+  })
+
   /**
    * `YonderCockpit` reaches the terrain component only through its own
    * `terrainComponent` prop (`default: () => TerrainVision`) — `<component

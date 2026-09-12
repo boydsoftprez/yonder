@@ -629,13 +629,14 @@ export default {
          * was worse: the bottom-anchored version kept the tail and dropped
          * the words that say what is wrong.
          *
-         * So the sentence goes where it fits — the full scene — and the
-         * window keeps what it always had: the stopped-state message, which
-         * is short, and the resume control, which is a button. **Whether the
-         * window should say more than that is the design's own open
-         * question** (the spec's window behaviour promises the reason inside
-         * it, and at this size that promise cannot be kept), and it is the
-         * operator's to settle, not this component's.
+         * So the sentence goes where it fits — the full scene, where the
+         * host sets this prop — and the window does not get it at all:
+         * settled by the operator on 2026-09-12, a window with no live
+         * picture shows the cockpit's own unavailable mark instead
+         * (`unavailableMark` below) — the red cross with its one-line label —
+         * which suppresses the older stopped-state message wherever it is
+         * set. The resume control is unaffected: it is `playbackBlocked`,
+         * not this prop, that puts it up.
          */
         reasonLine: { type: Boolean, default: false },
         /**
@@ -1517,7 +1518,7 @@ export default {
             if (this.signInRequired || ['stopped', 'failed'].includes(this.cameraRunState)) return
             clearTimeout(this.fallbackRetryTimer)
             this.attempt = 0
-            this.lastFrameAt = null
+            this.blank()
             this.reason = ''
             this.stillSrc = ''
             clearTimeout(this.retryTimer)

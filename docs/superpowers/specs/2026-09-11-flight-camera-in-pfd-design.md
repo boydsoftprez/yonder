@@ -206,7 +206,8 @@ size. This keeps the control to one tap each way, which was the point.
   itself, in its own words, on the scene — decision 2 as amended. The F-16 notice does
   not apply, because a configured camera is not an unavailable one; the escape to terrain
   is the Camera control, one tap, which is where the operator already looks. The button
-  still flips to `window`.
+  still flips to `window`. The operator ratified this narrowing of F-16 on 2026-09-12,
+  after the whole-branch review raised it.
 - Camera selected but not streaming, state `window`: the window is marked the way the
   cockpit marks an instrument with no reading — the red cross and one line beneath it
   (*VIDEO STOPPED*, *SIGN IN REQUIRED*, or *DATA UNAVAILABLE*), and nothing else. The
@@ -277,8 +278,10 @@ the change that implements it.
 Software, on this machine, as component tests:
 
 1. With a camera selected and `full`, the picture frame's box equals the attitude scene's
-   box at laptop and tablet sizes, and no toolbar, notice, badge or strip from the picture
-   component is rendered inside the PFD.
+   box at laptop and tablet sizes; no toolbar, badge or strip from the picture component
+   is rendered inside the PFD, and the only notices are the scene's one line of reason
+   with its resume control and the window's unavailable cross, both permitted by
+   decision 2 as amended.
 2. With a camera selected and `full`, the background container has no gradient, the
    attitude sky and ground fills are hidden, and the horizon line is drawn when the switch
    is on and hidden when it is off.

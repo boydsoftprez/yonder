@@ -24,7 +24,7 @@
      <button class="utility-display" aria-label="Display menu" @click="panel='display-menu'">Display</button>
      <button class="utility-extra" aria-label="Aircraft and command status" @click="panel='status'">Aircraft<small>{{flight.live?(telemetry.mode||'MAVLink'):'No data'}}<template v-if="connectionStats&&Number.isFinite(connectionStats.flightHz)"> · {{connectionStats.flightHz.toFixed(1)}} Hz</template></small></button>
      <button v-if="instrumentAlerts.length" class="cockpit-alert-summary" aria-label="Show aircraft notices" @click="panel='alerts'">{{instrumentAlerts.length}} !</button>
-     <button class="utility-extra cockpit-camera-toggle" aria-label="Camera view" :aria-pressed="cameraView==='window'" :disabled="!cameraPath" @click="toggleCameraView"><span class="cockpit-camera-glyph" aria-hidden="true">⟲</span>Camera<small>{{cameraToggleState}}</small></button>
+     <button class="utility-extra cockpit-camera-toggle" aria-label="Camera view" :aria-pressed="!!cameraPath&&cameraView==='window'" :disabled="!cameraPath" @click="toggleCameraView"><span class="cockpit-camera-glyph" aria-hidden="true">⟲</span>Camera<small>{{cameraToggleState}}</small></button>
      <button class="utility-extra cockpit-fullscreen" :aria-label="fullscreen?'Exit full screen':'Enter full screen'" :title="fullscreen?'Exit full screen':'Full screen'" :aria-pressed="fullscreen" :disabled="fullscreenBusy" @click="toggleFullscreen">{{fullscreen?'↙':'⛶'}}</button>
      <button class="utility-more" aria-label="Cockpit menu" @click="panel='cockpit-menu'">Menu</button>
     </nav>
