@@ -445,7 +445,7 @@ recorder or send a flight command.*
 | Traffic is enabled but empty | Read the traffic-status message and selected range. A browser-access error may require **Display → Map, terrain & data → ADS-B relay origin → Apply ADS-B relay**; this changes only traffic sourcing. HTTP 429 waits for cooldown. No targets does not establish clear airspace. |
 | Traffic appears only on the map | Geometric height/geoid conversion, ownship datum or forward field of view may be missing. Import the EGM96 grid through Traffic data setup when applicable. |
 | Skid ball, wind or director disappears | Open its settings for the missing/stale-data reason. Visibility can also be restored from **Display → PFD settings**. |
-| Camera is unavailable / registration unavailable | Select a detected camera and start its stream in Cameras. Use **Use synthetic terrain** for the terrain background. Registered annotations also require physical calibration and capture-time pose; those are not supplied by these screenshots. |
+| Camera is unavailable / registration unavailable | Select a detected camera and start its stream in Cameras. In the full picture, **Use synthetic terrain** switches the background; in the camera window, the window states the reason itself. The top-row **Camera** control switches between the full picture and the window whenever a camera is selected, and is disabled and reads **unavailable** when none is. Registered annotations also require physical calibration and capture-time pose; those are not supplied by these screenshots. |
 
 The [walkthrough verification record](console/evidence/2026-09-08-cockpit-telemetry-layouts.md)
 lists the checks performed, fixes found and limits that still need hardware or
@@ -1216,10 +1216,62 @@ clock relationship. When those inputs are unavailable, the cockpit states the
 reason and keeps the screen-fixed instruments. Physical camera registration has
 not been established by the synthetic browser tests.
 
+## Fill the flight display with the camera
+
+Choosing **Camera** as the background (Display → Map, terrain & data) puts the
+selected camera's configured preview across the whole attitude scene, screen-fixed
+instruments over it, in place of the fixed split that used to sit behind a bordered
+picture box (K-68). None of the picture's own toolbar, badges, thumbnail strip or
+capture controls appears inside the PFD, and nothing there starts or stops a stream;
+the Camera page keeps all of them. What the scene does keep is **one line saying why**,
+at the foot of the picture, whenever there is a reason — a session that expired, a
+preview the console cannot deliver, a decoder reconnecting — and nothing at all when
+the picture is fine. If this browser blocked the video from playing, a **Resume live
+video** control appears with it; that is this browser, not the aircraft. The small window
+form is too narrow for a sentence, so a window with no picture is crossed out in red with
+one line under it — *VIDEO STOPPED*, *SIGN IN REQUIRED* or *DATA UNAVAILABLE* — the same
+mark the cockpit draws over any instrument with no reading. A longer reason is read by
+going to the full picture. A window whose picture merely went quiet is never crossed out:
+it keeps the last frame, desaturated and hatched, with its age in the window's header. The attitude line
+stays drawn over the picture by default — **PFD settings → Attitude & display →
+Horizon line over camera** turns it off. Height above ground and the forward-clearance
+forecast keep reporting while the camera fills the scene: [`camera-full.png`](images/cockpit/camera-full.png),
+also shown in the day palette at [`camera-full-day.png`](images/cockpit/camera-full-day.png).
+
+A **Camera** button sits in the top row beside full screen, reading the current state
+and what a tap does — *Full · tap for window* or *Window · tap for full* — and is
+disabled and reads *unavailable* with no camera selected. It never starts or stops a
+stream. At narrow widths, where the top row folds away, the same control is a **Camera**
+row in the cockpit **Menu**. The button and the Background chooser move the same one
+setting: **Camera** is the full picture, **Synthetic terrain** with a camera selected is
+the window, and whichever you left it in is what the page comes back to. Pressing it
+shrinks the picture into a small window over synthetic terrain
+([`camera-window.png`](images/cockpit/camera-window.png), and at tablet size in
+[`camera-window-tablet.png`](images/cockpit/camera-window-tablet.png)): drag the
+window's header to move it, drag its corner grip to resize it between one eighth and
+one half of the scene's width while it keeps the picture's own shape. Place and size
+are remembered in this browser with the other display preferences and reset from
+**PFD settings → Attitude & display → Reset camera window position**, which does not
+change whether the camera is full or windowed. The window's own maximize control, or
+the Camera button again, returns to the full picture.
+
+With **no camera configured at all**, the scene keeps today's *Selected camera
+unavailable* notice and its **Use synthetic terrain** switch, and the Camera control is
+disabled. With a camera configured but **not streaming**, the picture is there and says
+so itself — *Video is stopped.* — in the scene and in the window alike, with no button
+beside it, because starting a stream is done on the Cameras page. One tap of the Camera
+control puts synthetic terrain back in the scene.
+Either way, a picture that goes quiet still desaturates, darkens and takes the hatch,
+and its running age appears in the PFD's footer label while full or the window's own
+header while windowed — never both, and never while the picture is live.
+
 ## Development verification
 
 The illustrated guide has an executable walkthrough. With the fixture preview
 running on port 4192, run `npm run cockpit:guide -w node-red-dashboard-2-yonder`.
+**It does not currently reach the end** — earlier checks drive controls that no longer
+exist, and the run stops at the first of them ([K-69](known-issues.md#k-69)), so the four
+camera images were made off-path and say so in their manifest rows.
 It checks the visible controls and captures their current appearance, then loads
 the actual prepared terrain pack through a temporary ground-only relay and checks
 offline reuse. It refuses a `?live=1` target and blocks aircraft HTTP requests.

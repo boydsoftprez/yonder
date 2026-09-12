@@ -6,6 +6,7 @@ import assert from 'node:assert/strict';
 import {mkdir,writeFile,readFile} from 'node:fs/promises';
 import {fileURLToPath} from 'node:url';
 import {MISSION_COMMANDS} from '../src/ui/cockpit/mission-commands.mjs';
+import {fixtureCamera} from './fixture.mjs';
 const base=process.env.COCKPIT_URL||'http://127.0.0.1:4192';
 assert(['127.0.0.1','localhost'].includes(new URL(base).hostname));
 assert(!new URL(base).searchParams.has('live'),'Guide fixture must not use a vehicle');
@@ -101,6 +102,44 @@ try{
   await button('Return to full PFD').click();await button('Open flight planning profile').click();await shot('profile-unavailable');
   await button('Waypoints').click();await button('Return to full PFD').click();
   await button('Aircraft and command status').click();await shot('aircraft-status',dialog());await close();
+ });
+ // K-69: this check has never run as part of `npm run cockpit:guide`. Checks
+ // above it press `PFD Menu` (line 38) and `Display & data` (79, 99, 101),
+ // neither of which exists in `src/ui` — and neither did at `ce3e449`, before
+ // this work started — so the run stops before reaching here. The four images
+ // it writes were made by running these steps from a temporary harness against
+ // the same fixture server, which is what `docs/images/cockpit/manifest.json`
+ // records as `source: "fixture-harness"`. Repair the selectors above (the
+ // current path is `Display menu` -> `Map, terrain & data`, used below) and
+ // this becomes a guide capture again.
+ await check('The camera fills the flight display, and the Camera control opens/closes its window (R-FLT-29, K-68)',async()=>{
+  await page.evaluate(camera=>window.cockpitFixture.set(camera),fixtureCamera());
+  await button('Display menu').click();await page.getByRole('button',{name:/^Map, terrain & data/}).click();
+  await page.getByRole('combobox',{name:/^Background/}).selectOption('camera');await close();
+  // Off the attitude hotspot before shooting, so the capture is the scene and
+  // not the scene with a hover border on it.
+  await page.mouse.move(640,860);
+  await shot('camera-full');
+  // The Camera control's own height against a genuinely comparable
+  // neighbour: both are two-line utility-extra buttons, unlike the
+  // single-glyph full-screen control beside them.
+  const heights=await page.evaluate(()=>[document.querySelector('.cockpit-camera-toggle')?.getBoundingClientRect().height,document.querySelector('[aria-label="Aircraft and command status"]')?.getBoundingClientRect().height]);
+  assert.ok(heights[0]>0);assert.equal(heights[0],heights[1]);
+  await button('Display menu').click();await label('Cockpit palette').selectOption('day');await close();
+  await page.mouse.move(640,860);
+  await shot('camera-full-day');
+  await button('Display menu').click();await label('Cockpit palette').selectOption('night');await close();
+  await button('Camera view').click();await shot('camera-window');
+  await page.setViewportSize({width:768,height:1024});await shot('camera-window-tablet');
+  await page.setViewportSize({width:1280,height:900});
+  await button('Camera view').click();
+  await button('Display menu').click();await page.getByRole('button',{name:/^Map, terrain & data/}).click();
+  await page.getByRole('combobox',{name:/^Background/}).selectOption('terrain');await close();
+  // Put the fixture back the way this check found it: `terrain` with a camera
+  // configured is the window state, so leaving the camera attached would leave
+  // a camera window over every later check's scene.
+  await page.evaluate(()=>{const s=window.cockpitFixture.snapshot();window.cockpitFixture.set({...s,camera:null,cameras:[]})});
+  assert.equal((await calls()).length,0);
  });
  await check('Disconnected aircraft blocks review and sends nothing',async()=>{
   await page.evaluate(()=>{const s=window.cockpitFixture.snapshot();window.cockpitFixture.set({...s,connected:false,ready:false,telemetry:{...s.telemetry,ready:false,ageMs:20000}})});

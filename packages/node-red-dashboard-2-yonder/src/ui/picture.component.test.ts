@@ -1389,6 +1389,31 @@ describe("what the soft-key rail sends it", () => {
     expect(fetchMock.mock.calls[2]?.[0]).toBe("/video/nose/whep");
   });
 
+  /**
+   * Minor 4, whole-branch re-review: `showUnavailableMark`'s invariant —
+   * nothing is on screen once `lastFrameAt` is null — held only because
+   * `blank()` clears `srcObject` together with it, and `requestLive()` used
+   * to null `lastFrameAt` alone. `connect()`'s own `teardown()` closes the
+   * peer connection but never touches `srcObject` (a media element goes on
+   * painting an ended track's last frame), so on this exact path — the
+   * `streamPath` watcher naming a fresh camera — the old camera's held frame
+   * stayed on the `<video>` element under whatever a failed renegotiation
+   * drew. `blank()` in `requestLive()` closes that.
+   */
+  it("lets go of the previous camera's held frame, not merely its timestamp, when a fresh camera is requested and the renegotiation fails", async () => {
+    const { wrapper, press } = mountWithRail();
+    await settle();
+    pc(0).deliverTrack();
+    frames(wrapper);
+    await settle();
+    expect(painted(wrapper)).toEqual({ id: "stream-1" });
+
+    reply = "throws";
+    await press({ path: "nose" });
+    expect(reasonText(wrapper)).toMatch(/could not negotiate/i);
+    expect(painted(wrapper)).toBeNull();
+  });
+
   it("does not renegotiate when it is told the camera it is already showing", async () => {
     const { press } = mountWithRail();
     await settle();

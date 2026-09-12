@@ -62,6 +62,61 @@ die()  { printf 'error: %s\n' "$*" >&2; exit 1; }
 
 command -v curl >/dev/null 2>&1 || die "curl is needed"
 command -v node >/dev/null 2>&1 || die "node is needed"
+
+# K-57. Node asks rather than `lsof` or `ss`, because this script already
+# depends on node and neither of those is present on both platforms this runs
+# on.
+#
+# **Two questions, both of which have to say free.** The first version asked
+# only whether `127.0.0.1:$PORT` could be bound, and that misses the console
+# this gate itself starts: it binds `uiHost 0.0.0.0`
+# (`packages/yonder-core/src/console/settings.ts`), and on darwin a loopback
+# bind succeeds beside a wildcard listener — libuv sets `SO_REUSEADDR` on
+# every TCP bind, and BSD sockets allow the narrower address. Measured on
+# darwin 25.6 with this repository's node: a holder on `127.0.0.1` read as in
+# use, a holder on `0.0.0.0` read as free, a holder on `::` read as free. So
+# the exact case K-57 exists for — a `HOLD=1` console from an earlier run —
+# passed the check it was written to fail.
+#
+# So: bind the wildcard address the console itself binds, which a wildcard
+# holder refuses; and then try to *connect* to loopback, because anything
+# answering there is something this run's capture could photograph, whatever
+# address it bound. A refused connection is the only answer that means free.
+# A connection that neither answers nor is refused is treated as held: the
+# honest reading, and the safe one for a gate whose whole purpose is to know
+# whose console it is looking at.
+port_is_free() {
+    node -e '
+        const net = require("net"), port = Number(process.argv[1]);
+        const answers = () => new Promise(resolve => {
+            const probe = net.connect({ port, host: "127.0.0.1" });
+            probe.setTimeout(1000);
+            const done = held => { probe.destroy(); resolve(held) };
+            probe.once("connect", () => done(true));
+            probe.once("timeout", () => done(true));
+            probe.once("error", () => done(false));
+        });
+        const bindable = () => new Promise(resolve => {
+            const probe = net.createServer();
+            probe.once("error", () => resolve(false));
+            probe.once("listening", () => probe.close(() => resolve(true)));
+            probe.listen(port, "0.0.0.0");
+        });
+        (async () => { process.exit(await bindable() && !(await answers()) ? 0 : 1) })();
+    ' "$PORT"
+}
+port_in_use_advice() {
+    printf '\n'
+    echo "port $PORT is already in use, so this run cannot prove whose console it would photograph."
+    echo "a HOLD=1 run leaves its pids in vendor/verify-pages.pids; a finished run can leave an"
+    echo "orphaned daemon whose argv is this repository path. check with:"
+    echo "    pgrep -fl 'verify-pages.sh|yonder-pages|dist/daemon/server.js'"
+    echo "then kill what is left, or run this gate on another port with PORT=..."
+}
+# Asked twice on purpose: here so a held console costs nothing instead of a
+# build and a payload staging, and again at the launch, which is the one that
+# has to be true.
+port_is_free || { port_in_use_advice; die "port $PORT is in use"; }
 [ -f "$CORE/dist/daemon/server.js" ] || die "no built daemon; run: npm run build"
 [ -f "$REPO/packages/node-red-contrib-yonder-system/dist/status.js" ] \
     || die "the contrib packages are not built; run: npm run build"
@@ -533,15 +588,39 @@ wait_for_socket() {
     give_up "the daemon never bound $SOCKET"
 }
 
+# K-57: this gate used to poll until *something* answered on the port and then
+# photograph it. A `HOLD=1` console left running by an earlier run keeps the
+# port, the new run's Node-RED cannot bind it, and the capture connects to the
+# *old* console — every page captured, no shape changed, green, and the edit
+# under test invisible. Observed on 2026-09-05: a run at 16:17 reported "every
+# page captured, and none changed shape" against a four-hour-old page.
+#
+# So the port is proved free before the console is started, rather than after,
+# when it is too late to tell whose console answered. Node does the asking
+# because this script already depends on it and `lsof`/`ss` are not both
+# present on both platforms this runs on.
+assert_port_free() {
+    port_is_free && return 0
+    port_in_use_advice
+    give_up "refusing to capture against a console this run did not start"
+}
+
+# And the answer has to come from a Yonder console, not merely from something
+# holding the port: the second half of the same defect. `Administrator
+# password` is the sign-in page this harness always comes up on, and is ASCII,
+# so it survives shell matching.
 wait_for_console() {
     i=0
     while [ "$i" -lt "$TRIES" ]; do
-        if curl -s -o /dev/null --max-time 1 "http://127.0.0.1:$PORT/"; then return 0; fi
+        body=$(curl -s --max-time 1 "http://127.0.0.1:$PORT/" 2>/dev/null || true)
+        case "$body" in
+            *"Administrator password"*) return 0 ;;
+        esac
         kill -0 "$CONSOLE_PID" 2>/dev/null || give_up "the console exited before it answered"
         sleep "$POLL"
         i=$((i + 1))
     done
-    give_up "the console never answered on port $PORT"
+    give_up "no Yonder console answered on port $PORT"
 }
 
 status() { curl -s -o /dev/null -w '%{http_code}' -b "$ROOT/cookies" -X "$1" "http://127.0.0.1:$PORT$2"; }
@@ -747,6 +826,7 @@ for entry in "$CONSOLE_TREE/node_modules"/*; do
     [ -e "$CONSOLE/node_modules/$name" ] || ln -s "$entry" "$CONSOLE/node_modules/$name"
 done
 
+assert_port_free
 node "$CONSOLE/node_modules/node-red/red.js" -s "$CONSOLE/settings.js" >>"$JOURNAL" 2>&1 &
 CONSOLE_PID=$!
 wait_for_console
@@ -1035,10 +1115,19 @@ if node -e 'import("playwright")' >/dev/null 2>&1; then
     # anything on this console does anything when pressed. Every soft key
     # shipped dead once — Dashboard drops a widget-action from a widget that
     # did not register onAction, silently — and no layout check could see it.
+    # `|| true` stays, deliberately: this invocation exists to *press a key*,
+    # and `wait_for_theme` below is the verdict. A side-effect capture that
+    # hiccups should not fail the gate.
+    #
+    # K-47: what does not stay is `>/dev/null 2>&1`. It sent a real failure —
+    # a rule violation on this page, a crash before the press — to nowhere, so
+    # the only way this run could speak was by the theme not changing, and
+    # anything it found on the way was lost. It goes to the journal now, with
+    # everything else this harness runs.
     node "$REPO/scripts/capture-pages.mjs" \
         --base-url "http://127.0.0.1:$PORT" --password "$PASSWORD" \
         --palette day --artifacts "$REPO/vendor/capture" \
-        --only settings --press Night >/dev/null 2>&1 || true
+        --only settings --press Night >>"$JOURNAL" 2>&1 || true
 
     if wait_for_theme night; then
         ok "pressing Night in Settings actually reached the device"

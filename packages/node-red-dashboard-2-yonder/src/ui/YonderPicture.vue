@@ -1,7 +1,7 @@
 <!-- SPDX-License-Identifier: GPL-3.0-or-later -->
 <template>
-    <div class="y-pic">
-        <header class="y-pic__toolbar" aria-label="Video status">
+    <div class="y-pic" :class="{ 'y-pic--scene': scene }">
+        <header v-if="!scene" class="y-pic__toolbar" aria-label="Video status">
             <div class="y-pic__controls">
                 <strong v-if="selectedCameraName" class="y-pic__camera" :title="selectedCameraName">{{ selectedCameraName }}</strong>
                 <div class="y-pic__view-modes" role="group" aria-label="This preview">
@@ -44,7 +44,7 @@
             ref="frame"
             class="y-pic__frame"
             :class="{ 'is-aiming': aimable }"
-            :style="{ aspectRatio: videoAspect, '--y-pic-aspect': String(videoAspect) }"
+            :style="scene ? null : { aspectRatio: videoAspect, '--y-pic-aspect': String(videoAspect) }"
             @pointerdown="dragDown"
             @pointermove="dragMove"
             @pointerup="onDragEnd"
@@ -61,7 +61,7 @@
                 playsinline
                 @pause="onPlaybackPause"
             ></video>
-            <img v-if="mode === 'stills' && stillSrc" class="y-pic__video" :src="stillSrc" alt="" />
+            <img v-if="mode === 'stills' && stillSrc" class="y-pic__video" :src="stillSrc" alt="" @load="onStillMetadata" />
             <div v-if="staleFor > 0" class="y-pic__hatch"></div>
 
             <!-- L-18: a still landed. The flash is the confirmation that
@@ -75,22 +75,42 @@
             <div v-if="mode === 'off'" class="y-pic__off">
                 Preview is off in this browser.
             </div>
-            <div v-if="!signInRequired && ['stopped', 'failed'].includes(cameraRunState)" class="y-pic__stopped">
+            <!-- The cockpit's own unavailable convention, in the window
+                 (R-UI-20; JJ's ruling of 2026-09-12). See `unavailableMark`. -->
+            <div v-if="showUnavailableMark" class="y-pic__unavailable" role="status">
+                <svg class="y-pic__missing" viewBox="0 0 100 100" preserveAspectRatio="none" aria-hidden="true">
+                    <path d="M0 0L100 100M100 0L0 100" />
+                </svg>
+                <span class="y-pic__stopped-l y-pic__missing-l">{{ unavailableLabel }}</span>
+            </div>
+            <div v-if="!signInRequired && !showUnavailableMark && ['stopped', 'failed'].includes(cameraRunState)" class="y-pic__stopped">
                 <span class="y-pic__stopped-l">{{ videoControl.message }}</span>
-                <button type="button" class="y-pic__start" :disabled="videoRequestPending || !videoControl.action" @click="pressStart">{{ videoRequestPending ? 'Requesting…' : videoControl.label }}</button>
+                <!-- R-FLT-29: the message is a reason and stays; the button
+                     starts the device's stream and must not exist in the
+                     scene presentation, which is the flight display. See
+                     this file's own `scene` prop doc comment. -->
+                <button v-if="!scene" type="button" class="y-pic__start" :disabled="videoRequestPending || !videoControl.action" @click="pressStart">{{ videoRequestPending ? 'Requesting…' : videoControl.label }}</button>
+            </div>
+            <!-- R-UI-20 in the scene presentation: one line saying why the
+                 picture is not what was asked for, and the one control that
+                 is the operator's own browser rather than the aircraft. See
+                 the `scene` prop's own doc comment. -->
+            <div v-if="scene && ((reasonLine && noticeReason) || playbackBlocked)" class="y-pic__scene-notice">
+                <div v-if="reasonLine && noticeReason" class="y-pic__reason" role="status">{{ noticeReason }}</div>
+                <button v-if="playbackBlocked" type="button" class="y-pic__resume" @click="resumePlayback">Resume live video</button>
             </div>
         </div>
       </div>
 
-        <div class="y-pic__capture-host"></div>
+        <div v-if="!scene" class="y-pic__capture-host"></div>
 
-        <div class="y-pic__notices">
+        <div v-if="!scene" class="y-pic__notices">
             <button v-if="playbackBlocked" type="button" class="y-pic__resume" @click="resumePlayback">Resume live video</button>
-            <div v-if="signInRequired || reason || aimRefusal" class="y-pic__reason" role="status">{{ signInRequired ? 'Your session expired. Sign in to restore video and controls.' : aimRefusal || reason }}</div>
+            <div v-if="noticeReason" class="y-pic__reason" role="status">{{ noticeReason }}</div>
             <div v-if="flashing" class="y-pic__saved" role="status"><i class="y-pic__saved-dot" aria-hidden="true"></i>Saved · to {{ savedTo }}</div>
         </div>
 
-        <div class="y-pic__thumbnails">
+        <div v-if="!scene" class="y-pic__thumbnails">
             <YonderThumbStrip
                 v-if="cameras.length"
                 class="y-pic__strip"
@@ -564,8 +584,85 @@ export default {
     props: {
         id: { type: String, required: true },
         props: { type: Object, default: () => ({}) },
-        state: { type: Object, default: () => ({}) }
+        state: { type: Object, default: () => ({}) },
+        /**
+         * R-FLT-29: the flight display's own presentation of this picture —
+         * frame and video only, filling the parent with `object-fit: cover`,
+         * none of this component's own chrome. A fourth sibling of the three
+         * props above, not a key inside `props`: those are the editor-
+         * configured, per-widget facts (path, label, cost, …); this is a
+         * host telling the component which of its two presentations to
+         * draw, the same kind of fact `aimable` already is internally.
+         * The Camera and Cockpit pages never set it and are unaffected.
+         *
+         * **Two things are drawn in the scene besides the frame, and only
+         * when they are true.** The operator ruled on this after the
+         * whole-branch review: one line of reason when there is one, and
+         * nothing at all when the picture is fine. The design's "no chrome
+         * in the scene" (decision 2) is about controls and readings that
+         * repeat what the PFD already says; a picture that is black for a
+         * reason the operator cannot see is R-UI-20's silent absence, which
+         * is the worse fault. So `.y-pic__reason` appears in the scene when
+         * something is wrong, and **Resume live video** appears when this
+         * browser blocked autoplay — the one case where the picture is
+         * recoverable from here, by this browser, with nothing sent to the
+         * aircraft or the device. The stopped-state *message* is likewise
+         * kept; its Start button is not, because that starts the device's
+         * stream (R-CMD-04, R-FLT-29). Nothing else: no toolbar, no badge,
+         * no strip, no capture host, no saved banner.
+         */
+        scene: { type: Boolean, default: false },
+        /**
+         * Draw the one-line reason in the scene presentation (R-UI-20, the
+         * operator's ruling on decision 2). Off by default, and the host
+         * sets it only where the line can actually be read.
+         *
+         * **This exists because a box can be too small for a sentence.** The
+         * scene presentation serves two boxes: the whole attitude scene, and
+         * the camera window, which is a sixth of the scene's width — about
+         * 140 x 55 px on the Flight page, with roughly 40 px of usable
+         * height. "The video service is unavailable. Reconnecting
+         * automatically." is 68 px of text there however it is set, so it
+         * cannot be shown whole; the page gate measured exactly that and
+         * refused it, correctly, as content hidden from the operator
+         * (`console/theme.ts`, "content is never clipped"). Truncating it
+         * was worse: the bottom-anchored version kept the tail and dropped
+         * the words that say what is wrong.
+         *
+         * So the sentence goes where it fits — the full scene, where the
+         * host sets this prop — and the window does not get it at all:
+         * settled by the operator on 2026-09-12, a window with no live
+         * picture shows the cockpit's own unavailable mark instead
+         * (`unavailableMark` below) — the red cross with its one-line label —
+         * which suppresses the older stopped-state message wherever it is
+         * set. The resume control is unaffected: it is `playbackBlocked`,
+         * not this prop, that puts it up.
+         */
+        reasonLine: { type: Boolean, default: false },
+        /**
+         * Mark this picture the way the cockpit marks an instrument with no
+         * reading: the red cross and a one-line label (R-UI-20, the
+         * operator's ruling of 2026-09-12). Off by default; the host sets it
+         * on the camera window.
+         *
+         * **Why a cross and not a sentence.** The window is about 140 x 55 px
+         * and cannot show a delivery-failure sentence without hiding part of
+         * it — the page gate measured 68 px of text in 40 px and refused it.
+         * The choice was then a blank black box, a shorter word, or the
+         * convention the rest of the cockpit already uses for "no data". The
+         * operator chose the convention: a window with no picture reads as
+         * one more instrument with nothing behind it, rather than as a
+         * different idea the operator has to learn.
+         *
+         * **It never covers a frame.** `lastFrameAt === null` is the whole
+         * condition, so a picture that has had media and then went quiet keeps
+         * that media, desaturated, darkened and hatched, with its age in the
+         * window's header — this file's own account of why going black is
+         * rejected applies exactly as much to a red cross.
+         */
+        unavailableMark: { type: Boolean, default: false }
     },
+    emits: ['stale', 'aspect'],
     data () {
         return {
             mode: 'live',
@@ -744,6 +841,38 @@ export default {
          * about it rather than guessing that a camera is stopped.
          */
         selectedCameraName () { return this.cameras.find(row => row.id === cameraFor(this.streamPath))?.name || this.props.label || '' },
+        /** The one line either presentation shows when something is wrong:
+         *  an expired session first, then a refused aim, then whatever the
+         *  delivery path last reported. Empty when the picture is fine,
+         *  which is what both `v-if`s test. */
+        noticeReason () {
+            if (this.signInRequired) return 'Your session expired. Sign in to restore video and controls.'
+            return this.aimRefusal || this.reason || ''
+        },
+        /** Nothing has ever arrived to show, and something says why — the
+         *  states the cockpit marks unavailable. Autoplay-blocked is
+         *  deliberately not one of them: that case keeps **Resume live
+         *  video**, which is the thing to press, and a cross over a button
+         *  is two answers to one question. `mode: 'off'` has its own panel,
+         *  and a still that is showing is a picture. */
+        showUnavailableMark () {
+            if (!this.scene || !this.unavailableMark) return false
+            if (this.mode === 'off') return false
+            if (this.mode === 'stills' && this.stillSrc) return false
+            if (this.lastFrameAt !== null) return false
+            return this.signInRequired || !!this.reason ||
+                ['stopped', 'failed'].includes(this.cameraRunState)
+        },
+        /** One line, and the same words the gauges use unless a shorter true
+         *  one exists for the state. `DATA UNAVAILABLE` is what an operator
+         *  reads under every other crossed-out instrument; the stopped and
+         *  sign-in states get their own shorter truth, because "unavailable"
+         *  would misdescribe a camera somebody deliberately stopped. */
+        unavailableLabel () {
+            if (this.signInRequired) return 'SIGN IN REQUIRED'
+            if (this.cameraRunState === 'stopped') return 'VIDEO STOPPED'
+            return 'DATA UNAVAILABLE'
+        },
         cameraRunState () {
             return this.fromPayload('runState') || (this.cameraRunning === true ? 'running' : this.cameraRunning === false ? 'stopped' : 'unknown')
         },
@@ -900,6 +1029,35 @@ export default {
         }
     },
     watch: {
+        // Hosts that place a scene picture in a separately sized surface
+        // (the PFD camera window) need the decoded source ratio as well as
+        // the picture itself. This same value is updated by either video
+        // metadata or a loaded still below; emitting its initial 16:9 value
+        // lets the host make a sensible first layout before either arrives.
+        videoAspect: {
+            immediate: true,
+            handler (value) {
+                this.$emit('aspect', value)
+            }
+        },
+        /**
+         * R-FLT-29: a host that draws this picture in the scene
+         * presentation has taken the toolbar — and the age reading inside
+         * it — away, and still needs to show that age somewhere else (the
+         * flight display's own footer label). `seconds`/`text` are
+         * `staleFor`/`ageText` verbatim, the identical two facts the
+         * toolbar's own `y-pic__age` already draws, so the two can never
+         * disagree about what "stale" means. `immediate` so a picture that
+         * is live for its entire mounted life still emits the `seconds: 0`
+         * a host needs to draw "not stale" — `staleFor` would otherwise
+         * never fire a change at all.
+         */
+        staleFor: {
+            immediate: true,
+            handler (value) {
+                this.$emit('stale', { seconds: value, text: this.ageText })
+            }
+        },
         cameraRunState (value, before) {
             if (value !== before) { this.videoRequestPending = false; clearTimeout(this.videoRequestTimer) }
             if (['stopped', 'failed'].includes(value)) { clearTimeout(this.retryTimer); clearTimeout(this.stillsTimer); this.teardown(); this.reason = ''; this.blank() }
@@ -1166,6 +1324,13 @@ export default {
             const v = this.$refs.video
             if (v && v.videoWidth && v.videoHeight) this.videoAspect = v.videoWidth / v.videoHeight
         },
+        // The still fallback has no video metadata event. Its intrinsic size
+        // is the equally authoritative decoded source ratio, so report it
+        // through the same host-facing value as live video.
+        onStillMetadata (event) {
+            const image = event.target
+            if (image?.naturalWidth && image?.naturalHeight) this.videoAspect = image.naturalWidth / image.naturalHeight
+        },
         /**
          * Nothing in flight: the session, and the handshake that was setting
          * it up.
@@ -1371,7 +1536,7 @@ export default {
             if (this.signInRequired || ['stopped', 'failed'].includes(this.cameraRunState)) return
             clearTimeout(this.fallbackRetryTimer)
             this.attempt = 0
-            this.lastFrameAt = null
+            this.blank()
             this.reason = ''
             this.stillSrc = ''
             clearTimeout(this.retryTimer)
@@ -1780,7 +1945,23 @@ export default {
    `width: 100%` is declared first and deliberately kept: a browser without
    container queries drops the `min()` line at parse time — `cqh` is not a
    unit it knows — and falls back to that, where `max-height` still holds the
-   box inside its slot. */
+   box inside its slot.
+
+   **A fourth version, in the grid rather than the width math** (R-FLT-29's
+   `scene` presentation, below): dropping the toolbar, capture host, notices
+   and thumbnails leaves three of `.y-pic`'s own four grid rows with nothing
+   in them, but `grid-template-rows` above still reserves their minimums —
+   34px, 80px — regardless of whether anything occupies them. That is this
+   same defect in a different unit: room subtracted from the row the frame
+   sizes against, unconnected to anything actually on screen. `.y-pic--scene`
+   fixes it the same way the fourth version of any of this component's own
+   sizing bugs should read as familiar rather than surprising: collapse the
+   row list to the one flexible track alone, and — because a picture filling
+   a flight instrument's background has no leftover to spend on empty panel
+   either — take `.y-pic__fit` and `.y-pic__frame` out of the container-query
+   arithmetic entirely, `position: absolute; inset: 0` against `.y-pic`
+   itself, `object-fit: cover` doing the cropping `aspect-ratio` and `cqh` no
+   longer need to. */
 .y-pic__fit {
     min-width: 0;
     min-height: 0;
@@ -1825,6 +2006,126 @@ export default {
    composite in a layer of its own that ignores DOM order, so nothing here
    is left to rely on painting later than its siblings by accident. */
 .y-pic__video { position: absolute; inset: 0; width: 100%; height: 100%; object-fit: contain; transition: filter 1s linear; z-index: 1; }
+/* R-FLT-29's scene presentation — see the fourth-version paragraph in
+   `.y-pic__frame`'s own comment above for why the grid row collapses and
+   `.y-pic__fit`/`.y-pic__frame` leave the container-query sizing entirely.
+   A plain `1fr`, not `minmax(0, 1fr)`: the one thing that could still grow
+   this row past its slot — `.y-pic__fit` sizing to its own content — cannot
+   happen once `.y-pic__fit` is taken out of flow below, so there is nothing
+   left for the `minmax()` floor to guard against. */
+.y-pic--scene { grid-template-rows: 1fr; }
+.y-pic--scene .y-pic__fit,
+.y-pic--scene .y-pic__frame {
+    position: absolute;
+    /* Longhand, not the `inset` shorthand this file uses elsewhere
+       (`.y-pic__video`, `.y-pic__hatch`, `.y-pic__flash`): jsdom's CSS
+       engine does not expand `inset` into `top`/`right`/`bottom`/`left`,
+       and `camera-scene.component.test.ts` reads exactly those four
+       through `getComputedStyle`, being unable to measure a box directly. */
+    top: 0;
+    right: 0;
+    bottom: 0;
+    left: 0;
+    width: auto;
+    height: auto;
+    max-width: none;
+    max-height: none;
+}
+.y-pic--scene .y-pic__video { object-fit: cover; }
+/* R-UI-20 in the scene: the reason, and the resume control, inside the
+   frame — there is nowhere else for them, since `.y-pic--scene` collapses
+   the grid to the one track the frame fills. Above the hatch and the
+   stopped message, at the foot of the picture where the PFD's own footer
+   is not, and only ever present when the template says something is
+   actually wrong. */
+.y-pic--scene .y-pic__scene-notice {
+    position: absolute;
+    inset: 4px;
+    z-index: 6;
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    justify-content: flex-end;
+    gap: 6px;
+    text-align: center;
+    overflow: hidden;
+    pointer-events: none;
+}
+/* The cockpit's own unavailable convention, reused rather than reinvented
+   (R-UI-20, the operator's ruling of 2026-09-12). The source is
+   `cockpit/instruments/InstrumentGauge.vue`: when a reading is not valid it
+   marks its root `instrument-unavailable`, draws `.missing-cross` — a two-
+   stroke X in `#ef5a53`, `stroke-width: 2.5`, no fill — corner to corner
+   across the gauge face, and puts `DATA UNAVAILABLE` beneath it in
+   `#c3d4dd`. That style block is `scoped`, so the values are restated here
+   rather than shared: **if the gauge's cross changes colour, this must move
+   with it.**
+
+   `preserveAspectRatio="none"` with `vector-effect: non-scaling-stroke` is
+   what makes one square path draw a true corner-to-corner cross in a 16:9
+   box without the stroke going oval with it. The label sits at the foot,
+   clear of the cross, exactly where the gauge puts its own detail line. */
+.y-pic--scene .y-pic__unavailable {
+    position: absolute;
+    inset: 0;
+    /* `inset: 0` plus padding overflows the frame without this. */
+    box-sizing: border-box;
+    z-index: 4;
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    padding: 5px;
+    gap: 2px;
+    pointer-events: none;
+}
+/* **The cross takes its height from the flex line, never from its own
+   intrinsic ratio.** An `<svg>` carrying a viewBox is a replaced element with
+   an intrinsic 1:1 ratio, so any sizing that leaves one axis indefinite draws
+   it square: `inset` alone made it 186px tall in a 76px frame here, and a
+   percentage height that did not resolve on the Flight page made it 131px
+   tall in a 48px one. A zero flex basis with `flex-grow` gives the height
+   outright, so there is no axis left for the ratio to fill in, and the cross
+   simply gets shorter as the window does. `preserveAspectRatio="none"` plus
+   `vector-effect: non-scaling-stroke` is what keeps one square path drawing a
+   true corner-to-corner X of even thickness in a 16:9 box. */
+.y-pic--scene .y-pic__missing {
+    flex: 1 1 0;
+    min-height: 0;
+    width: 100%;
+    align-self: stretch;
+}
+.y-pic--scene .y-pic__missing path {
+    stroke: #ef5a53;
+    stroke-width: 2.5;
+    fill: none;
+    vector-effect: non-scaling-stroke;
+}
+/* Beneath the cross, where the gauge puts its own detail line — not over it.
+   The type is `.y-pic__stopped-l`, this component's existing label on this
+   exact surface, because `--yonder-display` is cream in the day palette and
+   the gauge's own `#c3d4dd` is for a face that never goes light. It may wrap
+   rather than overflow at a hand-shrunk window size; at every size that ships
+   it is the one line the ruling asked for. */
+.y-pic--scene .y-pic__missing-l {
+    flex: none;
+    max-width: 100%;
+    font-size: 9px;
+    letter-spacing: 0.1em;
+    line-height: 1.2;
+    background: var(--yonder-display, #04060a);
+    padding: 0 3px;
+    border-radius: 2px;
+}
+
+/* No truncation here, deliberately: the host only sets `reasonLine` on the
+   box that can show the line whole (see the prop's own doc comment), so a
+   clip would mean the host got that wrong and should be visible as a gate
+   failure rather than hidden by CSS. */
+.y-pic--scene .y-pic__reason {
+    font-size: 11px;
+    padding: 3px 5px;
+}
+.y-pic--scene .y-pic__resume { pointer-events: auto; flex: none; }
 /* The hatch is the third of four signals, and the one that cannot be mistaken
    for a dark scene or a badly exposed shot. Above the video, below every
    reading drawn on top of it: it must wash over the picture, never obscure

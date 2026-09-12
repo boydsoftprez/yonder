@@ -1,6 +1,7 @@
 // Display references and settings. These values never become aircraft commands.
 // SPDX-License-Identifier: GPL-3.0-or-later
 import {units} from './flight-units.mjs';
+import {cockpitBackgroundSettings, clampCameraWindow, cameraWindowHome} from './camera-view.mjs';
 export const referenceFields = Object.freeze({
   airspeed: {
     title: 'Airspeed reference',
@@ -52,6 +53,22 @@ export const displayDefaults = Object.freeze({
   standardRatePointers: true,
   turnRate: true,
   followMission: true,
+  // R-FLT-29: the attitude line drawn over a camera background. On by
+  // default because a forward camera shows the true horizon only when its
+  // mount is level and the picture is clear; the switch in PFD settings is
+  // for the operator who finds it distracting, not a default choice.
+  horizonLine: true,
+  // R-FLT-29/K-68: the PFD's background, which *is* the camera's
+  // presentation — `terrain` means the window (when a camera is
+  // configured) and either camera value means full, so there is one stored
+  // value and not two that can disagree (`camera-view.mjs`'s own doc
+  // comment on `cameraViewFor`). Synthetic terrain is the default, so the
+  // Flight page's default capture draws nothing new. Stored with the other
+  // display preferences because the design promises the state is restored
+  // on reload, which it was not while `background` lived only in component
+  // data.
+  background: 'terrain',
+  cameraWindow: cameraWindowHome,
   ...units(),
   stripPlacement: 'mfd',
   layout: 'split'
@@ -88,7 +105,7 @@ export function validatePfdPreferences(input = {}) {
       references[key] = parseReference(key, input?.references?.[key]);
     } catch {}
   }
-  for (const key of ['pitchLadder', 'secondary', 'syntheticVision', 'fdVisible', 'skidBall', 'standardRatePointers', 'turnRate', 'followMission'])
+  for (const key of ['pitchLadder', 'secondary', 'syntheticVision', 'fdVisible', 'skidBall', 'standardRatePointers', 'turnRate', 'followMission', 'horizonLine'])
     if (typeof input?.display?.[key] === 'boolean') display[key] = input.display[key];
   for (const key of ['tapeOpacity', 'hsiOpacity'])
     if (Number.isFinite(input?.display?.[key])) display[key] = Math.max(.1, Math.min(1, input.display[key]));
@@ -97,6 +114,12 @@ export function validatePfdPreferences(input = {}) {
   if (['pfd', 'mfd', 'hidden'].includes(input?.display?.stripPlacement)) display.stripPlacement = input.display
     .stripPlacement;
   if (['split', 'pfd-wide', 'mfd-wide', 'swap'].includes(input?.display?.layout)) display.layout = input.display.layout;
+  display.background = cockpitBackgroundSettings(input?.display?.background);
+  // No live `aspect` at load time — nothing has rendered yet, so this bounds
+  // the horizontal extent and holds `y` in range without guessing a shape.
+  // `CameraWindow.vue` re-clamps against the box it actually measures, on
+  // mount and on resize; see `clampCameraWindow`'s own doc comment.
+  display.cameraWindow = clampCameraWindow(input?.display?.cameraWindow);
   Object.assign(display,units(input?.display));
   return {
     references,

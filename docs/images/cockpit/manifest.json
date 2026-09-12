@@ -1,5 +1,5 @@
 {
-  "date": "2026-09-08",
+  "date": "2026-09-12",
   "scope": "Instructional screenshots of native cockpit; fixture and SITL provenance in README",
   "images": [
     {
@@ -133,6 +133,30 @@
       "source": "guide",
       "sha256": "a14eed44134faad1f224b5836cde82b0798aed9b73bf555cb3054236a24d173e",
       "bytes": 439392
+    },
+    {
+      "file": "camera-full.png",
+      "source": "fixture-harness",
+      "sha256": "db531f67335ac5c9719d2af720c8fe35630a747be385d029621e2b1a17d8391e",
+      "bytes": 233890
+    },
+    {
+      "file": "camera-full-day.png",
+      "source": "fixture-harness",
+      "sha256": "b46d420e4d755bb93f4ad8178aad1da966538b30cf0a57347fc409f83c2c4c82",
+      "bytes": 233575
+    },
+    {
+      "file": "camera-window.png",
+      "source": "fixture-harness",
+      "sha256": "c23f3bbb7313a5f56c86afbd112a0dedb1a1511f0167a948dbb44938a4298653",
+      "bytes": 397215
+    },
+    {
+      "file": "camera-window-tablet.png",
+      "source": "fixture-harness",
+      "sha256": "5186b24a917f0993f227a0d25a3346495799f944eadd436a59e00248e2151728",
+      "bytes": 308115
     }
   ]
 }

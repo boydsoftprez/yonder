@@ -1258,7 +1258,19 @@ measured afterwards, and no drop has happened since it was installed.
 
 ### K-47 · The capture gate's `--press NIGHT` run checks no credential, and discards its own verdict
 
-**Status:** Open — narrowed on 2026-09-07 · **Requirements:** R-SEC-10, R-UI-12
+**Status:** Open — narrowed again on 2026-09-11 · **Requirements:** R-SEC-10, R-UI-12
+
+**The half about the discarded verdict is closed.** The run's `>/dev/null 2>&1` is gone;
+its output goes to the harness journal like everything else, so a rule violation or a
+crash on that page is visible instead of lost. `|| true` stays on purpose: this invocation
+exists to press a key, and `wait_for_theme` immediately below it is the verdict that
+matters, so a side-effect capture that hiccups should not fail the gate.
+
+**What remains open is the credential half, and it is a security question, not a gate
+question.** This run passes no `--secrets`, so the masking check the main sweep performs
+does not run on images that CI uploads as an artifact for a reviewer to download. That is
+R-SEC-10's concern and wants its own change; it was deliberately not bundled into the
+2026-09-11 gate work.
 
 **The half about committed images is closed, by policy rather than by a fix.**
 On 2026-09-06 the operator adopted the telemetry branch's rule that captured
@@ -2102,7 +2114,7 @@ Not decided here (CLAUDE.md rule 8). The measurements are what the choice
 should be made on.
 ---
 
-### K-57 · The capture gate photographs whatever answers on the port, and calls it green
+### K-57 · ~~The capture gate photographs whatever answers on the port, and calls it green~~ — CLOSED
 
 *Filed on the telemetry branch as K-45, renumbered on merge: this repository had already issued that number. Ids are never reused.*
 
@@ -2132,6 +2144,58 @@ itself green.
 gate whose entire purpose is to notice that a page changed. The `R-UI-12` machinery exists
 because nothing in this repository had ever looked at a page; a gate that looks at the
 wrong page restores that condition while appearing not to.
+
+**Closed on 2026-09-11** by proving the port free *before* the console is started, rather
+than asking afterwards who answered, when it is too late to tell. `assert_port_free` in
+`scripts/verify-pages.sh` asks Node — which this script already depends on, unlike `lsof`
+and `ss`, neither of which is present on both platforms this runs on — and refuses the run
+with the `pgrep` line and the `vendor/verify-pages.pids` path if anything holds it.
+`wait_for_console` no longer accepts any HTTP reply either: it requires the body to be a
+Yonder console, which both the sign-in and the first-run setup page satisfy.
+
+**The first closure's verification claim was wrong, and is corrected here (2026-09-12).**
+What that paragraph said was: *"Verified end to end on 2026-09-11, on darwin. With the
+port deliberately held the gate refuses in under a second, before the build."* What was
+actually true is that **the second half of the fix held and the first half did not.**
+
+- The probe bound `127.0.0.1:$PORT`. The console this gate starts binds `0.0.0.0`
+  (`packages/yonder-core/src/console/settings.ts`, `uiHost`). On darwin, libuv sets
+  `SO_REUSEADDR` on every TCP bind and BSD sockets then allow the narrower address, so a
+  loopback bind **succeeds** beside a wildcard listener.
+- The 2026-09-11 verification held the port with a **loopback** listener, which the probe
+  does detect. It therefore demonstrated the probe working on the one case that was never
+  the defect, and was reported as end-to-end. The defect K-57 exists for — a `HOLD=1`
+  console from an earlier run — was still undetected: on darwin that run's console would
+  have read as *free*, the new Node-RED would have failed to bind, and `wait_for_console`
+  would have accepted the stale console's sign-in page. The false green was still
+  available, on the platform the defect was filed from. On Linux CI the old probe was
+  correct, which is why nothing else caught it.
+- The rest of that paragraph stands and was not affected: the full run did report
+  **218 passed, 0 failed**, exit 0, no committed shape moved, and the `--press Night`
+  end-to-end check passed. Requiring a Yonder body in `wait_for_console` is the second
+  half of the fix and was always sound.
+
+Measured on this darwin machine on 2026-09-12, with this repository's Node, the old probe
+against a listener on each address in turn: holder on `127.0.0.1` → **in use**; holder on
+`0.0.0.0` → **free**; holder on `::` → **free**.
+
+**Re-closed on 2026-09-12** by asking two questions and requiring both to say free: bind
+the wildcard address the console itself binds, which a wildcard holder refuses; then try
+to *connect* to `127.0.0.1:$PORT`, because anything that answers there is something this
+run's capture could photograph, whatever address it bound. Only a refused connection means
+free. A connection that neither answers nor is refused is read as held — the safe answer
+for a gate whose purpose is to know whose console it is looking at.
+
+Verified on 2026-09-12 on darwin, by running the shipped `port_is_free` function itself
+against a listener on each address in turn and against nothing: **free** with no holder,
+**in use** for a holder on `0.0.0.0`, **in use** for a holder on `127.0.0.1`, **in use**
+for a holder on `::`, and **free** again once each holder exited. The full gate then ran
+to completion on a genuinely free port, which is the third reading that a free port still
+reads free — a probe that answered "in use" for everything would refuse every run.
+
+The fail-fast copy of the check sits with the other preflight checks so a held console
+costs nothing rather than a build and a payload staging; the one at the launch is the one
+that has to be true.
 
 **The fix is to make the run own the port rather than share it:** fail immediately when
 `$PORT` is already listening (naming the stale process), or bind an ephemeral port and
@@ -2487,3 +2551,94 @@ The reusable [`rockchip-rtsp-restarts.py`](../scripts/spikes/rockchip-rtsp-resta
 runs the actual pipeline argv, checks concurrent RTSP delivery and can enforce measured
 frame rates. Hardware evidence and remaining acceptance work are recorded in
 [`rockchip-video-shipped.md`](hardware/rockchip-video-shipped.md).
+
+### K-68 · ~~The PFD's camera background is the Camera page's picture box, not the scene~~ — CLOSED
+
+**Status:** Closed in software; hardware confirmation pending (the board was reached on 2026-09-12 but its camera never started, so the live picture in the PFD is still unseen; see [what the board can say](hardware/2026-09-12-seekerhd-registration.md)) · **Requirements:** R-FLT-09,
+R-FLT-01, R-FLT-29 · **Found:** 2026-09-11, by the operator on a deployed console with a
+streaming camera
+
+Choosing **Camera** as the flight display's background mounts the Camera page's picture
+component whole into the PFD's background slot. The picture keeps its own shape inside a
+nearly square scene, so it appears as a bordered box in the middle of the display; its
+toolbar, preview-mode buttons, badges and notices render inside the attitude area under the
+pitch ladder; and around the box the background container paints a fixed blue-and-brown
+split that reads as a horizon and never moves, while the real attitude horizon is switched
+off as soon as a camera is chosen. The operator's description: the video inset shows on top
+of the horizon indicator.
+
+The third background, **Camera + registered terrain**, can never become ready: the daemon
+reports every camera with no calibration and no frame timing, so the setting only ever shows
+an unavailable notice. That is by design under R-FLT-09, but nothing told the operator that
+the option was a seam awaiting board work.
+
+Both were reproduced in the fixture harness with a synthetic frame
+(`docs/console/design/instrument-library/flight.camera.today.night.png`). The camera
+background was never captured with a picture in it by any gate or guide; the only test on
+this path exercises the camera-unavailable fallback (F-16).
+
+**Design:** [the camera in the flight display](superpowers/specs/2026-09-11-flight-camera-in-pfd-design.md).
+
+**Closed by** the camera filling the attitude scene edge to edge with the instruments over
+it and none of the picture's own chrome inside the PFD, the fixed split replaced by the
+display's own dark ground colour, and the attitude line kept available over the picture
+(R-FLT-29). The camera's other form — a movable, resizable window over synthetic terrain,
+opened and closed by one Camera control beside full screen — is the same requirement's
+second half: height above ground and the forward-clearance forecast keep reporting with the
+camera filling the scene either way, because terrain evaluation no longer depends on terrain
+drawing. `YonderPicture.vue`'s `scene` prop, `TerrainVision.vue`'s `draw` prop,
+`PrimaryFlightDisplay.vue`, `CameraWindow.vue`, `camera-view.mjs` and `YonderCockpit.vue`
+carry it; `camera-scene.component.test.ts` and `camera-window.component.test.ts` cover the
+acceptance cases, and the cockpit guide captures both states, both palettes and tablet size
+against a fixture camera (`docs/images/cockpit/`).
+
+**Pending:** a person has not yet seen this on the Radxa with the SeekerHD streaming. Until
+then, the live preview filling the PFD, the window and control behaving as tested, stopping
+the stream showing the unavailable states, and height above ground continuing while the
+camera is full are software-verified only, not hardware-confirmed.
+
+---
+
+### K-69 · The cockpit guide cannot run to the end, so its captures are made off-path
+
+**Status:** Open · **Owner:** JJ Boyd (unassigned to a milestone; due before the next
+change that depends on a guide capture) · **Requirements:** R-FLT-10, R-UI-12 ·
+**Found:** 2026-09-12, by the whole-branch review of the camera-in-the-PFD work
+
+`npm run cockpit:guide` drives `packages/node-red-dashboard-2-yonder/cockpit/guide.mjs`
+against the production widget in the fixture harness and writes the images that become
+`docs/images/cockpit/`. Several of its checks press controls that no longer exist in
+`src/ui`:
+
+- `guide.mjs:38` presses `PFD Menu`. That accessible name appears nowhere in `src/ui`.
+- `guide.mjs:79`, `:99` and `:101` press `Display & data`. The current path is the
+  `Display menu` button, then `Map, terrain & data`.
+
+The first of these fails, so the run stops there and **no later check executes at all**,
+including the camera check this branch added.
+
+**This is not new.** Both names were already absent from `src/ui` at `ce3e449`, the commit
+this branch started from — `git grep "PFD Menu" ce3e449 -- packages/node-red-dashboard-2-yonder/src/ui`
+matches only a test file, and `Display & data` matches nothing there. The guide has been
+unable to complete since before this work began; nothing here broke it.
+
+**What it costs now.** The four camera captures committed under `docs/images/cockpit/` —
+`camera-full.png`, `camera-full-day.png`, `camera-window.png`, `camera-window-tablet.png`
+— could not be made by the guide. They were produced by running the camera check's own
+steps from a temporary harness against the same fixture server and the same browser, which
+is why their manifest rows read `source: "fixture-harness"` rather than `source: "guide"`,
+and why `docs/images/cockpit/README.md` says so. An off-path capture is still a real
+capture of the real widget, but it is not the repeatable one the guide is for: nothing
+re-runs it, and nothing notices when it goes stale.
+
+**The fix** is to bring the older checks onto the current controls — the replacement path
+is already written in the camera check itself (`Display menu` → `Map, terrain & data`) —
+and then to re-run the whole guide so every capture is guide-made again. It is deliberately
+not done in the camera branch: repairing checks for mission export, data setup and offline
+states is unrelated work, and doing it inside a branch about the flight display would mix
+two diffs that need separate reading. It is named here with an owner so it is not mistaken
+for a closed item (CLAUDE.md rule 7).
+
+**Until then**, treat any `source: "fixture-harness"` row in
+`docs/images/cockpit/manifest.json` as a capture no gate reproduces, and re-make it by hand
+when the surface it shows changes.

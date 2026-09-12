@@ -24,6 +24,13 @@
         <g class="pfd-horizon" :transform="horizon" :opacity="terrainReady?0:1">
           <rect :x="320-sceneExtent" :y="225-sceneExtent" :width="sceneExtent*2" :height="sceneExtent" fill="url(#pfd-sky)"/>
           <rect :x="320-sceneExtent" y="225" :width="sceneExtent*2" :height="sceneExtent" fill="url(#pfd-earth)"/>
+        </g>
+        <!-- R-FLT-29: split from the fills above so a camera background can
+             keep this line drawn (per the operator's own switch) while the
+             sky and earth fills it used to share an opacity with stay
+             hidden. Over terrain this still moves with `terrainReady`
+             exactly as the fills do, unchanged. -->
+        <g class="pfd-horizon-line" :transform="horizon" :opacity="horizonLineVisible?1:0">
           <line :x1="320-sceneExtent" y1="225" :x2="320+sceneExtent" y2="225" stroke="white" stroke-width="3"/>
         </g>
         <g v-if="options.pitchLadder" clip-path="url(#pfd-pitch-clip)" mask="url(#pfd-pitch-mask)"><g :transform="horizon">
@@ -153,9 +160,10 @@
     <PfdWindDisplay v-if="options.windDisplay!=='off'" :telemetry="telemetry" :mode="options.windDisplay||'components'" :speed-unit="selectedUnits.speedUnit" :style="hit([130-viewport.edgeShift,302,128,86])" @open="open('wind')"/>
     <div v-if="!flight.live" class="pfd-loss" role="status">Flight instruments unavailable</div>
     </div>
+    <div class="pfd-camera-overlay"><slot name="camera-overlay"/></div>
     </div>
     <nav v-if="options.menuStrip!==false" class="pfd-menu-strip" aria-label="PFD touch menu"><button @click="open('menu')">PFD settings</button><button @click="$emit('navigate','mission')">Flight plan</button><button @click="open('director')">FD</button><button @click="$emit('navigate','settings')">Display</button></nav>
-    <footer class="display-foot"><span>Touch an instrument · cyan = local reference</span><span>{{backgroundLabel||'Conventional horizon'}}</span></footer>
+    <footer class="display-foot"><span>Touch an instrument · cyan = local reference</span><span>{{backgroundLabel||'Conventional horizon'}}<template v-if="staleLabel"> · {{staleLabel}}</template></span></footer>
     <PfdControlPanel v-if="panel" :key="panel" :kind="panel" :flight="flight" :guidance="guidance" :telemetry="telemetry" :references="references" :options="options" :mission="mission" :terrain-status="terrainStatus" @close="panel=null" @panel="open" @reference="(key,value)=>$emit('reference',key,value)" @option="(key,value)=>$emit('option',key,value)" @navigate="$emit('navigate',$event)"/>
   </section>
 </template>
@@ -209,7 +217,13 @@ export default {
     PfdTurnRate
   },
   props: ['flight', 'guidance', 'telemetry', 'cdiScale', 'references', 'options', 'mission', 'trafficTracks', 'homeNavigation', 'reportedFlightState',
-    'trafficOptions', 'trafficSelected', 'trafficNow', 'backgroundReady', 'backgroundLabel', 'terrainReport', 'snapshot'
+    'trafficOptions', 'trafficSelected', 'trafficNow', 'backgroundReady', 'backgroundLabel', 'terrainReport', 'snapshot', 'cameraBackground',
+    // R-FLT-29/K-68, design decision 11: the picture's own stale age, shown
+    // in the footer only while the camera fills the scene by itself — the
+    // host (YonderCockpit.vue) already decides that boundary and hands
+    // over pre-formatted text or '', so this file adds no new condition of
+    // its own for when to show it.
+    'staleLabel'
   ],
   emits: ['reference', 'option', 'navigate', 'traffic-select', 'flight-controls'],
   setup(props, {
@@ -293,6 +307,24 @@ export default {
     const reading=(key,value)=>{const v=shown(key,value);return Number.isFinite(v)?v.toLocaleString('en-US',{maximumFractionDigits:({vsi:selectedUnits.value.verticalSpeedUnit,airspeed:selectedUnits.value.speedUnit}[key])==='mps'?1:0}):'—'};
     const altitudeScale=computed(()=>selectedUnits.value.altitudeUnit==='ft'?.35:1.2);
     const terrainReady = computed(() => props.backgroundReady === true);
+    /**
+     * R-FLT-29: the white attitude line used to share one `<g>`, and one
+     * opacity, with the sky and earth fills it is drawn over. That was
+     * right as long as a camera unmounted this line along with everything
+     * else; now the flight display can put a camera behind the instruments
+     * instead, and the line is the thing that still gives attitude at a
+     * glance when the picture's own horizon is not level or not clear.
+     *
+     * Over a camera (`cameraBackground`), the line follows the operator's
+     * own switch (`options.horizonLine`, default true — the same
+     * default-true idiom `standardRatePointers`/`turnRate`/`skidBall`
+     * already use below) regardless of whether that camera happens to be
+     * streaming right now. Over terrain, nothing changes: the line stays
+     * tied to `terrainReady`, exactly as the sky and earth fills still are.
+     */
+    const horizonLineVisible = computed(() => props.cameraBackground
+      ? props.options.horizonLine !== false
+      : !terrainReady.value);
     const director = computed(() => props.options.fdVisible ? flightDirectorCue(displayFlight.value) : null);
     const refOffset = (key, scale) => Number.isFinite(props.references[key]) && Number.isFinite(props.flight[key]) ?
       Math.max(-126, Math.min(126, (shown(key,props.flight[key]) - shown(key,props.references[key])) * scale)) : null;
@@ -374,6 +406,7 @@ export default {
       open,
       terrainStatus,
       terrainReady,
+      horizonLineVisible,
       director,
       turnCues: computed(()=>turnCueState(props.telemetry)),
       refOffset

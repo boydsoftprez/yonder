@@ -280,3 +280,22 @@ predates these and must be brought up to them:
   finder that used to supply an envelope is gone — is Task 38's open
   question, put to the operator separately. This blueprint draws the Aim
   panel simply live; it does not draw or claim an answer to that question.
+
+## The camera in the flight display
+
+Settled on 2026-09-11 by rendering the production PFD component in the cockpit
+fixture harness with synthetic telemetry and a synthetic camera frame; the design is
+[the camera in the flight display](../../../superpowers/specs/2026-09-11-flight-camera-in-pfd-design.md),
+the defect it corrects is K-68, and the manifest rows are F-32 to F-35. None of these
+renders is flight evidence, and the two overlay candidates are composites of a terrain
+plate over a picture from a different place: they show a treatment, not alignment.
+
+| Render | Shows |
+|---|---|
+| `flight.camera.today.night.png` | The defect: the picture box over a fixed split, its chrome inside the scene |
+| `flight.camera.full.night.png` | The camera filling the scene, instruments over it, horizon line kept |
+| `flight.camera.window.night.png` | The camera window in its top-left home over synthetic terrain (composite) |
+| `flight.camera.toggle.night.png`, `flight.camera.toggle.zoom.night.png` | The Camera button beside full screen, and magnified |
+| `flight.camera.full.tablet.night.png` | The full state at tablet size in full screen |
+| `flight.camera.overlay-wash.candidate.night.png` | Candidate treatment for registered terrain: translucent wash |
+| `flight.camera.overlay-wire.candidate.night.png` | Candidate treatment for registered terrain: ground-only wire |
