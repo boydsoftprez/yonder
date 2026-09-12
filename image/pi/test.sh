@@ -47,8 +47,27 @@ EOF
 for index in {0..31}; do
     [[ -e /dev/loop$index ]] || mknod "/dev/loop$index" b 7 "$index"
 done
-boot_loop=$(losetup --find --show --offset $((2048 * 512)) --sizelimit $((131072 * 512)) "$disk")
-root_loop=$(losetup --find --show --offset $((133120 * 512)) --sizelimit $((391168 * 512)) "$disk")
+attach_reserved_loop() {
+    local loop=$1 backing=$2 offset=${3:-} size=${4:-}
+    if losetup "$loop" >/dev/null 2>&1; then
+        printf 'FAIL: reserved Pi test loop is already allocated: %s\n' "$loop" >&2
+        return 1
+    fi
+    if [[ -n $offset && -n $size ]]; then
+        losetup --offset "$offset" --sizelimit "$size" "$loop" "$backing"
+    else
+        losetup "$loop" "$backing"
+    fi
+    [[ $(losetup -n -O BACK-FILE "$loop") == "$backing" ]]
+}
+boot_loop=/dev/loop31
+root_loop=/dev/loop30
+attach_reserved_loop "$boot_loop" "$disk" $((2048 * 512)) $((131072 * 512))
+attach_reserved_loop "$root_loop" "$disk" $((133120 * 512)) $((391168 * 512))
+if [[ $boot_loop != /dev/loop31 || $root_loop != /dev/loop30 ]]; then
+    printf '%s\n' 'FAIL: Pi layout fixture did not use its reserved high loop devices' >&2
+    exit 1
+fi
 boot_loop_diskseq=$(<"/sys/class/block/${boot_loop##*/}/diskseq")
 root_loop_diskseq=$(<"/sys/class/block/${root_loop##*/}/diskseq")
 unmount_layout_path() {
@@ -137,8 +156,10 @@ trap - EXIT
 # actual nested boot/root topology used by the builder.
 mkdir -p /work /target
 cp "$disk" /work/disk.img
-boot_loop=$(losetup --find --show --offset $((2048 * 512)) --sizelimit $((131072 * 512)) /work/disk.img)
-root_loop=$(losetup --find --show --offset $((133120 * 512)) --sizelimit $((391168 * 512)) /work/disk.img)
+boot_loop=/dev/loop29
+root_loop=/dev/loop28
+attach_reserved_loop "$boot_loop" /work/disk.img $((2048 * 512)) $((131072 * 512))
+attach_reserved_loop "$root_loop" /work/disk.img $((133120 * 512)) $((391168 * 512))
 printf '%s\n%s\n' "$boot_loop" "$root_loop" >/work/pi-loops
 mount "$root_loop" /target
 mkdir -p /target/boot/firmware /target/proc /target/dev /target/run \
@@ -162,19 +183,22 @@ mount -t tmpfs -o ro tmpfs /target/run/yonder-apt
 
 # Cancellation can arrive after allocating a loop but before the marker exists.
 truncate -s 8M /work/disk.img
-early_loop=$(losetup --find --show /work/disk.img)
+early_loop=/dev/loop27
+attach_reserved_loop "$early_loop" /work/disk.img
 [[ ! -e /work/pi-loops ]]
 /tmp/yonder-pi/cleanup.sh
 ! losetup "$early_loop" >/dev/null 2>&1
 
 # A detached marker loop may be reused for an unrelated backing file. Cleanup
 # must use the copied image's file identity and leave that reused loop alone.
-stale_loop=$(losetup --find --show /work/disk.img)
+stale_loop=/dev/loop26
+attach_reserved_loop "$stale_loop" /work/disk.img
 printf '%s\n' "$stale_loop" >/work/pi-loops
 losetup -d "$stale_loop"
 truncate -s 8M /tmp/unrelated.img
-losetup "$stale_loop" /tmp/unrelated.img
-private_loop=$(losetup --find --show /work/disk.img)
+attach_reserved_loop "$stale_loop" /tmp/unrelated.img
+private_loop=/dev/loop25
+attach_reserved_loop "$private_loop" /work/disk.img
 /tmp/yonder-pi/cleanup.sh
 ! losetup "$private_loop" >/dev/null 2>&1
 [[ $(losetup -n -O BACK-FILE "$stale_loop") == /tmp/unrelated.img ]]
