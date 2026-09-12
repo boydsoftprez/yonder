@@ -617,6 +617,11 @@ exit 99
 EOF
     chmod +x "$stub/$command"
 done
+cat >"$stub/ldconfig" <<'EOF'
+#!/bin/sh
+printf 'ldconfig\n' >>"$YONDER_TEST_CALLS"
+EOF
+chmod +x "$stub/ldconfig"
 : >"$calls"
 set +e
 PATH="$stub:$PATH" YONDER_TEST_CALLS="$calls" /bin/sh -c '
@@ -675,6 +680,7 @@ set -e
 if [ "$status" = 0 ] \
     && [ -f "$rock_plugins/libgstrockchipmpp.so" ] \
     && [ -f "$rock_lib/librockchip-test.so" ] \
+    && grep -qx 'ldconfig' "$calls" \
     && ! grep -q '^gst-inspect-1.0 ' "$calls"; then
     ok "a declared Radxa image installs Rockchip files without probing an MPP device"
 else

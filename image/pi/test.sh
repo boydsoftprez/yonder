@@ -49,11 +49,28 @@ for index in {0..31}; do
 done
 boot_loop=$(losetup --find --show --offset $((2048 * 512)) --sizelimit $((131072 * 512)) "$disk")
 root_loop=$(losetup --find --show --offset $((133120 * 512)) --sizelimit $((260096 * 512)) "$disk")
+unmount_layout_path() {
+    local path=$1 attempt
+    for attempt in {1..20}; do
+        if ! mountpoint -q "$path"; then
+            return 0
+        fi
+        umount "$path" 2>/dev/null || true
+        sleep 0.05
+    done
+    printf 'FAIL: Pi layout cleanup could not unmount %s\n' "$path" >&2
+    return 1
+}
 cleanup_layout() {
-    umount /mnt/layout/boot 2>/dev/null || true
-    umount /mnt/layout/root 2>/dev/null || true
-    losetup -d "$boot_loop" 2>/dev/null || true
-    losetup -d "$root_loop" 2>/dev/null || true
+    local cleanup_status=0 loop
+    unmount_layout_path /mnt/layout/boot || cleanup_status=1
+    unmount_layout_path /mnt/layout/root || cleanup_status=1
+    for loop in "$boot_loop" "$root_loop"; do
+        if losetup "$loop" >/dev/null 2>&1 && ! losetup -d "$loop"; then
+            cleanup_status=1
+        fi
+    done
+    return "$cleanup_status"
 }
 trap cleanup_layout EXIT
 mkfs.vfat -F 32 -n bootfs -i B2F082D2 "$boot_loop" >/dev/null 2>&1
@@ -64,7 +81,17 @@ mount "$root_loop" /mnt/layout/root
 printf '%s\n' firmware-preserved >/mnt/layout/boot/config.txt
 printf '%s\n' root-preserved >/mnt/layout/root/probe
 sync
+(
+    cd /mnt/layout/boot
+    sleep 0.2
+) &
+layout_holder=$!
 cleanup_layout
+wait "$layout_holder"
+if mountpoint -q /mnt/layout/boot || mountpoint -q /mnt/layout/root; then
+    printf '%s\n' 'FAIL: Pi layout cleanup accepted a busy mount and left it behind' >&2
+    exit 1
+fi
 trap - EXIT
 boot_hash=$(dd if="$disk" bs=512 skip=2048 count=131072 status=none | sha256sum | cut -d' ' -f1)
 
