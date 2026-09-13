@@ -48,10 +48,7 @@ export interface CommandOptions {
 export function inFlightRunner(runner: CommandRunner): CommandRunner {
   const pending = new Map<string, Promise<CommandResult>>();
   return (argv, opts) => {
-    const env = opts?.env === undefined
-      ? null
-      : Object.entries(opts.env).sort(([a], [b]) => a.localeCompare(b));
-    const key = JSON.stringify([argv, env]);
+    const key = observationKey(argv, opts);
     let shared = pending.get(key);
     if (shared === undefined) {
       const ownArgv = [...argv];
@@ -70,6 +67,62 @@ export function inFlightRunner(runner: CommandRunner): CommandRunner {
       shared = tracked;
     }
     return shared.then((result) => ({ ...result }));
+  };
+}
+
+/** One command line, with the environment it asked for, as a map key. */
+function observationKey(argv: string[], opts?: CommandOptions): string {
+  const env = opts?.env === undefined
+    ? null
+    : Object.entries(opts.env).sort(([a], [b]) => a.localeCompare(b));
+  return JSON.stringify([argv, env]);
+}
+
+/**
+ * Keep a read-only observation's answer for a bounded time.
+ *
+ * `inFlightRunner` shares a command only while it runs. This also keeps the
+ * settled answer for `ttlMs`, so two pollers a few seconds apart cost one
+ * process instead of two. That is the whole point, and it was measured
+ * before it was built (K-70): the console's fixed 2 s and 5 s pollers made
+ * the daemon fork `nmcli`, `mmcli` and `zerotier-cli` about six times a
+ * second, and each fork of a daemon this size cost its main thread tens of
+ * milliseconds on the bench board — half of everything that thread did,
+ * with the telemetry socket dropping packets behind it (R-HW-07).
+ *
+ * The rule from `inFlightRunner`, stricter: only for clients whose readers
+ * accept an answer up to `ttlMs` old. Never for a writer, never for the read
+ * that verifies one (R-CFG-03, R-NET-07), and never for a reader whose
+ * requirement says *now* — the modem net port (R-CEL-13) and the reach
+ * monitor stay on the unmemoised runner, which is why this is a separate
+ * wrapper the daemon applies to separate client instances rather than a
+ * setting on the runner everything shares.
+ *
+ * A non-zero exit is an answer and is kept like any other: a modem that is
+ * not there is not there for the next few seconds either, and asking every
+ * poll was the cost this removes. A runner that *throws* is not kept, so the
+ * next poll retries, exactly as `inFlightRunner` does.
+ */
+export function memoRunner(
+  runner: CommandRunner,
+  opts: { ttlMs: number; now?: () => number },
+): CommandRunner {
+  const now = opts.now ?? (() => Date.now());
+  const shared = inFlightRunner(runner);
+  const kept = new Map<string, { at: number; result: Promise<CommandResult> }>();
+  return (argv, o) => {
+    const key = observationKey(argv, o);
+    const at = now();
+    const held = kept.get(key);
+    if (held !== undefined && at - held.at < opts.ttlMs) {
+      return held.result.then((result) => ({ ...result }));
+    }
+    const result = shared(argv, o);
+    kept.set(key, { at, result });
+    result.catch(() => {
+      if (kept.get(key)?.result === result) kept.delete(key);
+    });
+    return result.then((r) => ({ ...r }));
   };
 }
 

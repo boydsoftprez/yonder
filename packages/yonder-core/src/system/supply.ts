@@ -66,11 +66,27 @@ export function parseThrottled(text: string): SupplyState {
   return { clean: bits === 0, now: flags(0), sinceBoot: flags(16), raw: `0x${bits.toString(16)}` };
 }
 
+/**
+ * Runners on which `vcgencmd` turned out not to exist at all.
+ *
+ * A board without the binary — every Rockchip board — answered every 5 s poll
+ * with a fork that failed to exec, and a fork of this daemon is not free on
+ * the boards that have no `vcgencmd` (K-70). A binary does not appear while
+ * the daemon runs, so the absence is remembered for the process; a present
+ * `vcgencmd` that merely fails is still asked next time.
+ */
+const absent = new WeakSet<CommandRunner>();
+
 /** null where the board does not expose it — unknown, not good. */
 export async function readSupply(
   opts: { runner?: CommandRunner } = {},
 ): Promise<SupplyState | null> {
-  const result = await (opts.runner ?? systemRunner)(["vcgencmd", "get_throttled"]);
-  if (result.code !== 0) return null;
+  const runner = opts.runner ?? systemRunner;
+  if (absent.has(runner)) return null;
+  const result = await runner(["vcgencmd", "get_throttled"]);
+  if (result.code !== 0) {
+    if (/\bENOENT\b/.test(result.stderr)) absent.add(runner);
+    return null;
+  }
   return parseThrottled(result.stdout);
 }

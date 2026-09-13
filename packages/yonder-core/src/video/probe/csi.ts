@@ -7,16 +7,32 @@ import type { Detection, Rejection } from "./camera.js";
  * Candidate sizes come from the active sensor and are retained only when
  * non-mutating TRY_FMT returns that exact NV12 mode. Auxiliary nodes are not cameras.
  */
+/**
+ * Rejections that must be asked about again next sweep (R-CAM-24).
+ *
+ * The ISP publishes ten nodes and nine of them are not the main capture
+ * path; that is a fact about the node, so a sweep may reuse it. A graph with
+ * no connected sensor, a missing rate or an unprepared format are facts about
+ * *now* — the sensor service is still bringing the pipeline up at boot — and
+ * the next sweep has to look again.
+ */
+export const csiTransient = new WeakSet<Rejection>();
+
 export async function probeRockchipCsi(
   node: string, card: string, runner: CommandRunner, names: ReadonlyMap<string, string>,
 ): Promise<Detection | Rejection> {
-  const reject = (reason: string): Rejection => ({ device: node, card, reason });
+  const reject = (reason: string, retry = true): Rejection => {
+    const rejection: Rejection = { device: node, card, reason };
+    if (retry) csiTransient.add(rejection);
+    return rejection;
+  };
   const info = await runner(["v4l2-ctl", "-d", node, "--info"]);
-  if (info.code !== 0 || !/Card type\s*:\s*rkisp(?:1)?_mainpath\s*$/m.test(info.stdout)) {
-    return reject("this is an auxiliary ISP node, not the CSI camera's main capture path");
+  if (info.code !== 0) return reject("this ISP node did not answer --info");
+  if (!/Card type\s*:\s*rkisp(?:1)?_mainpath\s*$/m.test(info.stdout)) {
+    return reject("this is an auxiliary ISP node, not the CSI camera's main capture path", false);
   }
   const bus = /Bus info\s*:\s*(platform:[\w.-]+)/.exec(info.stdout)?.[1];
-  if (!bus) return reject("the CSI capture device did not identify its media bus");
+  if (!bus) return reject("the CSI capture device did not identify its media bus", false);
   const graph = await runner(["media-ctl", "-d", bus, "-p"]);
   const sensors = graph.stdout.split(/^- entity /m).filter((s) => /subtype Sensor\b/.test(s));
   if (graph.code !== 0 || sensors.length !== 1 || !/\[ENABLED\]/.test(sensors[0])) {

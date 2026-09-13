@@ -200,8 +200,12 @@ export async function readRemoteState(
   }
   const info = await cli.info().catch(() => null);
   if (info === null) return remoteState({ config, installed: false, info: null, networks: [] });
-  const networks = await cli.listNetworks().catch(() => []);
-  const peers = await cli.listPeers().catch(() => []);
+  // Two independent reads, so a poll waits for the slower one rather than
+  // for both in turn (K-70: this route is polled every 2 s and every 5 s).
+  const [networks, peers] = await Promise.all([
+    cli.listNetworks().catch(() => []),
+    cli.listPeers().catch(() => []),
+  ]);
 
   const net = networks.find((n) => n.nwid === network_id);
   const iface = net?.portDeviceName;

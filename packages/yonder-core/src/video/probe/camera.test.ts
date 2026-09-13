@@ -2,7 +2,7 @@
 import { readFileSync } from "node:fs";
 import { join } from "node:path";
 import { describe, expect, it } from "vitest";
-import { detectCameras, gateIfInactive, isHardwareCodec, probeCamera, type ProbeOptions } from "./camera.js";
+import { detectCameras, forgetProbes, gateIfInactive, isHardwareCodec, probeCamera, PROBE_REUSE_MS, type ProbeOptions } from "./camera.js";
 import type { ByPathEntry } from "./bypath.js";
 import type { CommandRunner } from "../../net/runner.js";
 import type { CameraCapabilities, ControlRange } from "../capability.js";
@@ -462,5 +462,105 @@ describe("gateIfInactive", () => {
       by: { id: "autoExposure", label: "auto exposure" },
       value: heldShutter,
     });
+  });
+});
+
+describe("reusing a node's probe between sweeps (K-70, R-CAM-24)", () => {
+  /** `benchRunner` behind a counter — one instance shared by every sweep of a test. */
+  function counting(overrides: Record<string, string> = {}) {
+    const seen: string[][] = [];
+    const inner = benchRunner(overrides);
+    const runner: CommandRunner = async (argv) => { seen.push(argv); return inner(argv); };
+    const lines = () => seen.map((argv) => argv.join(" "));
+    return { runner, seen, lines, overrides };
+  }
+  const asksVideo0 = (lines: string[]) => lines.some((l) => l.includes("-d /dev/video0 "));
+
+  it("a second sweep inside the window lists devices but asks no readable node again", async () => {
+    const { runner, seen, lines } = counting();
+    let t = 0;
+    const opts: ProbeOptions = { runner, byPath: recordedByPath, now: () => t };
+    const first = await detectCameras(opts);
+    expect(asksVideo0(lines())).toBe(true);
+    const mark = seen.length;
+
+    t = PROBE_REUSE_MS - 1;
+    const second = await detectCameras(opts);
+    const again = lines().slice(mark);
+    expect(second).toEqual(first);
+    expect(again).toContain("v4l2-ctl --list-devices");
+    expect(asksVideo0(again)).toBe(false);
+    expect(again.some((l) => l.includes("--list-ctrls-menus"))).toBe(false);
+  });
+
+  it("asks again once the window has passed", async () => {
+    const { runner, seen, lines } = counting();
+    let t = 0;
+    const opts: ProbeOptions = { runner, byPath: recordedByPath, now: () => t };
+    await detectCameras(opts);
+    const mark = seen.length;
+    t = PROBE_REUSE_MS;
+    await detectCameras(opts);
+    expect(asksVideo0(lines().slice(mark))).toBe(true);
+  });
+
+  it("asks again when the by-path listing changes", async () => {
+    const { runner, seen, lines } = counting();
+    await detectCameras({ runner, byPath: recordedByPath });
+    const mark = seen.length;
+    await detectCameras({ runner, byPath: () => recordedByPath().slice(1) });
+    expect(asksVideo0(lines().slice(mark))).toBe(true);
+  });
+
+  it("asks again after forgetProbes, the control-write invalidation", async () => {
+    const { runner, seen, lines } = counting();
+    const opts: ProbeOptions = { runner, byPath: recordedByPath };
+    await detectCameras(opts);
+    const mark = seen.length;
+    forgetProbes();
+    await detectCameras(opts);
+    expect(asksVideo0(lines().slice(mark))).toBe(true);
+  });
+
+  it("never reuses a node without a stable by-path name", async () => {
+    const { runner, seen, lines } = counting();
+    const opts: ProbeOptions = { runner, byPath: () => [] };
+    const first = await detectCameras(opts);
+    expect(first.found[0].byPathStable).toBe(false);
+    const mark = seen.length;
+    await detectCameras(opts);
+    expect(asksVideo0(lines().slice(mark))).toBe(true);
+  });
+
+  it("does not reuse a node the runner could not read", async () => {
+    const { runner, seen, lines } = counting();
+    const opts: ProbeOptions = { runner, byPath: recordedByPath };
+    await detectCameras(opts);
+    // A node benchRunner answers "no such device" for: a transient failure,
+    // not a stable answer about the device.
+    const unreadable = lines().find((l) => l.includes("--list-formats-ext")
+      && !["/dev/video0 ", "/dev/video1 ", "/dev/video19 "].some((n) => l.includes(n)));
+    expect(unreadable).toBeDefined();
+    const mark = seen.length;
+    await detectCameras(opts);
+    expect(lines().slice(mark)).toContain(unreadable);
+  });
+
+  it("probeCamera asks the device and the next sweep reuses that answer", async () => {
+    const { runner, lines, overrides } = counting();
+    const opts: ProbeOptions = { runner, byPath: recordedByPath };
+    const first = await detectCameras(opts);
+    const camera = first.found[0];
+    expect(camera.capabilities.brightness.state).toBe("present");
+
+    // The camera now lists no controls at all, and the operator presses Refresh.
+    overrides["--list-ctrls-menus"] = "";
+    const refreshed = await probeCamera(camera.device, camera.card, opts);
+    expect("capabilities" in refreshed && refreshed.capabilities.brightness.state).toBe("not-offered");
+
+    const mark = lines().length;
+    const second = await detectCameras(opts);
+    expect(second.found[0].capabilities.brightness.state).toBe("not-offered");
+    expect(asksVideo0(lines().slice(mark))).toBe(false);
   });
 });

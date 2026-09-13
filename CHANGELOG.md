@@ -26,6 +26,9 @@ SD image or a claim of physical flight acceptance.
   consistency check; configuration schema version remains `1`.
 - Recovered telemetry/installer fixes, updated browser fixtures and reviewed
   macOS/Linux layout references.
+- Keep the daemon's main thread free for telemetry on the Radxa bench board: camera probes are
+  reused between sweeps, polled modem, network and mesh readings are memoised for a few seconds,
+  ZeroTier state is read concurrently, and a missing `vcgencmd` is asked once (K-70, R-CAM-24).
 - Reconcile PR #7: recover two-camera/gimbal browser coverage, shared viewer
   validation and missing video requirements; repair Stills status delivery
   and narrow camera controls.
