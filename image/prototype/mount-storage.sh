@@ -11,6 +11,7 @@ export PATH
 root=${1:?mounted root required}
 [ "$root" != / ] && [ -d "$root/etc" ] || exit 2
 config=$root/etc/yonder-storage-layout.conf
+legacy_prototype=0
 if [ -f "$config" ] && [ ! -L "$config" ]; then
     parser=/scripts/yonder-storage-layout
     [ -f "$parser" ] || parser=$root/usr/lib/yonder/storage/layout.sh
@@ -19,8 +20,11 @@ if [ -f "$config" ] && [ ! -L "$config" ]; then
     yonder_read_layout "$config" radxa || exit 1
 else
     # Generated root-owned prototype configuration, never user-provided.
-    # shellcheck disable=SC1091
-    . "$root/etc/yonder-storage-prototype.conf"
+    config=$root/etc/yonder-storage-prototype.conf
+    [ -f "$config" ] && [ ! -L "$config" ] || exit 1
+    # shellcheck disable=SC1090,SC1091
+    . "$config"
+    legacy_prototype=1
 fi
 state=$root/var/lib/yonder-state
 
@@ -28,6 +32,16 @@ partition_number() {
     name=${1##*/}
     [ -r "/sys/class/block/$name/partition" ] || return 1
     cat "/sys/class/block/$name/partition"
+}
+
+valid_uuid() {
+    printf '%s\n' "$1" | grep -Eq '^[0-9A-Fa-f]{8}(-[0-9A-Fa-f]{4}){3}-[0-9A-Fa-f]{12}$'
+}
+
+legacy_terrain_marker() {
+    marker=$root/etc/yonder/bench-image
+    [ -f "$marker" ] && [ ! -L "$marker" ] &&
+        grep -Fqx 'target=radxa-zero3w' "$marker"
 }
 
 root_device=$(findmnt -n -T "$root" -o SOURCE 2>/dev/null || true)
@@ -41,19 +55,35 @@ disk=/dev/$parent
 # Duplicate filesystem UUIDs on an inserted/cloned disk are deliberately ignored.
 # shellcheck disable=SC2046 # deliberate tokenization of controlled lsblk fields
 set -- $(lsblk -nrpo NAME,TYPE "$disk")
-[ "$#" -eq 10 ] && [ "$1" = "$disk" ] || exit 1
+legacy_terrain_layout=0
+case "$#" in
+    10) ;;
+    12)
+        # A pre-layout ZERO 3W bench card may retain its dedicated p5 terrain
+        # volume. It is never a production layout and must be explicitly
+        # identified before state is mounted or any partition is changed.
+        [ "$legacy_prototype" -eq 1 ] && valid_uuid "${TERRAIN_UUID:-}" &&
+            legacy_terrain_marker || exit 1
+        legacy_terrain_layout=1
+        ;;
+    *) exit 1 ;;
+esac
+[ "$1" = "$disk" ] || exit 1
 shift 2
 root_partition=''
 state_device=''
 log_device=''
 media_device=''
+terrain_device=''
 while [ "$#" -gt 0 ]; do
     [ "$2" = part ] || exit 1
     case "$(partition_number "$1")" in
-        1) root_partition=$1 ;;
-        2) state_device=$1 ;;
-        3) log_device=$1 ;;
-        4) media_device=$1 ;;
+        1) [ -z "$root_partition" ] && root_partition=$1 || exit 1 ;;
+        2) [ -z "$state_device" ] && state_device=$1 || exit 1 ;;
+        3) [ -z "$log_device" ] && log_device=$1 || exit 1 ;;
+        4) [ -z "$media_device" ] && media_device=$1 || exit 1 ;;
+        5) [ "$legacy_terrain_layout" -eq 1 ] && [ -z "$terrain_device" ] &&
+                terrain_device=$1 || exit 1 ;;
         *) exit 1 ;;
     esac
     shift 2
@@ -61,6 +91,7 @@ done
 [ "$root_partition" = "$root_device" ] \
     && [ -b "$state_device" ] && [ -b "$log_device" ] && [ -b "$media_device" ] \
     || exit 1
+[ "$legacy_terrain_layout" -ne 1 ] || [ -b "$terrain_device" ] || exit 1
 
 uuid_matches() {
     actual=$(blkid -s UUID -o value "$1" 2>/dev/null || true)
@@ -72,6 +103,10 @@ log_ready=1
 media_ready=1
 uuid_matches "$log_device" "$LOG_UUID" || log_ready=0
 uuid_matches "$media_device" "$MEDIA_UUID" || media_ready=0
+terrain_ready=1
+if [ "$legacy_terrain_layout" -eq 1 ]; then
+    uuid_matches "$terrain_device" "$TERRAIN_UUID" || terrain_ready=0
+fi
 
 mount_device() {
     device=$1
@@ -114,7 +149,11 @@ else
 fi
 grow_media=/scripts/yonder-grow-media
 [ -x "$grow_media" ] || grow_media="$root/usr/lib/yonder/storage-prototype/grow-media.sh"
-if [ "$log_ready" -ne 1 ]; then
+if [ "$legacy_terrain_layout" -eq 1 ]; then
+    # p4 is no longer the final partition on retained bench cards. Do not let
+    # the four-part grower relocate it across the UUID-bound terrain volume.
+    [ "$log_ready" -eq 1 ] || media_ready=0
+elif [ "$log_ready" -ne 1 ]; then
     media_ready=0
 elif [ "$media_ready" -ne 1 ]; then
     echo 'Yonder storage prototype: media identity mismatch; recordings disabled.' >&2
@@ -142,6 +181,11 @@ for mapping in 'config etc/yonder' 'ssh etc/ssh' 'app var/lib/yonder' \
     [ -d "$state/$1" ] && [ -d "$root/$2" ] || exit 1
     mount --bind "$state/$1" "$root/$2"
 done
+if [ "$legacy_terrain_layout" -eq 1 ]; then
+    # The directory is only a mount point. The following mount always hides
+    # it, including the bounded read-only fallback below.
+    mkdir -p "$root/var/lib/yonder/terrain"
+fi
 # A machine ID is created durably before PID 1; never inherited from the builder.
 if [ ! -e "$state/machine-id" ]; then
     tr -d '-' </proc/sys/kernel/random/uuid >"$state/machine-id.new"
@@ -174,6 +218,11 @@ fi
 if [ "$media_ready" -ne 1 ] || ! mount_device "$media_device" "$root/var/lib/yonder/captures"; then
     mount -t tmpfs -o size=4k,mode=755,ro,nosuid,nodev tmpfs "$root/var/lib/yonder/captures"
     echo 'Yonder storage prototype: media unavailable; recordings disabled by read-only mount.' >&2
+fi
+if [ "$legacy_terrain_layout" -eq 1 ] && \
+        { [ "$terrain_ready" -ne 1 ] || ! mount_device "$terrain_device" "$root/var/lib/yonder/terrain"; }; then
+    mount -t tmpfs -o size=4k,mode=750,ro,nosuid,nodev tmpfs "$root/var/lib/yonder/terrain"
+    echo 'Yonder storage prototype: terrain unavailable; read-only empty terrain mount active.' >&2
 fi
 root_options=$(findmnt -n -T "$root" -o OPTIONS 2>/dev/null || true)
 case ",$root_options," in

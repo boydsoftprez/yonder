@@ -42,6 +42,13 @@ At initramfs time, before systemd/services run:
   filesystem UUIDs, partition GUIDs/types, fixed geometry, media start/name and
   disk GUID. It refuses unexpected/additional partitions rather than scanning or
   mutating another physical disk.
+- A retained five-partition card is accepted only by the explicit ZERO 3W bench
+  prototype configuration, with a valid `TERRAIN_UUID` and a regular backing
+  root marker whose exact target is `radxa-zero3w`. Its UUID-bound p5 terrain
+  volume is mounted separately; a missing or mismatched volume is hidden by a
+  bounded read-only empty mount. This carve-out never applies to the production
+  layout marker. Because p4 is no longer last, it never invokes the four-part
+  media grower or changes the partition table.
 - GPT repair/relocation, partition growth and ext4 growth are separately flushed
   and verified. A later boot derives the remaining work from GPT/filesystem
   geometry, so interruption after any completed phase is retryable without a
@@ -66,6 +73,10 @@ an isolated mount namespace. Full tools live at private paths because the
 initramfs's lightweight default `mount` does not support `--bind`, and its copy
 helper does not overwrite existing binaries. This gate covers the tool mismatch
 that stopped prototype 03 before identity creation and persistent logging.
+The same verifier rejects an extra p6, an untrusted p5 and malformed terrain
+metadata before state mounting; it proves the explicit legacy p5 terrain mount,
+traps any invocation of the four-part grower, and proves that a terrain UUID
+mismatch leaves a read-only tmpfs at the terrain path.
 
 Assembly also exercises the actual mount script on the copied image in a private
 Linux container. It checks rejected system/boot writes, independent filesystem
