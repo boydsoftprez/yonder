@@ -47,8 +47,8 @@
     {
       "file": "mission-list.png",
       "source": "guide",
-      "sha256": "53da29991f0285cd6aa46b9210d73b4ffc655fcd3095219fe08572838cf50296",
-      "bytes": 337806
+      "sha256": "02eb0e59a16fbdbfff8338df98f4fb0056f7dbb0b8f82ace30b74f60349fa907",
+      "bytes": 355247
     },
     {
       "file": "mission-loiter.png",
@@ -59,20 +59,20 @@
     {
       "file": "mission-loiter-save.png",
       "source": "guide",
-      "sha256": "e805d3aefa3bdef24bc0b44c9a8897f3e50a394227ad22ca476d2eecd69e7385",
-      "bytes": 65727
+      "sha256": "aa2c7adccaaee91398c78f7538de0d0b86abcc90be32a403c52c8861340f6a75",
+      "bytes": 65048
     },
     {
       "file": "loiter-now.png",
       "source": "guide",
-      "sha256": "b93893c55e3544b2aa45771e4d26ad187a8299dcb78c86c90f990efa7b84517f",
-      "bytes": 62115
+      "sha256": "e99ac21f38179c68160d2355af5a912d612938bcf84ac4a1d504f83ba57aadd5",
+      "bytes": 61068
     },
     {
       "file": "command-review.png",
       "source": "guide",
-      "sha256": "43ba240dc225a8608dd77b9c027934ab2ccb56f3a97a9142e363da7bd16407eb",
-      "bytes": 28395
+      "sha256": "9bd7400c5cea38c53618397598b19062b15638bdeffa76f15bc11931f141fa75",
+      "bytes": 28356
     },
     {
       "file": "start-aircraft-mission.png",
@@ -83,26 +83,26 @@
     {
       "file": "terrain-profile.png",
       "source": "guide",
-      "sha256": "e78291c6856b0d26a1dbfcc824caa19cd78290f519b67f279afd868037fea497",
-      "bytes": 439469
+      "sha256": "262574a9d4c373bc26a39bf5b5a59bf4aec5c80cc8022b87f444189daa7c2846",
+      "bytes": 470203
     },
     {
       "file": "data-connection.png",
       "source": "guide",
-      "sha256": "33e5a029fdb0244eba01b973c3868ba5ea4a1df72931685ac1820f23fc058d64",
-      "bytes": 81948
+      "sha256": "3185aafeb07b9f0eb747cadd782177227ab07a1722b22711ec7df659dad3447f",
+      "bytes": 88037
     },
     {
       "file": "traffic.png",
       "source": "guide",
-      "sha256": "1a82636cf9aed0710c6ebee79d5ce494a663a83f68eb6dcfda707577f735db79",
-      "bytes": 37555
+      "sha256": "734bda98ae434eee90e703d16e97b214969fe9db6e6ed163708541a1dd3ff0fa",
+      "bytes": 39003
     },
     {
       "file": "breadcrumbs.png",
       "source": "guide",
-      "sha256": "f808429f0808e161e269b1c3c814229f4732d0809514fa623940a032372040e3",
-      "bytes": 45352
+      "sha256": "6b516e007434d1efb3d37e7e0c4a0ab202c3fea25fb68f12874948f48df2e8e0",
+      "bytes": 46642
     },
     {
       "file": "cockpit-split.png",
@@ -131,32 +131,32 @@
     {
       "file": "terrain-overview.png",
       "source": "guide",
-      "sha256": "a14eed44134faad1f224b5836cde82b0798aed9b73bf555cb3054236a24d173e",
-      "bytes": 439392
+      "sha256": "9de5a7d43bca5fddf6936bc56b5fdd2261362ca4a443dd3a51f676c735308dc3",
+      "bytes": 469739
     },
     {
       "file": "camera-full.png",
-      "source": "fixture-harness",
-      "sha256": "db531f67335ac5c9719d2af720c8fe35630a747be385d029621e2b1a17d8391e",
-      "bytes": 233890
+      "source": "guide",
+      "sha256": "e1d446f6c3b39fe2878133820a6b9f58b62191fddd23a92eb239ff03d99bbeae",
+      "bytes": 222413
     },
     {
       "file": "camera-full-day.png",
-      "source": "fixture-harness",
-      "sha256": "b46d420e4d755bb93f4ad8178aad1da966538b30cf0a57347fc409f83c2c4c82",
-      "bytes": 233575
+      "source": "guide",
+      "sha256": "ad34075459adbe581e578e8eaef285055815c7b321a9aa3f99364dc8ef6bbdd0",
+      "bytes": 224140
     },
     {
       "file": "camera-window.png",
-      "source": "fixture-harness",
-      "sha256": "c23f3bbb7313a5f56c86afbd112a0dedb1a1511f0167a948dbb44938a4298653",
-      "bytes": 397215
+      "source": "guide",
+      "sha256": "7e85045df68199ad48dc3b4021e65406291d7e1275727cae40d63c127fdf93b0",
+      "bytes": 387066
     },
     {
       "file": "camera-window-tablet.png",
-      "source": "fixture-harness",
-      "sha256": "5186b24a917f0993f227a0d25a3346495799f944eadd436a59e00248e2151728",
-      "bytes": 308115
+      "source": "guide",
+      "sha256": "3d489fc30a72142cbc1498f5386f2f5d6764c515a8a114b78e21b79b742c2b41",
+      "bytes": 302383
     }
   ]
 }

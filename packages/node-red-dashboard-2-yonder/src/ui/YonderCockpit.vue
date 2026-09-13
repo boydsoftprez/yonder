@@ -350,7 +350,7 @@
           </div>
           <template v-if="reviewing.action.kind==='mission-upload'&&snapshot.identity?.autopilot===3">
             <div><dt>Planning home elevation</dt><dd>{{homeElevationLabel}}</dd></div>
-            <div><dt>Controller home used by upload</dt><dd>{{reviewing.action.items[0].x}}°, {{reviewing.action.items[0].y}}° · {{reviewing.action.items[0].z}} m MSL</dd></div>
+            <div><dt>Controller home (reported)</dt><dd>{{actualMission.home?.lat??'—'}}°, {{actualMission.home?.lon??'—'}}° · {{actualMission.home?.alt??'—'}} m MSL</dd></div>
           </template>
           <div v-if="reviewing.action.kind==='mission-clear'">
             <dt>Removal</dt>
@@ -382,7 +382,7 @@
           </template>
         </dl>
         <p v-if="reviewing.action.kind==='set-home'">This changes the controller's return-home reference and home-relative altitude reference. In RTL or QRTL it can redirect the aircraft. The planning draft stays as authored. Yonder requests and checks home readback after acceptance.</p>
-        <p v-if="reviewing.action.kind==='mission-upload'">Waypoint altitude numbers stay as authored. Above-home heights use the controller's home elevation; a different planning elevation changes the preview, not that uploaded reference.</p>
+        <p v-if="reviewing.action.kind==='mission-upload'">Waypoint altitude numbers stay as authored. Above-home heights use the controller's current home elevation, which can update while disarmed. Uploading does not set or lock controller home. A different planning elevation changes the preview, not that aircraft reference.</p>
         <p>The autopilot validates and executes this request. Acceptance and observed effect are reported separately.
         </p>
         <p
@@ -1636,6 +1636,17 @@ export default {
       const current = this.reviewing;
       this.sending = true;
       try {
+        const action = clone(current.action);
+        const reviewedHome = action.kind === 'mission-upload' ? action.items[0] : null;
+        if (this.snapshot.identity?.autopilot === 3 && reviewedHome?.seq === 0 && reviewedHome.command === 16 && [0, 5].includes(reviewedHome.frame)) {
+          const home = this.actualMission.home;
+          if (!home || ![home.lat, home.lon, home.alt].every(Number.isFinite)) {
+            throw Object.assign(new Error('Controller home is unavailable; read the aircraft mission and review again.'), {admissionRejected:true});
+          }
+          // Refresh only controller-owned coordinates shown live in the review.
+          // The reviewed home structure and all authored items stay unchanged.
+          Object.assign(reviewedHome, {x:home.lat, y:home.lon, z:home.alt});
+        }
         const response = await this.source.command({
           id: cockpitRequestId(),
           vehicleGeneration: current.generation,
@@ -1643,7 +1654,7 @@ export default {
             expectedMissionRevision: current.revision
           } : {}),
           confirmed: true,
-          action: current.action
+          action
         });
         if (response.accepted !== true) {
           this.error = 'Request rejected: ' + (response.message || 'Command was not admitted');

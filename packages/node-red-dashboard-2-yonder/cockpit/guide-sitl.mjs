@@ -23,7 +23,7 @@ async function close(){await page.keyboard.press('Escape')}
 try{
  await page.goto(url.href);await b('Aircraft and command status').waitFor();
  await status();await operation('stream-setup',()=>b('Request flight telemetry').click(),false);await operation('mission-download',()=>b('Read aircraft mission').click(),false);await page.getByRole('dialog').screenshot({path:dir+'telemetry-setup.png'});await close();await until('SITL EKF3 and GPS ready before arming',s=>s.telemetry.fixType>=3&&s.statustext.some(t=>t.text==='AHRS: EKF3 active'),90000);
- await b('Display & data').click();await b('Load VTOL cove example as local draft').click();await close();
+ await b('Display menu').click();await page.getByRole('dialog').last().getByRole('button',{name:/^Map, terrain & data/}).click();await b('Load VTOL cove example as local draft').click();await close();
  await b('Mission controls').click();assert(await page.getByRole('button',{name:/^Start aircraft mission/}).isDisabled());
  await page.getByRole('dialog').screenshot({path:dir+'start-disabled-draft.png'});
  await operation('mission-upload',()=>page.getByRole('button',{name:/^Upload draft to aircraft/}).click());

@@ -79,7 +79,7 @@ run python3 "$seeker_installer/bootargs.py" "$YONDER_ARMBIAN_ENV"
 # Runtime and profiles are fully offline payload files. Preserve the active IQ
 # on a live reinstall; an image begins in the measured normal-light profile.
 ensure_dir "$YONDER_SEEKER_LIB_DIR" 0755
-ensure_dir "$YONDER_SEEKER_SHARE_DIR/iqfiles" 0755
+ensure_dir "$YONDER_SEEKER_SHARE_DIR" 0755
 ensure_dir "$YONDER_SEEKER_SHARE_DIR/profiles" 0755
 run install -m 0755 "$seeker_payload/bin/rkaiq_3A_server" \
     "$YONDER_SEEKER_LIB_DIR/rkaiq_3A_server"
@@ -97,13 +97,8 @@ done
 run install -m 0644 "$seeker_payload/profiles/manifest.json" \
     "$YONDER_SEEKER_SHARE_DIR/profiles/manifest.json"
 run install -m 0644 "$seeker_payload/SOURCES" "$YONDER_SEEKER_SHARE_DIR/SOURCES"
-seeker_active="$YONDER_SEEKER_SHARE_DIR/iqfiles/imx462_IMX462_default.json"
-if [ "$IMAGE_MODE" = "1" ] || [ ! -s "$seeker_active" ]; then
-    run install -m 0644 "$seeker_payload/iqfiles/imx462_IMX462_default.json" \
-        "$seeker_active"
-else
-    log "preserving the live board's active SeekerHD profile"
-fi
+seekerhd_provision_active_iq \
+    "$seeker_payload/iqfiles/imx462_IMX462_default.json" "$IMAGE_MODE"
 
 ensure_dir "$YONDER_SEEKER_UNIT_DIR/yonder-core.service.d" 0755
 run install -m 0644 "$seeker_src/yonder-seekerhd.service" \

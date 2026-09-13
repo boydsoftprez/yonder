@@ -347,13 +347,26 @@ describe("mission transactions", () => {
     expect(r.service.snapshot().operations[0].action).toMatchObject({kind:"mission-upload",itemCount:2});
     expect(r.service.snapshot().operations[0].action).not.toHaveProperty("items");r.service.close();
   });
-  it("updates a downloaded ArduPilot home record when the vehicle reports a new home", async () => {
+  it("updates a downloaded ArduPilot home record without changing the mission revision", async () => {
     const r=rig();r.heartbeat();r.request({kind:"mission-download"});await flush();r.feed(Object.assign(new common.MissionCount(),{count:2}));await flush();
     for(const item of sample()){r.feed(missionWire(item));await flush();}
     const before=r.service.snapshot().mission.revision;
     r.feed(Object.assign(new common.HomePosition(),{latitude:350100000,longitude:-830100000,altitude:315740}));
     expect(r.service.snapshot().mission.items[0]).toMatchObject({x:35.01,y:-83.01,z:315.74});
-    expect(r.service.snapshot().mission.revision).not.toBe(before);r.service.close();
+    expect(r.service.snapshot().mission.revision).toBe(before);r.service.close();
+  });
+  it("keeps reviewed ArduPlane mission content valid while disarmed home reporting drifts", async () => {
+    const r=rig();r.heartbeat();r.request({kind:"mission-download"});await flush();r.feed(Object.assign(new common.MissionCount(),{count:2}));await flush();
+    for(const item of sample()){r.feed(missionWire(item));await flush();}
+    const before=r.service.snapshot(), revision=before.mission.revision!, detailKey=before.detailKey;
+    r.feed(Object.assign(new common.HomePosition(),{latitude:350001000,longitude:-830001000,altitude:302170}));
+    expect(r.service.snapshot().telemetry.homePosition).toEqual({lat:35.0001,lon:-83.0001,alt:302.17});
+    expect(r.service.snapshot().mission.items[0]).toMatchObject({x:35.0001,y:-83.0001,z:302.17});
+    expect(r.service.snapshot().mission.revision).toBe(revision);expect(r.service.snapshot().detailKey).toBe(detailKey);
+    r.feed(Object.assign(new common.HomePosition(),{latitude:350002000,longitude:-830002000,altitude:331220}));
+    expect(r.service.snapshot().mission.revision).toBe(revision);expect(r.service.snapshot().detailKey).toBe(detailKey);
+    expect(r.request({kind:"mission-upload",items:sample()},{expectedMissionRevision:revision})).toMatchObject({accepted:true});
+    r.service.close();
   });
 });
 

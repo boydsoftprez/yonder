@@ -154,15 +154,20 @@ export function aircraftMission(snapshot = {}) {
   const wire = snapshot.mission?.items || [],
     isPlaneHome = snapshot.identity?.autopilot === 3;
   const homeItem = isPlaneHome && wire[0]?.seq === 0 && wire[0]?.command === 16 ? wire[0] : null;
+  // Mission content is cached by revision. Controller-owned home coordinates
+  // can keep changing while disarmed without changing that content revision.
+  const reportedHome = snapshot.telemetry?.homePosition;
+  const homeRecord = homeItem && [0, 5].includes(homeItem.frame) && validPosition(reportedHome) && finite(reportedHome.alt)
+    ? {...homeItem, x:reportedHome.lat, y:reportedHome.lon, z:reportedHome.alt} : homeItem;
   return {
     name: 'Aircraft mission',
     source: 'Vehicle readback',
-    home: homeItem ? {
-      lat: homeItem.x,
-      lon: homeItem.y,
-      alt: homeItem.z
+    home: homeRecord ? {
+      lat: homeRecord.x,
+      lon: homeRecord.y,
+      alt: homeRecord.z
     } : snapshot.telemetry?.homePosition || null,
-    homeRecord: homeItem,
+    homeRecord,
     warnings: [],
     items: wire.filter(item => item !== homeItem).map(({
       x,

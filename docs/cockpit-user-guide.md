@@ -365,12 +365,12 @@ Move **Inspect along route** to read estimated AGL against official MSL ground.
 Choose a waypoint in **Inspect waypoint** and use **Edit waypoint altitude** to
 change it.
 
-![Terrain-profile design specimen with planned altitude, ground and mapped surface](images/cockpit/terrain-profile.png)
+![Terrain profile with planned altitude and detailed display surface while official ground is unavailable](images/cockpit/terrain-profile.png)
 
-*Design specimen from the earlier Cove-backed profile. The current profile uses
-official ArduPilot MSL ground for the green line and retains a separately sourced
-amber detailed mapped-surface overlay when its datum is verified and compatible.
-It samples the route centreline and does not model climb capability or turns.*
+*Current fixture profile with official terrain disabled: ground and AGL remain
+unavailable while the amber detailed Cove surface is shown separately. Prepared
+official MSL ground supplies the green line when available. The profile samples
+the route centreline and does not model climb capability or turns.*
 
 The profile accepts only authenticated official samples carrying the fixed provider,
 30 m spacing, generation and MSL datum evidence. Unknown, malformed and missing
@@ -399,7 +399,7 @@ Open **Display → Map, terrain & data**, then **Connection & offline data**:
    disarmed and use **Official controller terrain** as described under
    [Prepare official terrain for the controller](#prepare-official-terrain-for-the-controller).
 
-![Connection and offline data controls in Display and data](images/cockpit/data-connection.png)
+![Connection and offline data controls in Map, terrain & data](images/cockpit/data-connection.png)
 
 *Fixture controls. The panel scrolls; source switches, imagery, forecast and
 import controls are farther down. Ground setup has no automatic aircraft fallback.*
@@ -837,6 +837,11 @@ not publish this field show **NO WIND DATA** until their core is updated.
    ArduPlane mission, the upload includes its actual reported HOME_POSITION as
    wire item zero. This does not set the aircraft home. An unread mission or
    unavailable actual home remains blocked.
+   ArduPlane controller-home telemetry updates do not invalidate an
+   upload review. The review shows the current reported home; uploading does not
+   set or lock it. Changes to the aircraft or mission contents still require a
+   new review. Explicit **Set controller home** retains its separate home-change
+   checks.
 
 ### Vertical takeoff in the QuadPlane simulator
 

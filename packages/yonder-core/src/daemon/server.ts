@@ -1,6 +1,6 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 import {createHash} from "node:crypto";
-import { createServer, type Server } from "node:http";
+import { createServer, type IncomingMessage, type Server, type ServerResponse } from "node:http";
 import { unlinkSync, existsSync, mkdirSync, chmodSync, accessSync, constants } from "node:fs";
 import { dirname, join } from "node:path";
 import { fileURLToPath, pathToFileURL } from "node:url";
@@ -92,6 +92,27 @@ import { generateSecret } from "../secrets/generate.js";
  * the operator spends reading "the console is restarting".
  */
 export const PROVISION_RESTART_DELAY_MS = 1_500;
+/** Default ceiling for a daemon request whose route has no smaller contract. */
+export const MAX_BODY_BYTES = 1_048_576;
+
+function requestBodyLimit(path: string): number {
+  if (path === "/recovery/preview") return MAX_RECOVERY_BASE64_BYTES + 8192;
+  if (path.startsWith("/recovery/") || path.startsWith("/owner/") || path.startsWith("/storage/")) return 8192;
+  if (path.startsWith("/cockpit/")) return 512 * 1024;
+  return MAX_BODY_BYTES;
+}
+
+/**
+ * A refusal follows the caller's last byte. Draining keeps a local caller
+ * from seeing a broken pipe while never retaining an oversized body.
+ */
+function refuseTooLarge(req: IncomingMessage, res: ServerResponse, limit: number): void {
+  req.resume();
+  req.once("end", () => {
+    res.writeHead(413, { "content-type": "application/json" });
+    res.end(JSON.stringify({ error: `Request exceeds size limit (${limit} bytes)` }));
+  });
+}
 
 /**
  * How often ModemManager is asked to refresh the detailed signal numbers.
@@ -1671,20 +1692,29 @@ export async function startServer(opts: ServerOptions): Promise<{ close(): Promi
   });
 
   const server: Server = createServer((req, res) => {
+    const path = (req.url ?? "").split("?")[0];
+    const limit = requestBodyLimit(path);
+    const declared = Number(req.headers["content-length"]);
+    if (Number.isFinite(declared) && declared > limit) {
+      refuseTooLarge(req, res, limit);
+      return;
+    }
     const chunks: Buffer[] = [];
-    let cockpitLength = 0;
-    let cockpitTooLarge = false;
+    let received = 0;
+    let tooLarge = false;
     req.on("data", (c: Buffer) => {
-      cockpitLength += c.length;
-      const path = (req.url ?? "").split("?")[0];
-      const limit = path === "/recovery/preview" ? MAX_RECOVERY_BASE64_BYTES + 8192
-        : path?.startsWith("/recovery/") || path?.startsWith("/owner/") || path?.startsWith("/storage/") ? 8192
-          : path?.startsWith("/cockpit/") ? 512 * 1024 : Infinity;
-      if (cockpitLength > limit) { cockpitTooLarge = true; chunks.length = 0; }
-      if (!cockpitTooLarge) chunks.push(c);
+      if (tooLarge) return;
+      received += c.length;
+      if (received > limit) {
+        tooLarge = true;
+        chunks.length = 0;
+        refuseTooLarge(req, res, limit);
+        return;
+      }
+      chunks.push(c);
     });
     req.on("end", () => {
-      if (cockpitTooLarge) { res.writeHead(413, {"content-type": "application/json"}); res.end(JSON.stringify({error: "Request exceeds size limit"})); return; }
+      if (tooLarge) return;
       let body: unknown;
       if (chunks.length > 0) {
         try {

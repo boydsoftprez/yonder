@@ -54,7 +54,8 @@
           <path v-for="side in [-1,1]" :key="side" d="M320 64 L313 52 H327 Z" :transform="`rotate(${side*turnCues.bankDeg} 320 225)`" fill="#51ff68" stroke="#09280f" stroke-width="1.5"/>
           <text x="320" y="96" text-anchor="middle" fill="#51ff68" stroke="#09280f" stroke-width="2" paint-order="stroke" font-size="10">STD · EST TAS</text>
         </g>
-        <path v-if="flight.attitudeValid" d="M320 65 L311 80 L329 80 Z" fill="white" stroke="#263744" :transform="'rotate('+(-displayFlight.roll)+' 320 225)'"/>
+        <!-- R-FLT-01: indicate aircraft bank on the fixed scale; only the horizon counter-rotates. -->
+        <path v-if="flight.attitudeValid" d="M320 65 L311 80 L329 80 Z" fill="white" stroke="#263744" :transform="'rotate('+displayFlight.roll+' 320 225)'"/>
       </g>
       <g class="pfd-aircraft-reference" fill="#fff348" stroke="#26210a" stroke-width="2.5">
         <!-- Fixed aircraft wedges adapted from SDU460 ADI.svg (GPL-3.0-or-later). -->

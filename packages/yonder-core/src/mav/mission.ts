@@ -71,8 +71,17 @@ export function decodeMissionItem(message: common.MissionItemInt | common.Missio
     x: decodedFloat(message.x / scale), y: decodedFloat(message.y / scale), z: decodedFloat(message.z),
   };
 }
-export function missionRevision(items: MissionItem[]): string {
-  return createHash("sha256").update(JSON.stringify(items.map(item => ({ ...item, current: false })))).digest("hex").slice(0, 24);
+export function missionRevision(items: MissionItem[], { ardupilotHome = false }: { ardupilotHome?: boolean } = {}): string {
+  // ArduPlane owns seq-0 home coordinates and updates them while disarmed.
+  // They are telemetry, not an operator edit to the uploaded mission content.
+  return createHash("sha256").update(JSON.stringify(items.map((item, index) => {
+    const normalized = { ...item, current: false };
+    if (ardupilotHome && index === 0 && item.seq === 0 && item.command === 16 && missionFrame(item.frame) === 0) {
+      const { x, y, z, ...content } = normalized;
+      return content;
+    }
+    return normalized;
+  }))).digest("hex").slice(0, 24);
 }
 /** The autopilot maintains its actual home; upload is never a SET_HOME operation. */
 export function verifyMission(expected: MissionItem[], actual: MissionItem[]): string[] {

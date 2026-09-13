@@ -30,7 +30,8 @@ try {
  });
  await page.goto(url);
  if(process.env.COCKPIT_TERRAIN_RELAY){
-  await page.getByRole('button',{name:'Display & data',exact:true}).click();
+  await page.getByRole('button',{name:'Display menu',exact:true}).click();
+  await page.getByRole('dialog').last().getByRole('button',{name:/^Map, terrain & data/}).click();
   await page.getByRole('textbox',{name:'Ground relay origin',exact:true}).fill(process.env.COCKPIT_TERRAIN_RELAY);
   await page.getByRole('button',{name:'Apply ground relay',exact:true}).click();
   await page.getByRole('button',{name:'Close cockpit panel',exact:true}).click();
