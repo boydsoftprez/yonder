@@ -141,3 +141,34 @@ retry test verified actual frames once publication began.
 An ordinary warm reboot was then requested from the repaired kernel. SSH closed,
 but neither known address returned during the first observation window. The
 kernel cleanup repair and working cameras do not yet establish reliable reboot.
+
+## Recovery after the failed warm reboot
+
+The operator power-cycled the Mule again, producing boot ID
+`a8cf8c78-8280-4032-ad3d-b446b582fd93`. The usb2 initramfs now supplied the observed
+protected-mode marker through exactly one /run mount. Core, admin, console,
+ZeroTier, CSI preparation, AIQ and MediaMTX started successfully, with no failed
+systemd units. ZeroTier was ONLINE at the original address and the console
+returned HTTP 200. All nine protected file hashes still matched.
+
+The retained log from the preceding boot shows FunctionFS cleanup and core
+shutdown completing without the earlier Oops. Systemd reached reboot.target;
+systemd-shutdown synced filesystems and terminated journald. No intervening boot
+is recorded before the physical recovery cycle. This narrows the unknown failure
+to the period after persistent logging ends; it does not distinguish late kernel
+shutdown, reset firmware, or early boot.
+
+Ramoops is enabled, but its storage is reserved DRAM. The physical power cycle
+can erase it, so empty pstore is not evidence that the reset path succeeded.
+Neither an HDMI monitor nor a USB serial adapter was available. An external boot
+console or another reliable way to retain late reset evidence remains necessary
+to distinguish those stages without speculative changes.
+
+CSI passed a decoded-frame check on this boot. DJI initially had no fresh video
+and its USB connection remained at the initial phone stage. One normal core
+service restart completed without a kernel fault, after which the accessory
+connection negotiated successfully. The operator clarified that DJI had powered
+down: its missing video is not evidence of a software startup regression, and
+its return cannot be attributed solely to the service restart. Both cameras then
+passed the 16-buffer decode check with zero pipeline restarts and kernel taint
+unchanged at 4096. No further board reboot was issued during this recovery.
