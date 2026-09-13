@@ -1,0 +1,54 @@
+{
+  "camera": "cam2",
+  "requestedRate": 1.0,
+  "requestedDegrees": 30.0,
+  "targetRoll": -2.5,
+  "targetReached": true,
+  "absoluteMotionLimitSeconds": 45.0,
+  "initialRun": {
+    "id": "cam2",
+    "state": "stopped",
+    "since": 1789309614035,
+    "restarts": 0
+  },
+  "issue": {
+    "submittedAt": 0.9141982719993393,
+    "acceptedAt": 0.9240017430001899,
+    "accepted": true
+  },
+  "stop": {
+    "submittedAt": 31.065424968001025,
+    "acceptedAt": 31.08155835300022,
+    "accepted": true
+  },
+  "stopTailSeconds": 2.0150683259998914,
+  "stopTailErrors": [],
+  "jointDelta": {
+    "pan": -0.09999999999999432,
+    "tilt": 0.20000000000000284,
+    "roll": -30.6
+  },
+  "rollOvershoot": 0.6000000000000014,
+  "error": null,
+  "date": "2026-09-13",
+  "mount": "Handle secured flat, screen facing up; head clear",
+  "authorization": "Operator explicitly requested roll movement of 30 degrees or more",
+  "worldRotationDegrees": 30.231310954281188,
+  "acceptedRenewals": 239,
+  "maxRequestMs": 65.85105299927818,
+  "observedGenerations": [
+    1000000
+  ],
+  "initialJoints": {
+    "pan": -66.2,
+    "tilt": -99.7,
+    "roll": 27.5
+  },
+  "finalJoints": {
+    "pan": -66.3,
+    "tilt": -99.5,
+    "roll": -3.1
+  },
+  "scriptSha256": "3bf1e2bb949aca65139076b98598a1df7cd98947e86b0ab10fcf2ac1abb19c89",
+  "operatorObservation": "Yes, visible and smooth"
+}

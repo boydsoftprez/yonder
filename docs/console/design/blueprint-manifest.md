@@ -217,6 +217,25 @@ No real camera image is part of the fixture or evidence.
 
 This update does not reclassify unrelated historical manifest rows as complete.
 
+#### Pocket 2 independent roll update
+
+The operator approved a separate horizontal spring-return roll surface below
+the existing pan/tilt pad (R-CAM-11). It shows measured native roll and the
+current rate limit, and has its own saved **Roll max speed** slider from 1 to
+120°/s, defaulting to 30°/s. Expo remains shared with pan/tilt; Shift supplies fine
+control. It explains unavailable states. FPV and an identified live HG211 are
+required. The initial 1°/s check and subsequent operating-speed observations are
+recorded in the [hardware evidence](../../hardware/dji-pocket-2-roll-control.md).
+Release, center, interrupted pointer capture and lifecycle changes retire the
+hold. Pan/tilt, roll and preset holds are exclusive; presets retain pan/tilt only.
+The workflow fixture includes working and unavailable roll, verified at desktop
+and phone widths in both palettes by `scripts/verify-roll-control.mjs`.
+
+When collapsed, Aim leaves a compact 56 × 44 px **‹ Aim** tab at the preview's
+right edge (R-UI-29). The surrounding Dashboard card has no background, border,
+shadow or padding in this state. Reopening preserves the video receiver and the
+camera's saved drawer preference; expanded layout behavior is unchanged.
+
 ### 1.6 The Capture toolbar
 
 | # | The blueprint shows | Today | Class | Note |

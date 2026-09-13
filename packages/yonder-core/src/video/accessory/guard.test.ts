@@ -50,11 +50,22 @@ describe('physical motion guard (synthetic measured context)', () => {
     const c = context(); c.attitude!.yawLimit = true;
     expect(guard({ kind: 'rate', pan: 120, tilt: 0 }, c)).toEqual({ allowed: false, reason: 'limit-direction-unknown' });
   });
-  it('does not use sign-to-world mappings and never exposes roll', () => {
+  it('does not use sign-to-world mappings and keeps unverified roll unavailable', () => {
     const c = context(); c.signs.tilt = null;
     expect(guard(rate, c).allowed).toBe(true);
     expect(guard({ kind: 'rate', pan: 0, tilt: 1 }, c)).toEqual({ allowed: true });
-    expect(guard({ kind: 'rate', pan: 0, tilt: 0, roll: 1 } as any, c).allowed).toBe(false);
+    expect(guard({ kind: 'rate', pan: 0, tilt: 0, roll: 1 }, c)).toEqual({ allowed: false, reason: 'roll-unavailable' });
+  });
+  it.each([-1, 1])('admits verified FPV roll in direction %s only with finite native joints and the common rate cap', sign => {
+    const c = context(); c.rollRateVerified = true;
+    c.attitude!.joints = { pan: 0, tilt: 0, roll: 0 };
+    expect(guard({ kind: 'rate', pan: 0, tilt: 0, roll: sign * 120 }, c)).toEqual({ allowed: true });
+    expect(guard({ kind: 'rate', pan: 0, tilt: 0, roll: sign * 120.1 }, c)).toEqual({ allowed: false, reason: 'rate-cap' });
+    expect(guard({ kind: 'rate', pan: 1, tilt: 0, roll: 1 }, c)).toEqual({ allowed: false, reason: 'malformed-command' });
+    c.attitude!.mode = 2;
+    expect(guard({ kind: 'rate', pan: 0, tilt: 0, roll: 1 }, c)).toEqual({ allowed: false, reason: 'roll-mode' });
+    c.attitude!.mode = 1; delete c.attitude!.joints;
+    expect(guard({ kind: 'rate', pan: 0, tilt: 0, roll: 1 }, c)).toEqual({ allowed: false, reason: 'roll-unavailable' });
   });
   it('native pan and tilt need no invented world ranges, while discrete trajectories still do', () => {
     const c = context(); delete c.envelopes[0].roll; delete c.envelopes[0].pitch;

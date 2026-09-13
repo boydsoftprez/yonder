@@ -1,8 +1,9 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 import { mount, type VueWrapper } from "@vue/test-utils";
-import { describe, expect, it, vi } from "vitest";
+import { afterEach, describe, expect, it, vi } from "vitest";
 import YonderAim from "./YonderAim.vue";
 import YonderAimPad from "./YonderAimPad.vue";
+import YonderRollStrip from "./YonderRollStrip.vue";
 import YonderSegmented from "./YonderSegmented.vue";
 
 /**
@@ -44,12 +45,23 @@ interface AimReport {
     reason: string;
     pan: number;
     tilt: number;
+    roll?: number | null;
+    rollControl?: { available: boolean; reason: string | null; maxRate: number };
+    url?: string;
+    generation?: number;
+    imageDirection?: string;
+    maxRate?: number;
     bounds: { pan: [number, number]; tilt: [number, number] } | null;
     atLimit: { pitch: boolean; yaw: boolean };
     mode: string;
     modes: string[];
     inhibited: string | null;
 }
+
+afterEach(() => {
+    vi.useRealTimers()
+    vi.unstubAllGlobals()
+})
 
 /** A live, fully-answering report — the base every test narrows with its
  * own overrides, the same idiom `deck.component.test.ts`'s own
@@ -116,6 +128,14 @@ function recentreBtn(w: VueWrapper<any>) {
 }
 function rateValue(w: VueWrapper<any>) {
     return w.find(".y-aimpanel__rate-v");
+}
+function rollTrack(w: VueWrapper<any>): Element {
+    const element = w.find('.y-roll__track').element
+    element.getBoundingClientRect = () => ({ left: 0, width: 160 }) as DOMRect
+    return element
+}
+function rollPoint(type: string, x: number, pointerId = 9): PointerEvent {
+    return new PointerEvent(type, { clientX: x, pointerId, bubbles: true, cancelable: true })
 }
 
 /** Finds a mounted `YonderPositionGauge` by its own label — the same
@@ -284,6 +304,105 @@ describe("the commanded-rate block only when present", () => {
         expect(rateValue(wrapper).text()).toContain("0");
     });
 });
+
+describe('a known roll control', () => {
+    it('moves roll onto its own center-return strip, preserving the measured angle and removing the pad strike only when live', () => {
+        const { wrapper } = mountAim(makeReport({ roll: -3.5, rollControl: { available: true, reason: null, maxRate: 20 } }))
+        expect(wrapper.findComponent(YonderRollStrip).exists()).toBe(true)
+        expect(wrapper.find('.y-roll__head').text()).toContain('-3.5°')
+        expect(wrapper.find('.y-roll__track').attributes('aria-disabled')).toBe('false')
+        expect(wrapper.find('.y-aim__struck').exists()).toBe(false)
+    })
+
+    it('keeps a known but unavailable roll control drawn, disabled and explained, while the pan/tilt pad retains its struck axis', () => {
+        const { wrapper } = mountAim(makeReport({ roll: 4.2, rollControl: { available: false, reason: 'Roll rate has not been verified.', maxRate: 20 } }))
+        expect(wrapper.find('.y-roll__track').attributes('aria-disabled')).toBe('true')
+        expect(wrapper.find('.y-roll__reason').text()).toBe('Roll rate has not been verified.')
+        expect(wrapper.find('.y-aim__struck').exists()).toBe(true)
+    })
+
+    it('relays the strip rate as roll, shows its commanded rate, uses the shared stop path, and retires an active pad even when the strip begins at centre', async () => {
+        const { wrapper, emit } = mountAim(makeReport({ roll: 0, rollControl: { available: true, reason: null, maxRate: 20 } }))
+        const pad = dial(wrapper)
+        press(pad, 40, 0)
+        expect(slewCalls(emit)).toHaveLength(1)
+        const track = rollTrack(wrapper)
+        track.dispatchEvent(rollPoint('pointerdown', 80))
+        expect(stopCalls(emit)).toHaveLength(1)
+        track.dispatchEvent(rollPoint('pointermove', 156))
+        const roll = slewCalls(emit).at(-1)![2].payload.slew
+        expect(roll).toMatchObject({ pan: 0, tilt: 0 })
+        expect(roll.roll).toBeGreaterThan(0)
+        expect(roll.gesture).toMatch(/^roll-/)
+        await wrapper.vm.$nextTick()
+        expect(wrapper.findAll('.y-aimpanel__rate').at(1)!.text()).toContain('Commanded roll')
+        expect(wrapper.findAll('.y-aimpanel__rate').at(1)!.text()).toContain('20°/s')
+        track.dispatchEvent(new Event('pointerup', { bubbles: true, cancelable: true }))
+        expect(stopCalls(emit)).toHaveLength(2)
+    })
+
+    it('lets a verified roll hold interrupt an active preset before relaying its rate', async () => {
+        const { wrapper, emit } = mountAim(makeReport({ roll: 0, rollControl: { available: true, reason: null, maxRate: 20 } }))
+        const stop = vi.spyOn(wrapper.vm.aimTransport, 'stop')
+        wrapper.vm.activePreset = 2
+        await wrapper.vm.$nextTick()
+        const track = rollTrack(wrapper)
+        expect(track.getAttribute('aria-disabled')).toBe('false')
+        track.dispatchEvent(rollPoint('pointerdown', 156))
+        expect(stop).toHaveBeenCalledTimes(1)
+        expect(slewCalls(emit).at(-1)![2].payload.slew).toMatchObject({ pan: 0, tilt: 0, roll: 20 })
+    })
+
+    it.each([
+        ['mode', (wrapper: VueWrapper<any>) => wrapper.findAll('.y-seg__opt').find(button => button.text() === 'FPV')!.trigger('click')],
+        ['recentre', (wrapper: VueWrapper<any>) => recentreBtn(wrapper).trigger('click')]
+    ])('sends %s as the first discrete request after an admitted roll hold', async (_name, activate) => {
+        vi.useFakeTimers({ toFake: ['setTimeout', 'clearTimeout', 'Date', 'performance'] })
+        const calls: Array<Record<string, unknown>> = []
+        vi.stubGlobal('fetch', vi.fn(async (_url: string, options: RequestInit) => {
+            const body = JSON.parse(String(options.body))
+            calls.push(body)
+            return { ok: true, json: async () => ({ accepted: true, grant: { gesture: 'g', credential: 'c', deadline: 500 }, next: { gesture: 'g', credential: 'next', deadline: 600 } }) }
+        }))
+        const { wrapper } = mountAim(makeReport({
+            roll: 0,
+            rollControl: { available: true, reason: null, maxRate: 20 },
+            url: '/video/cam/aim', generation: 1, imageDirection: 'identity', maxRate: 30
+        }))
+        rollTrack(wrapper).dispatchEvent(rollPoint('pointerdown', 156))
+        await vi.advanceTimersByTimeAsync(0)
+        expect(calls.map(call => call.op)).toEqual(['issue', 'slew'])
+        await activate(wrapper)
+        await vi.advanceTimersByTimeAsync(0)
+        expect(calls.map(call => call.op)).toEqual(['issue', 'slew', _name])
+        wrapper.unmount()
+    })
+
+    it('does not queue a mode change behind a genuinely pending roll request', async () => {
+        vi.useFakeTimers({ toFake: ['setTimeout', 'clearTimeout', 'Date', 'performance'] })
+        const calls: Array<Record<string, unknown>> = []
+        let admit: (() => void) | undefined
+        vi.stubGlobal('fetch', vi.fn((_url: string, options: RequestInit) => {
+            const body = JSON.parse(String(options.body))
+            calls.push(body)
+            if (body.op !== 'issue') return Promise.resolve({ ok: true, json: async () => ({ accepted: true }) })
+            return new Promise(resolve => { admit = () => resolve({ ok: true, json: async () => ({ accepted: true, grant: { gesture: 'g', credential: 'c', deadline: 500 } }) }) })
+        }))
+        const { wrapper } = mountAim(makeReport({
+            roll: 0,
+            rollControl: { available: true, reason: null, maxRate: 20 },
+            url: '/video/cam/aim', generation: 1, imageDirection: 'identity', maxRate: 30
+        }))
+        rollTrack(wrapper).dispatchEvent(rollPoint('pointerdown', 156))
+        expect(calls.map(call => call.op)).toEqual(['issue'])
+        await wrapper.findAll('.y-seg__opt').find(button => button.text() === 'FPV')!.trigger('click')
+        expect(calls.map(call => call.op)).toEqual(['issue'])
+        admit!()
+        await vi.advanceTimersByTimeAsync(0)
+        expect(calls.map(call => call.op)).toEqual(['issue', 'stop'])
+        wrapper.unmount()
+    })
+})
 
 describe("the RATE CONTROL / NOT ANSWERING badge", () => {
     it("reads RATE CONTROL, in the select tone, while present", () => {

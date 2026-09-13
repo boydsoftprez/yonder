@@ -54,6 +54,16 @@ describe("daemon-owned camera intent", () => {
     expect(intent.live()?.isValid()).toBe(true);
   });
 
+  it('preserves legacy rate shapes while carrying an explicitly supplied roll rate', () => {
+    const { intent } = setup();
+    expect(admit(intent, issue(intent))).toMatchObject({ accepted: true });
+    expect(intent.live()?.rate).toEqual({ pan: 12, tilt: -3 });
+    intent.reset();
+    const grant = issue(intent);
+    expect(intent.admit('alice', { ...grant, seq: 0, rate: { pan: 0, tilt: 0, roll: -2.5 } })).toMatchObject({ accepted: true });
+    expect(intent.live()?.rate).toEqual({ pan: 0, tilt: 0, roll: -2.5 });
+  });
+
   it("successful renewal consumes its credential and aborts the superseded queued rate", () => {
     const { intent, clock } = setup();
     const grant = issue(intent);
@@ -80,6 +90,7 @@ describe("daemon-owned camera intent", () => {
     ["unsafe sequence", "seq", Number.MAX_SAFE_INTEGER + 1],
     ["nonfinite pan", "rate", { pan: NaN, tilt: 0 }],
     ["nonfinite tilt", "rate", { pan: 0, tilt: Infinity }],
+    ["nonfinite roll", "rate", { pan: 0, tilt: 0, roll: NaN }],
     ["string rate", "rate", { pan: "1", tilt: 0 }],
     ["missing rate", "rate", null],
   ])("rejects %s without changing rate or consuming the next grant", (_name, key, value) => {

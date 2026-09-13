@@ -47,10 +47,11 @@ export class GimbalController {
   private awaitingMode?: { mode: number; after: number; signal: AbortSignal };
   private discrete?: { controller: AbortController; command: Exclude<MotionCommand, { kind: 'rate' }>; deadline: number };
   private readonly progress = new RotationProgress();
-  private rateEpoch?: Readonly<{ gesture: string; owner: string; generation: number; mode: number }>;
+  private rateEpoch?: Readonly<{ gesture: string; owner: string; generation: number; mode: number; roll: boolean; rollProbe: boolean }>;
   private generation = 0;
   private notice: string | null = null;
   private rangeProbe?: { owner: string; gesture: string; until: number };
+  private rollProbe?: { owner: string; gesture: string; until: number };
   private recall?: { owner:string; gesture:string; name:string; target:{pan:number;tilt:number}; maxRate:number; until:number; best:number; progressAt:number };
   get motionNotice(): string | null { return this.notice; }
   get recalling(): boolean {
@@ -58,6 +59,12 @@ export class GimbalController {
     return this.recall !== undefined;
   }
   get lastMotionAt(): number { return this.lastCompletedAt; }
+  /** Current admitted rate for presentation, including a private probe epoch. */
+  reportedRate(owner: string, gesture: string): IntentRate | null {
+    const live = this.intent.live();
+    if (!live || live.owner !== owner || live.gesture !== gesture) return null;
+    return this.check({ kind: 'rate', ...live.rate }, undefined, this.rollProbeAllows(live)).allowed ? live.rate : null;
+  }
 
   constructor(private readonly options: GimbalControllerOptions) {
     this.leaseMs = options.leaseMs ?? 500;
@@ -67,7 +74,7 @@ export class GimbalController {
     if (!this.available || this.closed) return { accepted: false, reason: 'unavailable' };
     if (this.discrete) return { accepted: false, reason: 'busy' };
     const reply = this.intent.issue(owner, clientGesture);
-    if (reply.accepted) { this.recall = undefined; this.rangeProbe = undefined; this.rateEpoch = undefined; this.progress.reset(); this.setNotice(null); }
+    if (reply.accepted) { this.recall = undefined; this.rangeProbe = undefined; this.rollProbe = undefined; this.rateEpoch = undefined; this.progress.reset(); this.setNotice(null); }
     return reply;
   }
   startRecall(owner:string,clientGesture:string,target:{pan:number;tilt:number},name:string,maxRate:number):IntentIssued|MotionRefusal {
@@ -113,23 +120,37 @@ export class GimbalController {
     if (reply.accepted) this.rangeProbe = { owner, gesture: reply.grant.gesture, until: this.options.clock.now() + 2000 };
     return reply;
   }
+  /** Private HG211 roll investigation. This never changes production verification. */
+  issueRollProbe(owner: string, clientGesture: string): IntentIssued | MotionRefusal {
+    const reply = this.issue(owner, clientGesture);
+    if (reply.accepted) this.rollProbe = { owner, gesture: reply.grant.gesture, until: this.options.clock.now() + 2000 };
+    return reply;
+  }
   admit(owner: string, request: unknown): IntentAdmitted | MotionRefusal {
     if (!this.available || this.closed) return { accepted: false, reason: 'unavailable' };
     if (this.discrete) return { accepted: false, reason: 'busy' };
+    if ((this.rangeProbe && this.options.clock.now() >= this.rangeProbe.until)
+      || (this.rollProbe && this.options.clock.now() >= this.rollProbe.until)) this.reset();
     const result = this.intent.admit(owner, request);
     if (!result.accepted) return result;
     const live = this.intent.live();
     if (!live) { this.clearTimer(); return result; }
-    if (this.rangeProbe && (Math.hypot(live.rate.pan, live.rate.tilt) > 3 || (live.rate.pan !== 0 && live.rate.tilt !== 0))) {
+    const roll = live.rate.roll ?? 0;
+    if (this.rangeProbe && (live.rate.roll !== undefined || Math.hypot(live.rate.pan, live.rate.tilt) > 3 || (live.rate.pan !== 0 && live.rate.tilt !== 0))) {
+      this.reset(); return { accepted: false, reason: 'rate-cap' };
+    }
+    if (this.rollProbe && (live.rate.pan !== 0 || live.rate.tilt !== 0 || roll === 0 || Math.abs(roll) > 3)) {
       this.reset(); return { accepted: false, reason: 'rate-cap' };
     }
     const effective = quantizedRate(live.rate);
-    if (!effective.pan && !effective.tilt) { this.reset(); return { accepted: true, next: null }; }
-    const verdict = this.check({ kind: 'rate', ...live.rate });
+    if (!effective.pan && !effective.tilt && !effective.roll) { this.reset(); return { accepted: true, next: null }; }
+    const rollProbe = this.rollProbeAllows(live);
+    const verdict = this.check({ kind: 'rate', ...live.rate }, undefined, rollProbe);
     if (!verdict.allowed) { this.intent.reset(); this.clearTimer(); return { accepted: false, reason: verdict.reason }; }
     if (!this.rateEpoch || this.rateEpoch.gesture !== live.gesture) {
       this.progress.reset();
-      this.rateEpoch = Object.freeze({ gesture: live.gesture, owner: live.owner, generation: this.generation, mode: this.options.context().attitude!.mode });
+      this.rateEpoch = Object.freeze({ gesture: live.gesture, owner: live.owner, generation: this.generation,
+        mode: this.options.context().attitude!.mode, roll: roll !== 0, rollProbe });
     }
     live.signal.addEventListener('abort', () => this.clearTimer(), { once: true });
     this.pump();
@@ -139,12 +160,14 @@ export class GimbalController {
   end(owner: string, gesture: string): void {
     this.intent.end(owner, gesture);
     if (this.rangeProbe?.owner === owner && this.rangeProbe.gesture === gesture) this.rangeProbe = undefined;
+    if (this.rollProbe?.owner === owner && this.rollProbe.gesture === gesture) this.rollProbe = undefined;
     if (this.recall?.owner === owner && this.recall.gesture === gesture) this.recall = undefined;
   }
   /** Call on every attitude/configuration update, including a malformed attitude push. */
   refresh(): void {
     if(this.recall && (!this.intent.retains(this.recall.owner,this.recall.gesture) || this.options.clock.now()>=this.recall.until || this.options.context().attitude?.mode!==1 || !this.options.context().attitude?.joints)){this.reset();return;}
     if (this.rangeProbe && this.options.clock.now() >= this.rangeProbe.until) { this.reset(); return; }
+    if (this.rollProbe && this.options.clock.now() >= this.rollProbe.until) { this.reset(); return; }
     if (this.discrete) this.discreteAdmission(this.discrete);
     const live = this.intent.live();
     if (live) this.rateAdmission(live);
@@ -152,13 +175,21 @@ export class GimbalController {
       // Between one expired rate and its still-fresh next credential, camera
       // faults/limits/mode changes must retire the gesture too. A later clear
       // report cannot revive it without a new operator press.
-      const verdict = this.check({ kind: 'rate', pan: 0.1, tilt: 0 });
+      const verdict = this.check(this.rateEpoch.roll
+        ? { kind: 'rate', pan: 0, tilt: 0, roll: 0.1 }
+        : { kind: 'rate', pan: 0.1, tilt: 0 }, undefined, this.rateEpoch.rollProbe);
       if (!verdict.allowed || this.options.context().attitude?.mode !== this.rateEpoch.mode) this.reset();
+      else {
+        const attitude = this.options.context().attitude!;
+        const notice = this.progress.observe(this.rateEpoch, attitude, this.options.clock.now());
+        if (notice) this.cancelMotion(notice);
+      }
     }
   }
   reset(): void {
     this.clearTimer(); this.intent.reset();
     this.rangeProbe = undefined;
+    this.rollProbe = undefined;
     this.recall = undefined;
     this.rateEpoch = undefined; this.progress.reset(); this.generation++;
     this.discrete?.controller.abort(); this.discrete = undefined;
@@ -208,8 +239,9 @@ export class GimbalController {
       if (this.discrete === action) this.reset();
     }
   }
-  private check(command: MotionCommand, signal?: AbortSignal): GuardResult {
-    const context = { ...this.options.context(), now: this.options.clock.now() };
+  private check(command: MotionCommand, signal?: AbortSignal, rollProbe = false): GuardResult {
+    const base = this.options.context();
+    const context = { ...base, now: this.options.clock.now(), rollRateVerified: base.rollRateVerified === true || rollProbe };
     // Only the original discrete command may pass its own unresolved transition.
     const ownTransition = this.awaitingMode !== undefined && this.awaitingMode.signal === signal;
     if (this.awaitingMode && !ownTransition) {
@@ -227,7 +259,9 @@ export class GimbalController {
     if(this.recall && (this.options.clock.now()>=this.recall.until || this.options.context().attitude?.mode!==1 || !this.options.context().attitude?.joints)){this.reset();return false;}
     if (this.rangeProbe && (this.rangeProbe.owner !== live.owner || this.rangeProbe.gesture !== live.gesture
       || this.options.clock.now() >= this.rangeProbe.until)) { this.reset(); return false; }
-    if (!this.check({ kind: 'rate', ...live.rate }).allowed) { this.intent.reset(); this.clearTimer(); return false; }
+    if (this.rollProbe && !this.rollProbeAllows(live)) { this.reset(); return false; }
+    const rollProbe = this.rollProbeAllows(live);
+    if (!this.check({ kind: 'rate', ...live.rate }, undefined, rollProbe).allowed) { this.intent.reset(); this.clearTimer(); return false; }
     const epoch = this.rateEpoch, context = this.options.context();
     if (!epoch || epoch.generation !== this.generation) return false;
     if (context.attitude!.mode !== epoch.mode) {
@@ -272,7 +306,7 @@ export class GimbalController {
     try {
       const probe = this.rangeProbe;
       await this.options.write(this.wire({ kind: 'rate', ...live.rate }, probe ? 0x84 : 0x80), {
-        signal: live.signal, deadline: Math.min(live.expiresAt, probe?.until ?? Infinity, this.recall?.until ?? Infinity), admission: () => {
+        signal: live.signal, deadline: Math.min(live.expiresAt, probe?.until ?? Infinity, this.rollProbe?.until ?? Infinity, this.recall?.until ?? Infinity), admission: () => {
           // Recheck after any writer queue delay. Keep this local flag apart
           // from arbitrary endpoint errors, which still disconnect below.
           if (!live.isValid() || this.intent.live() !== live) return false;
@@ -297,7 +331,7 @@ export class GimbalController {
     }
   }
   private hasDispatchBudget(live: LiveIntent): boolean {
-    return Math.min(live.expiresAt, this.rangeProbe?.until ?? Infinity, this.recall?.until ?? Infinity) - this.options.clock.now() >= Math.min(MIN_RATE_DISPATCH_MS, this.leaseMs);
+    return Math.min(live.expiresAt, this.rangeProbe?.until ?? Infinity, this.rollProbe?.until ?? Infinity, this.recall?.until ?? Infinity) - this.options.clock.now() >= Math.min(MIN_RATE_DISPATCH_MS, this.leaseMs);
   }
   private watchAction(action: NonNullable<GimbalController['discrete']>): void {
     this.clearTimer();
@@ -320,11 +354,17 @@ export class GimbalController {
     const payload = Buffer.alloc(7);
     // Truncate toward zero so quantization cannot exceed the guarded speed.
     payload.writeInt16LE(Math.trunc(command.pan * 10), 0);
+    payload.writeInt16LE(Math.trunc((command.roll ?? 0) * 10), 2);
     payload.writeInt16LE(Math.trunc(command.tilt * 10), 4);
     payload[6] = rateFlags;
     return { ...common, commandId: 0x0c, payload };
   }
+  private rollProbeAllows(live: LiveIntent): boolean {
+    return !!this.rollProbe && this.rollProbe.owner === live.owner && this.rollProbe.gesture === live.gesture
+      && this.options.clock.now() < this.rollProbe.until;
+  }
 }
-function quantizedRate(rate: { pan: number; tilt: number }): { pan: number; tilt: number } {
-  return { pan: Math.trunc(rate.pan * 10) / 10, tilt: Math.trunc(rate.tilt * 10) / 10 };
+function quantizedRate(rate: IntentRate): IntentRate {
+  return { pan: Math.trunc(rate.pan * 10) / 10, tilt: Math.trunc(rate.tilt * 10) / 10,
+    ...(rate.roll === undefined ? {} : { roll: Math.trunc(rate.roll * 10) / 10 }) };
 }
