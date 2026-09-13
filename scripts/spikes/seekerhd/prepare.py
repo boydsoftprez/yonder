@@ -37,9 +37,8 @@ def bound_sensor_device(driver=Path('/sys/bus/i2c/drivers/imx462')):
         return None
     for device in sorted(driver.glob('*-001a')):
         if device.is_symlink():
-            # The media subdevice may not exist yet: rebuilding that async
-            # graph is the purpose of this helper. The I2C driver's binding
-            # is the safe prerequisite for touching the ISP/DPHY graph.
+            # The I2C device can bind before its media node is available.
+            # Check the media graph separately without detaching drivers.
             return str(device)
     return None
 
@@ -51,24 +50,18 @@ def main():
     run('modprobe', 'imx462_yonder')
     bound_sensor = bound_sensor_device()
     if bound_sensor is None:
-        # With the overlay loaded, Linux creates the I2C client even when the
-        # camera is unplugged. Never tear down the built-in ISP/DPHY graph
-        # unless this driver actually bound: vendor remove paths retain
-        # references, and camera absence must cost only the camera.
+        # The overlay creates an I2C client even with the camera unplugged.
+        # Camera absence must cost only the camera.
         print('SeekerHD IMX462 is not bound; leaving the ISP graph untouched')
         return
     graph = run('media-ctl', '-d', 'platform:rkisp-vir0', '-p')
     if 'subtype Sensor' not in graph:
-        # The built-in vendor ISP drops unbound sensor links at late-init,
-        # before modules can load. Rebuild just the camera graph, once.
-        for driver, name, operation in [
-            ('rkisp', 'rkisp-vir0', 'unbind'),
-            ('rockchip-csi2-dphy', 'csi2-dphy0', 'unbind'),
-            ('rockchip-csi2-dphy', 'csi2-dphy0', 'bind'),
-            ('rkisp', 'rkisp-vir0', 'bind'),
-        ]:
-            Path('/sys/bus/platform/drivers', driver, operation).write_text(name)
-        graph = run('media-ctl', '-d', 'platform:rkisp-vir0', '-p')
+        # Vendor remove paths retain async-notifier references. Rebinding
+        # can Oops the kernel even when the sensor is present. Preserve the
+        # notifier at boot instead, so the module can register normally.
+        raise SystemExit(
+            'SeekerHD sensor is missing from the media graph; leaving drivers attached. '
+            'Check the camera boot setup and initcall_blacklist=rkisp_clr_unready_dev.')
     sensors = [s for s in graph.split('- entity ') if 'subtype Sensor' in s]
     if len(sensors) != 1 or 'm00_b_imx462 2-001a' not in sensors[0]:
         raise SystemExit('Expected one attached SeekerHD IMX462 sensor')
