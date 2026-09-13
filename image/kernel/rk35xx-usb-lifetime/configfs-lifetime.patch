@@ -1,0 +1,308 @@
+--- a/drivers/usb/gadget/configfs.c
++++ b/drivers/usb/gadget/configfs.c
+@@ -21,17 +21,28 @@
+ void acc_disconnect(void);
+ #endif
+ static struct class *android_class;
++/* Serialize the exported function-device parent across gadget teardown. */
+ static struct device *android_device;
++static LIST_HEAD(android_devices);
++static DEFINE_MUTEX(android_device_lock);
+ static int index;
+ static int gadget_index;
+ 
+ struct device *create_function_device(char *name)
+ {
+-	if (android_device && !IS_ERR(android_device))
+-		return device_create(android_class, android_device,
+-			MKDEV(0, index++), NULL, name);
+-	else
++	struct device *dev;
++
++	/* device_create() may sleep, so retain this mutex for its full call. */
++	mutex_lock(&android_device_lock);
++	if (!android_device || IS_ERR(android_device)) {
++		mutex_unlock(&android_device_lock);
+ 		return ERR_PTR(-EINVAL);
++	}
++	dev = device_create(android_class, android_device,
++			MKDEV(0, index++), NULL, name);
++	mutex_unlock(&android_device_lock);
++
++	return dev;
+ }
+ EXPORT_SYMBOL_GPL(create_function_device);
+ #endif
+@@ -81,7 +92,9 @@
+ 	bool connected;
+ 	bool sw_connected;
+ 	struct work_struct work;
++	/* Protected by spinlock, including worker scheduling and teardown. */
+ 	struct device *dev;
++	struct list_head android_device_list;
+ #endif
+ };
+ 
+@@ -1466,6 +1479,16 @@
+ }
+ 
+ #ifdef CONFIG_USB_CONFIGFS_UEVENT
++static void android_queue_work(struct gadget_info *gi)
++{
++	unsigned long flags;
++
++	spin_lock_irqsave(&gi->spinlock, flags);
++	if (gi->dev && !gi->unbind)
++		schedule_work(&gi->work);
++	spin_unlock_irqrestore(&gi->spinlock, flags);
++}
++
+ static void android_work(struct work_struct *data)
+ {
+ 	struct gadget_info *gi = container_of(data, struct gadget_info, work);
+@@ -1473,15 +1496,30 @@
+ 	char *disconnected[2] = { "USB_STATE=DISCONNECTED", NULL };
+ 	char *connected[2]    = { "USB_STATE=CONNECTED", NULL };
+ 	char *configured[2]   = { "USB_STATE=CONFIGURED", NULL };
+-	/* 0-connected 1-configured 2-disconnected*/
++	/* 0-connected 1-configured 2-disconnected */
+ 	bool status[3] = { false, false, false };
+ 	unsigned long flags;
+ 	bool uevent_sent = false;
++	struct device *dev;
++
++	/*
++	 * Teardown clears gi->dev under the same lock before cancel_work_sync().
++	 * The reference keeps a running worker's event target alive until it
++	 * completes, while a worker queued after detach simply returns.
++	 */
++	spin_lock_irqsave(&gi->spinlock, flags);
++	if (!gi->dev || gi->unbind) {
++		spin_unlock_irqrestore(&gi->spinlock, flags);
++		return;
++	}
++	dev = get_device(gi->dev);
++	spin_unlock_irqrestore(&gi->spinlock, flags);
++	if (!dev)
++		return;
+ 
+ 	spin_lock_irqsave(&cdev->lock, flags);
+ 	if (cdev->config)
+ 		status[1] = true;
+-
+ 	if (gi->connected != gi->sw_connected) {
+ 		if (gi->connected)
+ 			status[0] = true;
+@@ -1492,28 +1530,27 @@
+ 	spin_unlock_irqrestore(&cdev->lock, flags);
+ 
+ 	if (status[0]) {
+-		kobject_uevent_env(&gi->dev->kobj, KOBJ_CHANGE, connected);
++		kobject_uevent_env(&dev->kobj, KOBJ_CHANGE, connected);
+ 		pr_info("%s: sent uevent %s\n", __func__, connected[0]);
+ 		uevent_sent = true;
+ 	}
+-
+ 	if (status[1]) {
+-		kobject_uevent_env(&gi->dev->kobj, KOBJ_CHANGE, configured);
++		kobject_uevent_env(&dev->kobj, KOBJ_CHANGE, configured);
+ 		pr_info("%s: sent uevent %s\n", __func__, configured[0]);
+ 		uevent_sent = true;
+ 	}
+-
+ 	if (status[2]) {
+-		kobject_uevent_env(&gi->dev->kobj, KOBJ_CHANGE, disconnected);
++		kobject_uevent_env(&dev->kobj, KOBJ_CHANGE, disconnected);
+ 		pr_info("%s: sent uevent %s\n", __func__, disconnected[0]);
+ 		uevent_sent = true;
+ 	}
+-
+-	if (!uevent_sent) {
++	if (!uevent_sent)
+ 		pr_info("%s: did not send uevent (%d %d %p)\n", __func__,
+ 			gi->connected, gi->sw_connected, cdev->config);
+-	}
++
++	put_device(dev);
+ }
++
+ #endif
+ 
+ static void configfs_composite_unbind(struct usb_gadget *gadget)
+@@ -1549,16 +1586,23 @@
+ {
+ 	struct usb_composite_dev *cdev = get_gadget_data(gadget);
+ 	unsigned long flags;
+-	struct gadget_info *gi = container_of(cdev, struct gadget_info, cdev);
++	struct gadget_info *gi;
+ 	int value = -EOPNOTSUPP;
+ 	struct usb_function_instance *fi;
++	bool queue_work = false;
+ 
++	if (!cdev)
++		return value;
++	gi = container_of(cdev, struct gadget_info, cdev);
++
+ 	spin_lock_irqsave(&cdev->lock, flags);
+ 	if (!gi->connected) {
+ 		gi->connected = 1;
+-		schedule_work(&gi->work);
++		queue_work = true;
+ 	}
+ 	spin_unlock_irqrestore(&cdev->lock, flags);
++	if (queue_work)
++		android_queue_work(gi);
+ 	list_for_each_entry(fi, &gi->available_func, cfs_list) {
+ 		if (fi != NULL && fi->f != NULL && fi->f->setup != NULL) {
+ 			value = fi->f->setup(fi->f, c);
+@@ -1571,16 +1615,16 @@
+ 	if (value < 0)
+ 		value = acc_ctrlrequest_composite(cdev, c);
+ #endif
+-
+ 	if (value < 0)
+ 		value = composite_setup(gadget, c);
+ 
++	queue_work = false;
+ 	spin_lock_irqsave(&cdev->lock, flags);
+-	if (c->bRequest == USB_REQ_SET_CONFIGURATION &&
+-						cdev->config) {
+-		schedule_work(&gi->work);
+-	}
++	if (c->bRequest == USB_REQ_SET_CONFIGURATION && cdev->config)
++		queue_work = true;
+ 	spin_unlock_irqrestore(&cdev->lock, flags);
++	if (queue_work)
++		android_queue_work(gi);
+ 
+ 	return value;
+ }
+@@ -1642,10 +1686,13 @@
+ 
+ #ifdef CONFIG_USB_CONFIGFS_UEVENT
+ 	gi->connected = 0;
+-	schedule_work(&gi->work);
+ #endif
+ 	composite_disconnect(gadget);
+ 	spin_unlock_irqrestore(&gi->spinlock, flags);
++#ifdef CONFIG_USB_CONFIGFS_UEVENT
++	/* Queue only after releasing gi->spinlock: composite may take cdev->lock. */
++	android_queue_work(gi);
++#endif
+ }
+ 
+ static void configfs_composite_reset(struct usb_gadget *gadget)
+@@ -1769,10 +1816,24 @@
+ 	NULL
+ };
+ 
++static void android_select_device(void)
++{
++	struct gadget_info *gi;
++
++	android_device = NULL;
++	list_for_each_entry(gi, &android_devices, android_device_list) {
++		if (gi->dev) {
++			android_device = gi->dev;
++			break;
++		}
++	}
++}
++
+ static int android_device_create(struct gadget_info *gi)
+ {
+ 	struct device_attribute **attrs;
+ 	struct device_attribute *attr;
++	int err;
+ 
+ 	INIT_WORK(&gi->work, android_work);
+ 	gi->dev = device_create(android_class, NULL,
+@@ -1781,21 +1842,21 @@
+ 		return PTR_ERR(gi->dev);
+ 
+ 	dev_set_drvdata(gi->dev, gi);
+-	if (!android_device)
+-		android_device = gi->dev;
+-
+ 	attrs = android_usb_attributes;
+ 	while ((attr = *attrs++)) {
+-		int err;
+-
+ 		err = device_create_file(gi->dev, attr);
+ 		if (err) {
+-			device_destroy(gi->dev->class,
+-				       gi->dev->devt);
++			device_unregister(gi->dev);
++			gi->dev = NULL;
+ 			return err;
+ 		}
+ 	}
+ 
++	mutex_lock(&android_device_lock);
++	list_add_tail(&gi->android_device_list, &android_devices);
++	if (!android_device)
++		android_device = gi->dev;
++	mutex_unlock(&android_device_lock);
+ 	return 0;
+ }
+ 
+@@ -1803,11 +1864,36 @@
+ {
+ 	struct device_attribute **attrs;
+ 	struct device_attribute *attr;
++	struct device *dev;
++	unsigned long flags;
+ 
++	/*
++	 * Detach before cancel_work_sync(): new work observes a NULL device,
++	 * and an already-running worker retains its own device reference.
++	 * The global lock remains held through device_destroy(), preventing the
++	 * exported create_function_device() from using this departing parent.
++	 */
++	mutex_lock(&android_device_lock);
++	spin_lock_irqsave(&gi->spinlock, flags);
++	dev = gi->dev;
++	gi->dev = NULL;
++	spin_unlock_irqrestore(&gi->spinlock, flags);
++	if (!dev) {
++		mutex_unlock(&android_device_lock);
++		return;
++	}
++
++	list_del_init(&gi->android_device_list);
++	if (android_device == dev)
++		android_select_device();
++
++	cancel_work_sync(&gi->work);
+ 	attrs = android_usb_attributes;
+ 	while ((attr = *attrs++))
+-		device_remove_file(gi->dev, attr);
+-	device_destroy(gi->dev->class, gi->dev->devt);
++		device_remove_file(dev, attr);
++	/* All gadget roots use MKDEV(0, 0); unregister this exact root. */
++	device_unregister(dev);
++	mutex_unlock(&android_device_lock);
+ }
+ #else
+ static inline int android_device_create(struct gadget_info *gi)
+@@ -1858,6 +1944,9 @@
+ 	mutex_init(&gi->lock);
+ 	INIT_LIST_HEAD(&gi->string_list);
+ 	INIT_LIST_HEAD(&gi->available_func);
++#ifdef CONFIG_USB_CONFIGFS_UEVENT
++	INIT_LIST_HEAD(&gi->android_device_list);
++#endif
+ 
+ 	composite_init_dev(&gi->cdev);
+ 	gi->cdev.desc.bLength = USB_DT_DEVICE_SIZE;
+@@ -1894,8 +1983,9 @@
+ 	struct gadget_info *gi;
+ 
+ 	gi = container_of(to_config_group(item), struct gadget_info, group);
+-	config_item_put(item);
++	/* android_device_destroy() still needs gi and its work item alive. */
+ 	android_device_destroy(gi);
++	config_item_put(item);
+ }
+ 
+ static struct configfs_group_operations gadgets_ops = {
