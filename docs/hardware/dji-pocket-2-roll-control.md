@@ -49,15 +49,17 @@ deadlines were not extended.
 ## Enabled behavior
 
 The public roll capability is enabled only for a live, identified DJI HG211 in
-FPV with native joint feedback. Its initial maximum is 1°/s, the tested speed.
-Higher rates require further bounded hardware evidence before raising that cap.
+FPV with native joint feedback. The initial maximum was 1°/s, the first tested
+speed. The operator subsequently approved a 30°/s operating maximum and an
+independent roll speed setting; see the operating-speed evaluation below.
 Free and Follow continue to offer their existing pan/tilt controls; the roll
 strip explains that FPV is required.
 
 Roll uses the existing single-use 500 ms intent chain and native fault, limit,
 freshness, mode and dispatch checks. Mixed pan/tilt/roll requests are rejected.
-The independent strip springs to center on release and shares the pan/tilt
-speed and expo preferences, capped by the roll limit. Shift requests one quarter
+The independent strip springs to center on release. Roll has its own saved
+speed preference (30°/s default, selectable 1–30°/s); expo remains shared with
+pan/tilt. Each control remains bounded by its reported capability. Shift requests one quarter
 speed; input below the 0.1°/s wire resolution remains at rest. Starting another
 manual surface or a preset retires the previous hold. Saved presets remain
 pan/tilt positions, and saving waits for all three joints to settle.
@@ -130,3 +132,46 @@ left the console running, root mounted read-only, and the Pocket's video stopped
 as found. The camera remained available for control. The
 [installed runtime hashes](evidence/pocket2-roll-runtime-2026-09-13.json) identify
 the combined build.
+
+## Operating-speed evaluation
+
+The operator rejected 1°/s as too slow for normal use and approved a 30°/s
+full-deflection roll default, a separate roll speed setting and the existing
+60°/s pan/tilt default. These are engineering operating settings, not a claim
+that DJI prescribes them. A 30-degree move takes nominally one second at 30°/s,
+excluding acceleration and settling. Smaller strip inputs and Shift retain
+fine movement. Saved pan/tilt speed does not change the roll setting.
+
+The command format, native flags, mixed-axis rejection, intent leases and
+release semantics are unchanged. Stop cancels further rate dispatch and the
+Pocket settles natively. The earlier 0.6-degree post-target movement at 1°/s
+cannot establish post-release distance at 30°/s.
+
+The 30°/s version was installed on the Mule by replacing only the guard module
+and Aim bundle, with originals backed up and all nine gimbal/control runtime
+hashes verified against the combined build. Both services were active, root was
+read-only, and configuration and secrets retained their hashes. The first full
+camera report timed out during reconnection; a subsequent read showed a live
+identified HG211 in Follow with the 30°/s capability correctly gated by mode.
+
+Before the planned speed check, a preflight found that the mode and position had
+changed. It sent no action. The operator confirmed they were already testing
+and asked to retain control, so no mode change or rate pulse was sent by this
+update session. Higher-rate mechanical speed, post-release distance and human
+acceptance remain unmeasured here. The prepared
+[one-command speed check](../../scripts/pocket2/roll-speed-check.py) is available
+for a later coordinated measurement; it does not run automatically.
+
+Software verification passed 306 focused core tests, all 1,173 widget tests,
+the workspace build and a widget rebuild after the storage-failure correction.
+Four functional browser cases covered phone/desktop widths in both palettes,
+30°/s requests, independent speed selection, persistence, release/no replay,
+blur, disabled controls and measured legibility. The independent review found
+that failed preference writes could revert the selected roll speed; the fix
+retains the selected value in memory and has regression coverage for both
+missing and stale saved values. The full page gate passed all 219 checks with
+zero failures and no new geometry acceptance. The prepared pulse tool passed
+eight offline tests; no physical higher-rate result is inferred from them.
+
+The [installation record](evidence/pocket2-roll-speed-install-2026-09-13.json)
+identifies the installed files and the pending hardware evidence.

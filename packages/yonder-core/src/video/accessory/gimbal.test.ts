@@ -93,11 +93,14 @@ describe('intent-bound gimbal dispatcher', () => {
     f.freshAdvance(1); expect(f.writes).toHaveLength(2);
     f.controller.close();
   });
-  it('encodes verified roll at offset two without changing the ordinary native rate flags', () => {
+  it.each([
+    [30, [0,0,0x2c,0x01,0,0,0x80]],
+    [-30, [0,0,0xd4,0xfe,0,0,0x80]],
+  ])('encodes public roll rate %s at offset two without changing the ordinary native rate flags', (roll, bytes) => {
     const f = fixture(); f.context.rollRateVerified = true;
     f.context.attitude!.joints = { pan: 0, tilt: 0, roll: 0 };
-    expect(f.admit(f.issue(), 0, 0, 0, -1)).toMatchObject({ accepted: true });
-    expect(Buffer.from(f.writes[0].command.payload!)).toEqual(Buffer.from([0,0,0xf6,0xff,0,0,0x80]));
+    expect(f.admit(f.issue(), 0, 0, 0, roll as number)).toMatchObject({ accepted: true });
+    expect(Buffer.from(f.writes[0].command.payload!)).toEqual(Buffer.from(bytes as number[]));
     f.controller.close();
   });
   it('renewal cancels the old queued write and cannot exceed the frame cadence', async () => {

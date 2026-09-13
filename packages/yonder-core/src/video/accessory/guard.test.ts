@@ -56,11 +56,11 @@ describe('physical motion guard (synthetic measured context)', () => {
     expect(guard({ kind: 'rate', pan: 0, tilt: 1 }, c)).toEqual({ allowed: true });
     expect(guard({ kind: 'rate', pan: 0, tilt: 0, roll: 1 }, c)).toEqual({ allowed: false, reason: 'roll-unavailable' });
   });
-  it('admits verified FPV roll only with finite native joints and its separate cap', () => {
+  it.each([-1, 1])('admits verified FPV roll in direction %s only with finite native joints and its separate cap', sign => {
     const c = context(); c.rollRateVerified = true;
     c.attitude!.joints = { pan: 0, tilt: 0, roll: 0 };
-    expect(guard({ kind: 'rate', pan: 0, tilt: 0, roll: 1 }, c)).toEqual({ allowed: true });
-    expect(guard({ kind: 'rate', pan: 0, tilt: 0, roll: 1.1 }, c)).toEqual({ allowed: false, reason: 'rate-cap' });
+    expect(guard({ kind: 'rate', pan: 0, tilt: 0, roll: sign * 30 }, c)).toEqual({ allowed: true });
+    expect(guard({ kind: 'rate', pan: 0, tilt: 0, roll: sign * 30.1 }, c)).toEqual({ allowed: false, reason: 'rate-cap' });
     expect(guard({ kind: 'rate', pan: 1, tilt: 0, roll: 1 }, c)).toEqual({ allowed: false, reason: 'malformed-command' });
     c.attitude!.mode = 2;
     expect(guard({ kind: 'rate', pan: 0, tilt: 0, roll: 1 }, c)).toEqual({ allowed: false, reason: 'roll-mode' });

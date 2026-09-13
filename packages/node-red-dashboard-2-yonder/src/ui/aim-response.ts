@@ -1,6 +1,7 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 export const EXPO_KEY = 'yonder:aim:expo';
 export const SPEED_KEY = 'yonder:aim:speed';
+export const ROLL_SPEED_KEY = 'yonder:aim:roll-speed';
 export const AIM_RESPONSE_CHANGED = 'yonder-aim-response-changed';
 
 /** Inverse displayed-image transform, with pan right and tilt up positive. */

@@ -1,8 +1,8 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
-import { afterEach, describe, expect, it } from 'vitest'
+import { afterEach, describe, expect, it, vi } from 'vitest'
 import { mount, type VueWrapper } from '@vue/test-utils'
 import YonderRollStrip from './YonderRollStrip.vue'
-import { AIM_RESPONSE_CHANGED, SPEED_KEY } from './aim-response.js'
+import { AIM_RESPONSE_CHANGED, EXPO_KEY, ROLL_SPEED_KEY, SPEED_KEY } from './aim-response.js'
 
 function strip (props: Record<string, unknown> = {}) {
     const wrapper = mount(YonderRollStrip, { props: { roll: 12.4, maxRate: 30, available: true, reason: '', ...props } })
@@ -27,6 +27,7 @@ function stops (wrapper: VueWrapper) {
 }
 
 afterEach(() => {
+    vi.restoreAllMocks()
     Object.defineProperty(document, 'hidden', { configurable: true, value: false })
     localStorage.clear()
 })
@@ -88,21 +89,94 @@ describe('Roll strip', () => {
         wrapper.unmount()
     })
 
-    it('uses the shared Aim response values, Shift fine control, and retires a hold when settings change', () => {
-        localStorage.setItem(SPEED_KEY, '20')
+    it('uses independent roll speed, Shift fine control, and retires a hold when roll settings change', () => {
+        localStorage.setItem(SPEED_KEY, '90')
+        localStorage.setItem(ROLL_SPEED_KEY, '20')
         const wrapper = strip({ maxRate: 30 })
         const track = wrapper.find('.y-roll__track').element
         track.dispatchEvent(pointer('pointerdown', 156, 1, true))
-        const fine = slews(wrapper)[0]!.roll
-        expect(fine).toBeGreaterThan(0)
-        expect(fine).toBeLessThanOrEqual(5)
+        expect(slews(wrapper)[0]!.roll).toBe(5)
+        localStorage.setItem(ROLL_SPEED_KEY, '10')
+        window.dispatchEvent(new CustomEvent(AIM_RESPONSE_CHANGED, { detail: { key: ROLL_SPEED_KEY, value: 10 } }))
+        expect(stops(wrapper)).toHaveLength(1)
+        track.dispatchEvent(pointer('pointermove', 4, 1))
+        expect(slews(wrapper)).toHaveLength(1)
+        track.dispatchEvent(pointer('pointerdown', 4, 2))
+        expect(slews(wrapper).at(-1)!.roll).toBe(-10)
+        wrapper.unmount()
+    })
+
+    it('defaults to 30 independently of pan/tilt speed and retains fine movement near centre', () => {
+        localStorage.setItem(SPEED_KEY, '20')
+        const wrapper = strip()
+        const track = wrapper.find('.y-roll__track').element
+        track.dispatchEvent(pointer('pointerdown', 100))
+        expect(slews(wrapper)[0]!.roll).toBeGreaterThan(1)
+        expect(slews(wrapper)[0]!.roll).toBeLessThan(5)
+        track.dispatchEvent(pointer('pointermove', 156))
+        expect(slews(wrapper).at(-1)!.roll).toBe(30)
         localStorage.setItem(SPEED_KEY, '10')
         window.dispatchEvent(new CustomEvent(AIM_RESPONSE_CHANGED, { detail: { key: SPEED_KEY, value: 10 } }))
+        track.dispatchEvent(pointer('pointermove', 4))
+        expect(slews(wrapper).at(-1)!.roll).toBe(-30)
+        expect(stops(wrapper)).toHaveLength(0)
+        localStorage.setItem(EXPO_KEY, '100')
+        window.dispatchEvent(new CustomEvent(AIM_RESPONSE_CHANGED, { detail: { key: EXPO_KEY, value: 100 } }))
         expect(stops(wrapper)).toHaveLength(1)
+        wrapper.unmount()
+    })
+
+    it('persists the roll slider, stops its active hold and leaves pan/tilt speed alone', async () => {
+        localStorage.setItem(SPEED_KEY, '60')
+        const wrapper = strip()
+        const track = wrapper.find('.y-roll__track').element
+        track.dispatchEvent(pointer('pointerdown', 156))
+        await wrapper.find('input[aria-label="Maximum roll speed"]').setValue('12')
+        expect(stops(wrapper)).toHaveLength(1)
+        expect(localStorage.getItem(ROLL_SPEED_KEY)).toBe('12')
+        expect(localStorage.getItem(SPEED_KEY)).toBe('60')
+        track.dispatchEvent(pointer('pointermove', 4))
+        expect(slews(wrapper)).toHaveLength(1)
         track.dispatchEvent(pointer('pointerdown', 4, 2))
-        const left = slews(wrapper).at(-1)!
-        expect(left.roll).toBeLessThan(0)
-        expect(Math.abs(left.roll)).toBeLessThanOrEqual(10)
+        expect(slews(wrapper).at(-1)!.roll).toBe(-12)
+        wrapper.unmount()
+        const restored = strip()
+        expect(restored.find('input').element.value).toBe('12')
+        expect(restored.find('.y-roll__head').text()).toContain('12°/s max')
+        restored.unmount()
+    })
+
+    it.each(['NaN', 'Infinity', '0', '-1', '121', ''])('ignores invalid saved roll speed %s', value => {
+        localStorage.setItem(ROLL_SPEED_KEY, value)
+        const wrapper = strip()
+        wrapper.find('.y-roll__track').element.dispatchEvent(pointer('pointerdown', 156))
+        expect(slews(wrapper)[0]!.roll).toBe(30)
+        wrapper.unmount()
+    })
+
+    it.each([null, '20'])('retains the chosen speed if persistence fails with stored value %s', async previous => {
+        if (previous !== null) localStorage.setItem(ROLL_SPEED_KEY, previous)
+        vi.spyOn(Storage.prototype, 'setItem').mockImplementation(() => { throw new Error('Storage unavailable') })
+        const wrapper = strip()
+        await wrapper.find('input[aria-label="Maximum roll speed"]').setValue('5')
+        expect(wrapper.find('.y-roll__head').text()).toContain('5°/s max')
+        wrapper.find('.y-roll__track').element.dispatchEvent(pointer('pointerdown', 156))
+        expect(slews(wrapper)[0]!.roll).toBe(5)
+        wrapper.unmount()
+    })
+
+    it('clamps to a reduced backend cap and retires any hold without replay', async () => {
+        localStorage.setItem(ROLL_SPEED_KEY, '120')
+        const wrapper = strip()
+        const track = wrapper.find('.y-roll__track').element
+        track.dispatchEvent(pointer('pointerdown', 156))
+        expect(slews(wrapper)[0]!.roll).toBe(30)
+        await wrapper.setProps({ maxRate: 5 })
+        expect(stops(wrapper)).toHaveLength(1)
+        track.dispatchEvent(pointer('pointermove', 156))
+        expect(slews(wrapper)).toHaveLength(1)
+        track.dispatchEvent(pointer('pointerdown', 156, 2))
+        expect(slews(wrapper).at(-1)!.roll).toBe(5)
         wrapper.unmount()
     })
 

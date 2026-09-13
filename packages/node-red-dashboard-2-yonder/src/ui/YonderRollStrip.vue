@@ -21,18 +21,24 @@
             <span class="y-roll__puck" :style="{ left: puck + '%' }" aria-hidden="true" />
         </div>
         <div class="y-roll__labels"><span>↶ Roll left</span><span>Roll right ↷</span></div>
+        <label class="y-roll__speed">
+            <span>Roll max speed <output>{{ selectedSpeed }}°/s</output></span>
+            <input type="range" aria-label="Maximum roll speed" min="1" :max="rateLimit" step="1"
+                :value="selectedSpeed" :disabled="!available || rateLimit < 1"
+                :aria-valuetext="`${selectedSpeed} degrees per second`" @input="changeSpeed" />
+        </label>
         <p v-if="reason" class="y-roll__reason">{{ reason }}</p>
     </section>
 </template>
 
 <script>
-import { AIM_RESPONSE_CHANGED, EXPO_KEY, SPEED_KEY, hasWireMotion, rateLimit, responseMagnitude, savedNumber } from './aim-response.ts'
+import { AIM_RESPONSE_CHANGED, EXPO_KEY, ROLL_SPEED_KEY, hasWireMotion, rateLimit, responseMagnitude, savedNumber, saveResponse } from './aim-response.ts'
 
 const DEAD_PX = 12
 const RANGE_PX = 64
 const PUCK_TRAVEL_PERCENT = 42
 const DEFAULT_EXPO = 50
-const DEFAULT_SPEED = 60
+const DEFAULT_SPEED = 30
 let gestureCounter = 0
 
 function newGestureId () {
@@ -42,8 +48,8 @@ function newGestureId () {
 
 /**
  * A one-axis, spring-return rate control for a gimbal roll joint (R-CAM-11).
- * It deliberately owns no speed or expo settings: those are the Aim pad's
- * shared response preferences. A press begins a gesture even inside the dead
+ * It owns a separate roll speed preference and shares the Aim pad's expo.
+ * A press begins a gesture even inside the dead
  * zone, so its parent can retire a simultaneous pan/tilt hold; movement begins
  * only after the pointer leaves centre. Every release path retires one gesture.
  */
@@ -61,7 +67,7 @@ export default {
         seq: 0,
         pointerId: null,
         puck: 50,
-        speed: savedNumber(SPEED_KEY, DEFAULT_SPEED, 1, 120),
+        speed: savedNumber(ROLL_SPEED_KEY, DEFAULT_SPEED, 1, 120),
         expo: savedNumber(EXPO_KEY, DEFAULT_EXPO, 0, 100)
     }),
     computed: {
@@ -80,10 +86,13 @@ export default {
         this.onVisibility = () => { if (document.hidden) this.onEnd() }
         this.onPageHide = () => this.onEnd()
         this.onResponseChanged = event => {
-            if (![SPEED_KEY, EXPO_KEY].includes(event?.detail?.key)) return
+            const { key, value } = event?.detail ?? {}
+            if (![ROLL_SPEED_KEY, EXPO_KEY].includes(key) || !Number.isFinite(value)
+                || value < (key === EXPO_KEY ? 0 : 1) || value > (key === EXPO_KEY ? 100 : 120)) return
             this.onEnd()
-            this.speed = savedNumber(SPEED_KEY, DEFAULT_SPEED, 1, 120)
-            this.expo = savedNumber(EXPO_KEY, DEFAULT_EXPO, 0, 100)
+            // Keep the current-session choice even when browser storage rejects it.
+            if (key === ROLL_SPEED_KEY) this.speed = value
+            else this.expo = value
         }
         window.addEventListener('blur', this.onBlur)
         window.addEventListener('offline', this.onOffline)
@@ -100,6 +109,13 @@ export default {
         this.onEnd()
     },
     methods: {
+        changeSpeed (event) {
+            const value = Number(event.target.value)
+            if (!this.available || !Number.isFinite(value) || value < 1 || value > this.rateLimit) return
+            this.onEnd()
+            this.speed = value
+            saveResponse(ROLL_SPEED_KEY, value)
+        },
         at (event) {
             const rect = this.$refs.strip?.getBoundingClientRect()
             if (!rect || ![rect.left, rect.width, event.clientX].every(Number.isFinite) || rect.width <= 0) return false
@@ -165,6 +181,10 @@ export default {
 .y-roll__centre { position:absolute; left:50%; top:9px; bottom:9px; border-left:1px solid var(--yonder-label, #7f8a95); }
 .y-roll__puck { position:absolute; top:12px; width:16px; height:16px; transform:translateX(-50%); border:2px solid var(--yonder-select, #2ad4f0); border-radius:50%; background:var(--yonder-pane, #0c1218); box-sizing:border-box; pointer-events:none; }
 .y-roll__labels { display:flex; justify-content:space-between; margin-top:4px; color:var(--yonder-label, #7f8a95); font-size:9px; letter-spacing:.06em; text-transform:uppercase; }
+.y-roll__speed { display:block; margin-top:9px; color:var(--yonder-label, #7f8a95); font-size:11px; }
+.y-roll__speed > span { display:flex; justify-content:space-between; }
+.y-roll__speed output { color:var(--yonder-value, #fff); font-variant-numeric:tabular-nums; }
+.y-roll__speed input { display:block; width:100%; margin:4px 0 0; accent-color:var(--yonder-select, #2ad4f0); }
 .y-roll__track.is-pushing { cursor:grabbing; border-color:var(--yonder-select, #2ad4f0); }
 .y-roll__track.is-disabled { cursor:not-allowed; border-style:dashed; }
 .y-roll__reason { margin:5px 0 0; color:var(--yonder-label, #7f8a95); font-size:11px; line-height:1.35; }

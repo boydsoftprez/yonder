@@ -221,10 +221,11 @@ This update does not reclassify unrelated historical manifest rows as complete.
 
 The operator approved a separate horizontal spring-return roll surface below
 the existing pan/tilt pad (R-CAM-11). It shows measured native roll and the
-current rate limit, retains shared speed/expo and Shift fine control, and
-explains unavailable states. FPV and an identified live HG211 are required.
-The initial limit is 1°/s following the
-[two-direction hardware check](../../hardware/dji-pocket-2-roll-control.md).
+current rate limit, and has its own saved **Roll max speed** slider from 1 to
+30°/s, defaulting to 30°/s. Expo remains shared with pan/tilt; Shift supplies fine
+control. It explains unavailable states. FPV and an identified live HG211 are
+required. The initial 1°/s check and subsequent operating-speed observations are
+recorded in the [hardware evidence](../../hardware/dji-pocket-2-roll-control.md).
 Release, center, interrupted pointer capture and lifecycle changes retire the
 hold. Pan/tilt, roll and preset holds are exclusive; presets retain pan/tilt only.
 The workflow fixture includes working and unavailable roll, verified at desktop
