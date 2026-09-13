@@ -73,3 +73,27 @@ describe("readSupply", () => {
     await expect(readSupply({ runner: ok })).resolves.toMatchObject({ clean: true });
   });
 });
+
+describe("readSupply on a board with no vcgencmd (K-70)", () => {
+  it("remembers that the binary is absent and stops forking for it", async () => {
+    let calls = 0;
+    const missing: CommandRunner = async () => {
+      calls += 1;
+      return { code: 127, stdout: "", stderr: "spawn vcgencmd ENOENT" };
+    };
+    await expect(readSupply({ runner: missing })).resolves.toBeNull();
+    await expect(readSupply({ runner: missing })).resolves.toBeNull();
+    expect(calls).toBe(1);
+  });
+
+  it("keeps asking a vcgencmd that exists but failed", async () => {
+    let calls = 0;
+    const failing: CommandRunner = async () => {
+      calls += 1;
+      return { code: 1, stdout: "", stderr: "VCHI initialization failed" };
+    };
+    await expect(readSupply({ runner: failing })).resolves.toBeNull();
+    await expect(readSupply({ runner: failing })).resolves.toBeNull();
+    expect(calls).toBe(2);
+  });
+});

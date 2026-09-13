@@ -437,6 +437,12 @@ class Element(object):
         _trace("request_pad", element=self.name, pad=name)
         return self._pad(name, PadPresence.REQUEST)
 
+    @property
+    def srcpads(self):
+        """PyGObject exposes a GstElement's src pad list as `element.srcpads`;
+        the host counts a tee's consumers off it (R-VID-21)."""
+        return [pad for name, pad in self.pads.items() if name.startswith("src")]
+
     def get_request_pad(self, template):
         """`tee.get_request_pad("src_%u")` — the call the spiked recipe makes.
         Deprecated in GStreamer 1.20 in favour of `request_pad_simple` and
@@ -491,6 +497,7 @@ class Element(object):
 
     def set_property(self, name, value):
         self.props[name] = value
+        _trace("set_property", element=self.name, name=name, value=value)
 
     # state
     def set_state(self, state):

@@ -7,7 +7,7 @@ import {
 import { DESCRIPTORS, sentenceLabel } from "../descriptors.js";
 import { parseControls, parseDevices, parseFormats } from "./parse.js";
 import { byPathNames, systemByPath, type ByPathReader } from "./bypath.js";
-import { probeRockchipCsi } from "./csi.js";
+import { csiTransient, probeRockchipCsi } from "./csi.js";
 
 /**
  * Detection on demand (R-CAM-12).
@@ -84,6 +84,67 @@ export interface ProbeOptions {
    * ever supplied by a test leaves the requirement unmet on the board.
    */
   byPath?: ByPathReader;
+  /** The clock `PROBE_REUSE_MS` is measured on; a test drives it by hand. */
+  now?: () => number;
+}
+
+/**
+ * How long one node's probe is reused between sweeps (K-70, R-CAM-24).
+ *
+ * A sweep on the Rockchip bench board is twenty-one `v4l2-ctl` processes —
+ * ten ISP nodes, each asked for its formats and its controls — and three
+ * callers ask for a sweep every five seconds: the cockpit, the Cameras page's
+ * poll and autostart. Each fork of a daemon this size cost the main thread
+ * tens of milliseconds on that board, and the telemetry socket dropped
+ * packets behind them (R-HW-07). What those callers actually consume is
+ * whether a by-path name is still there, plus formats that do not change
+ * while a device stays plugged in. So a node's answer is kept for a minute,
+ * and every sweep still runs `--list-devices` and re-reads
+ * `/dev/v4l/by-path`: a camera that appears or disappears changes that
+ * listing, and the whole memory is dropped with it. A control write drops it
+ * too (`forgetProbes`), because `inactive` flags are read live; and the
+ * operator's *Refresh camera* (`probeCamera`, R-CAM-12) always asks the
+ * device, and corrects what the next sweep reuses.
+ *
+ * Never reused: a node the runner could not read (the device may have been
+ * busy starting), a Rockchip CSI rejection (its media graph is brought up by
+ * another service at boot), and a node with no stable by-path name, since
+ * that name is what the memory is keyed on.
+ */
+export const PROBE_REUSE_MS = 60_000;
+
+interface ProbeMemory {
+  listing: string;
+  generation: number;
+  nodes: Map<string, { at: number; outcome: Detection | Rejection }>;
+}
+
+/** Per runner, so a test's fake runner never shares memory with another's. */
+const memories = new WeakMap<CommandRunner, ProbeMemory>();
+/** Rejections to ask about again next sweep, marked where they are made. */
+const transient = new WeakSet<Rejection>();
+let generation = 0;
+
+/** Forget every reused probe: after a control write a device may answer differently. */
+export function forgetProbes(): void {
+  generation += 1;
+}
+
+function rememberedFor(runner: CommandRunner, names: ReadonlyMap<string, string>): ProbeMemory {
+  const listing = [...names.entries()].map(([node, name]) => `${node}=${name}`).sort().join("\n");
+  const held = memories.get(runner);
+  if (held !== undefined && held.listing === listing && held.generation === generation) return held;
+  const fresh: ProbeMemory = { listing, generation, nodes: new Map() };
+  memories.set(runner, fresh);
+  return fresh;
+}
+
+function reusable(outcome: Detection | Rejection): boolean {
+  return "capabilities" in outcome ? outcome.byPathStable : !transient.has(outcome);
+}
+
+function memoryKey(node: string, card: string, names: ReadonlyMap<string, string>): string {
+  return `${names.get(node) ?? node}|${card}`;
 }
 
 /** Formats that carry compressed video, and are therefore flyable (R-CAM-02). */
@@ -252,6 +313,8 @@ export async function detectCameras(opts: ProbeOptions = {}): Promise<DetectResu
   const rejected: Rejection[] = [];
 
   const names = resolveNames(opts);
+  const now = opts.now ?? Date.now;
+  const memory = rememberedFor(runner, names);
 
   const listed = await runner(["v4l2-ctl", "--list-devices"]);
   if (listed.code !== 0) {
@@ -274,7 +337,16 @@ export async function detectCameras(opts: ProbeOptions = {}): Promise<DetectResu
     // kernel created.
     const outcomes: (Detection | Rejection)[] = [];
     for (const node of device.nodes) {
-      outcomes.push(await probeNode(node, device.card, runner, names));
+      const key = memoryKey(node, device.card, names);
+      const held = memory.nodes.get(key);
+      if (held !== undefined && now() - held.at < PROBE_REUSE_MS) {
+        outcomes.push(held.outcome);
+        continue;
+      }
+      const outcome = await probeNode(node, device.card, runner, names);
+      if (reusable(outcome)) memory.nodes.set(key, { at: now(), outcome });
+      else memory.nodes.delete(key);
+      outcomes.push(outcome);
     }
     const accepted = outcomes.find((o): o is Detection => "capabilities" in o);
     if (accepted) found.push(accepted);
@@ -302,14 +374,18 @@ async function probeNode(
 
   const formats = await runner(["v4l2-ctl", "-d", node, "--list-formats-ext"]);
   if (formats.code !== 0) {
-    return {
+    const unread: Rejection = {
       device: node, card,
       reason: `could not read this device's formats: ${formats.stderr.trim() || `exit ${formats.code}`}`,
     };
+    transient.add(unread);
+    return unread;
   }
   if (/Size:\s*Stepwise/.test(formats.stdout) &&
       (/^rkisp(?:1)?_mainpath$/.test(card) || byPath.get(node)?.startsWith("platform-rkisp-"))) {
-    return probeRockchipCsi(node, card, runner, byPath);
+    const csi = await probeRockchipCsi(node, card, runner, byPath);
+    if (!("capabilities" in csi) && csiTransient.has(csi)) transient.add(csi);
+    return csi;
   }
   const parsed = parseFormats(formats.stdout);
   if (parsed.length === 0) {
@@ -388,5 +464,16 @@ export async function probeCamera(
   card: string,
   opts: ProbeOptions = {},
 ): Promise<Detection | Rejection> {
-  return probeNode(node, card, opts.runner ?? systemRunner, resolveNames(opts));
+  const runner = opts.runner ?? systemRunner;
+  const names = resolveNames(opts);
+  const outcome = await probeNode(node, card, runner, names);
+  // On demand means the device was asked (R-CAM-12); the next sweep reuses
+  // this answer rather than the one it held before the operator pressed.
+  const memory = memories.get(runner);
+  if (memory !== undefined) {
+    const key = memoryKey(node, card, names);
+    if (reusable(outcome)) memory.nodes.set(key, { at: (opts.now ?? Date.now)(), outcome });
+    else memory.nodes.delete(key);
+  }
+  return outcome;
 }

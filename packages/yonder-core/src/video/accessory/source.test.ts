@@ -333,3 +333,37 @@ it('captures fresh stationary native positions without issuing a motion command'
   await expect(position).resolves.toEqual({pan:-220,tilt:-100});expect(h.device.sendCommand).not.toHaveBeenCalled();
  }finally{await h.source.close();vi.useRealTimers()}
 });
+
+it('sets the live view aside once native geometry is known and nobody watches, pulls it back for a consumer, and forgets it on a new link (R-VID-22)', async () => {
+  const h = harness(); const forwardVideo = vi.fn(); (h.device as any).forwardVideo = forwardVideo;
+  await h.source.discover(); h.live();
+  const data = Buffer.from([0,0,1,0x41,1]);
+  const feed = (from: number, count: number) => { for (let i = 0; i < count; i++) h.callbacks().onVideo!({ data, timestamp: from + i * 33, metadata: 0 }); };
+  // Going live on a new link syncs the choice to forwarding; frames without a size are not an answer yet, so it stays.
+  const held = () => forwardVideo.mock.calls.filter(([on]) => on === false).length;
+  expect(forwardVideo).toHaveBeenLastCalledWith(true);
+  feed(1000, 20);
+  expect(held()).toBe(0);
+  // The device answered: size from its SPS, rate from its clock. Nobody is watching, so the view is set aside.
+  h.media.dimensions = { width: 1280, height: 720 };
+  feed(1000 + 20 * 33, 1);
+  expect(held()).toBe(1); expect(forwardVideo).toHaveBeenLastCalledWith(false);
+  // Ten seconds with no video is not staleness: the link is live and the answer is held.
+  h.now.value += 10_000;
+  expect(h.source.input(h.camera.device)).toMatchObject({ live: true, native: { width: 1280, height: 720 }, reason: null });
+  expect(h.source.input(h.camera.device)!.native!.fps).toBeCloseTo(30, 0);
+  // A consumer arrives: the view is pulled again, and its resumed clock is a fresh start, not a discontinuity.
+  const socket = {} as any; (h.media as any).clients.set(socket, false); h.media.onClients!();
+  expect(forwardVideo).toHaveBeenLastCalledWith(true);
+  expect(h.media.push({ data, timestamp: 90_000, metadata: 0 })).toBe(true);
+  expect((h.media as any).clients.size).toBe(1);
+  // The consumer leaves: set aside again, still live, answer still held.
+  (h.media as any).clients.delete(socket); h.media.onClients!();
+  expect(forwardVideo).toHaveBeenLastCalledWith(false);
+  expect(h.source.input(h.camera.device)).toMatchObject({ live: true, native: { width: 1280, height: 720 } });
+  // A new USB link is a new device to ask: nothing is carried over.
+  h.newLiveGeneration();
+  expect(forwardVideo).toHaveBeenLastCalledWith(true);
+  expect(h.source.input(h.camera.device)?.native).toBeNull();
+  await h.source.close();
+});

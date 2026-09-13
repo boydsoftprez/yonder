@@ -115,6 +115,14 @@ for _needed in ("parse_launchv", "util_set_object_arg"):
 # The tee `compose()` forks the ground station's outputs off. Its sink pad is
 # where continuity is witnessed.
 MAIN_TEE = "main"
+# The valve `compose()` puts before the full-rate encode (R-VID-21): closed
+# when no output is enabled, opened here for a recording, closed again when
+# the last consumer leaves. A pipeline without one has its encode always on.
+MAIN_GATE = "main-gate"
+# The preview encoder, named by `compose()`; its output is the one stream
+# that is always published (R-VID-13), so it is what progress is judged on
+# while the gate is closed.
+PREVIEW_ENCODER = "enc-preview"
 
 # The tee `compose()` forks the decoded frames off, before either encode.
 #
@@ -194,14 +202,16 @@ class MainBranch(object):
     branch would answer for that output only.
     """
 
-    def __init__(self, pipeline):
+    def __init__(self, pipeline, pad=None):
         self.count = 0
         self.gaps = 0
         self._last_pts = None
         self._gap_ns = None
         self._lock = threading.Lock()
-        tee = pipeline.get_by_name(MAIN_TEE)
-        self.pad = tee.get_static_pad("sink") if tee is not None else None
+        if pad is None:
+            tee = pipeline.get_by_name(MAIN_TEE)
+            pad = tee.get_static_pad("sink") if tee is not None else None
+        self.pad = pad
         if self.pad is not None:
             self.pad.add_probe(Gst.PadProbeType.BUFFER, self._saw)
 
@@ -428,6 +438,11 @@ class Host(object):
     def __init__(self, pipeline):
         self.pipeline = pipeline
         self.main = MainBranch(pipeline)
+        # The preview encoder's output: what progress is judged on while the
+        # full-rate encode is gated (R-VID-21). None on a pipeline without one.
+        preview = pipeline.get_by_name(PREVIEW_ENCODER)
+        self.preview = MainBranch(
+            pipeline, None if preview is None else preview.get_static_pad("src"))
         # One pipeline is one camera, so one recording at a time is all there
         # is to hold. `video/recorder.ts` refuses a second start before it
         # reaches here; this is what makes that refusal true rather than
@@ -474,6 +489,9 @@ class Host(object):
             mark = self.main.mark()
             observed = self.record_stop()
             broke = self.main.broke_over(mark, RECORD_WATCH_S)
+            # Only now: a gate closed inside the window above would read as
+            # the stop having broken the stream it emptied on purpose.
+            self.close_gate_if_idle()
         else:
             note("no such op: %r" % (op,))
             return None
@@ -484,6 +502,39 @@ class Host(object):
             "continuous": not broke,
             "observed": observed,
         }
+
+    # -- the gate before the full-rate encode (R-VID-21) --------------------
+
+    def gate(self):
+        return self.pipeline.get_by_name(MAIN_GATE)
+
+    def gate_open(self):
+        """Whether `main` is expected to carry frames right now: there is no
+        gate in this pipeline, or the gate is open."""
+        gate = self.gate()
+        return gate is None or not dropping(gate)
+
+    def open_gate(self):
+        """Let frames reach the full-rate encode. Called once a consumer is
+        hung on `main`, so the encoder's first frame -- a keyframe -- is
+        the consumer's first frame too."""
+        gate = self.gate()
+        if gate is not None and dropping(gate):
+            gate.set_property("drop", False)
+            note("full-rate encode: opened for a consumer")
+
+    def close_gate_if_idle(self):
+        """Stop feeding the full-rate encode once nothing hangs off `main`:
+        the gate started closed because no output was composed, and the
+        last recording has released its pad. Called after the continuity
+        window of the instruction that emptied the tee, never inside it."""
+        gate = self.gate()
+        tee = self.pipeline.get_by_name(MAIN_TEE)
+        if gate is None or tee is None or dropping(gate):
+            return
+        if not consumers_of(tee):
+            gate.set_property("drop", True)
+            note("full-rate encode: closed, nothing consumes it")
 
     # -- a still, off the raw tee (R-CAM-18) -------------------------------
 
@@ -698,6 +749,10 @@ class Host(object):
         branch.frames = frames
 
         branch.start()
+        # After the join, not before: the first frame through the opened
+        # gate is the encoder's keyframe, and it must find the muxer already
+        # hung on the tee (R-VID-21).
+        self.open_gate()
         self.recording = branch
         self.recording_path = path
         return {"path": path, "recording": True}
@@ -946,6 +1001,27 @@ class Host(object):
 
 # -- small graph helpers ---------------------------------------------------
 
+
+def dropping(gate):
+    """Whether a valve is closed. A launch line writes the property as the
+    text `true`/`false` and a set_property writes a bool; both are answers."""
+    value = gate.get_property("drop")
+    if isinstance(value, str):
+        return value.strip().lower() in ("true", "1", "yes")
+    return bool(value)
+
+
+def consumers_of(tee):
+    """The tee's src pads -- one per output branch composed into the launch
+    line, one per recording currently hung on it. Read from the element's own
+    pad list rather than a counter, so a released request pad is gone at
+    once."""
+    pads = getattr(tee, "srcpads", None)
+    if pads is None:
+        pads = [pad for pad in getattr(tee, "pads", {}).values()
+                if pad.get_name().startswith("src")] if hasattr(tee, "pads") else []
+    return list(pads)
+
 def name_of(element):
     try:
         return element.get_name()
@@ -1070,25 +1146,52 @@ def negotiated_shape(pairs):
 
 # -- the process ------------------------------------------------------------
 
-def watch_progress(main, now=time.monotonic, pause=time.sleep):
+def watch_progress(expected, now=time.monotonic, pause=time.sleep):
     """A live process with no encoded frames is not a running video stream.
 
-    Read the atomic counter without taking its probe lock: the streaming
+    `expected()` names the branches that must be delivering frames *now*: the
+    preview always (R-VID-13), and `main` only while its gate is open
+    (R-VID-21) -- a gated full-rate encode delivers nothing on purpose, and a
+    watchdog that counted that as a stall would restart a healthy camera every
+    fifteen seconds. Each branch is judged on its own: fifteen seconds of
+    nothing before its first frame, five after, and this host exits so the
+    supervisor restarts it. A branch that stops being expected is forgotten,
+    not judged.
+
+    Read the atomic counters without taking their probe locks: the streaming
     thread itself may be stuck in a GStreamer call while holding that lock.
     Do not set pipeline state here; teardown is the operation that may be
     deadlocked. Exiting releases this encoder's resources for the supervisor.
     """
-    count = main.count
-    changed = now()
-    seen = count > 0
+    if not callable(expected):
+        # One branch, watched for ever: the shape every caller before the
+        # gate existed used, and the one the feeder's own test still uses.
+        branch = expected
+        expected = lambda: [branch]  # noqa: E731
+    # Keyed by identity: a branch object need not be hashable to be watched.
+    marks = {}
+
+    def observe(branches):
+        for branch in branches:
+            count = branch.count
+            held = marks.get(id(branch))
+            if held is None or count != held[0]:
+                marks[id(branch)] = (count, now(), count > 0 or (held is not None and held[2]))
+            elif now() - held[1] >= (5 if held[2] else 15):
+                note('encoded video stopped progressing; restarting the pipeline host')
+                os._exit(1)
+
+    # The first mark is taken now, before the first pause: the fifteen seconds
+    # a branch has to deliver its first frame are counted from the start.
+    observe(expected())
     while True:
         pause(0.5)
-        current = main.count
-        if current != count:
-            count, changed, seen = current, now(), True
-        elif now() - changed >= (5 if seen else 15):
-            note('encoded video stopped progressing; restarting the pipeline host')
-            os._exit(1)
+        watched = expected()
+        observe(watched)
+        alive = set(id(branch) for branch in watched)
+        for key in list(marks):
+            if key not in alive:
+                del marks[key]
 
 
 def watch_bus(pipeline):
@@ -1184,7 +1287,15 @@ def main(args):
             "claim would be one this program could not witness; it is left to "
             "gst-launch-1.0" % MAIN_TEE)
 
-    threading.Thread(target=watch_progress, args=(host.main,), daemon=True).start()
+    def expected():
+        """The preview when it exists, and `main` while its gate is open --
+        or `main` alone on a pipeline with neither gate nor preview."""
+        branches = [host.preview] if host.preview.pad is not None else []
+        if host.gate_open() or not branches:
+            branches.append(host.main)
+        return branches
+
+    threading.Thread(target=watch_progress, args=(expected,), daemon=True).start()
     if pipeline.set_state(Gst.State.PLAYING) == Gst.StateChangeReturn.FAILURE:
         die("that pipeline will not play")
 

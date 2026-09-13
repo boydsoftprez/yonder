@@ -3,6 +3,7 @@ import { describe, expect, it } from "vitest";
 import {
   compose, encodeControl, encodesIn, encoderFor, previewCaps, refuse, scalesInEncoder,
   ENCODE_ELEMENT, PREVIEW_CAPS_ELEMENT, QUEUE,
+  MAIN_GATE,
 } from "./pipeline.js";
 import { present, noCapabilities, captureSizes } from "./capability.js";
 import type { ControlRange } from "./capability.js";
@@ -737,5 +738,37 @@ describe('stream color processing', () => {
     expect(adjusted.join(' ')).toContain('videobalance name=image-balance brightness=0.1 contrast=1.1 saturation=1.15 hue=0.05 !');
     expect(adjusted.indexOf('videobalance')).toBeLessThan(adjusted.indexOf('name=raw'));
     for (const token of ['queue', 'jpegdec', 'v4l2h264enc']) expect(adjusted.filter(t => t === token)).toHaveLength(base.filter(t => t === token).length);
+  });
+});
+
+describe("the gate before the full-rate encode (R-VID-21, K-70)", () => {
+  const gateOf = (argv: readonly string[]) => {
+    const at = argv.indexOf(`name=${MAIN_GATE}`);
+    return at < 1 ? null : { kind: argv[at - 1], drop: argv[at + 1], next: argv.slice(at + 2, at + 6) };
+  };
+
+  it("starts closed when no output is enabled, immediately before the encoder", () => {
+    for (const outputs of [[], [{ ...rtspOutput, enabled: false }]]) {
+      const gate = gateOf(compose({ ...opts, camera: { ...CAMERA, outputs } }));
+      expect(gate).not.toBeNull();
+      expect(gate!.kind).toBe("valve");
+      expect(gate!.drop).toBe("drop=true");
+      // The very next element is the full-rate encoder: nothing else pays for a dropped frame.
+      expect(gate!.next[0]).toBe("!");
+      expect(gate!.next.slice(1)).toContain(`name=${ENCODE_ELEMENT.stream}`);
+    }
+  });
+
+  it("starts open when an output is enabled", () => {
+    const gate = gateOf(compose({ ...opts, camera: { ...CAMERA, outputs: [rtspOutput] } }));
+    expect(gate?.drop).toBe("drop=false");
+  });
+
+  it("never stands between the capture and the preview", () => {
+    const argv = compose({ ...opts, camera: { ...CAMERA, outputs: [] } });
+    const line = argv.join(" ");
+    const preview = line.indexOf(`name=${ENCODE_ELEMENT.preview}`);
+    const branch = line.lastIndexOf("raw.", preview);
+    expect(line.slice(branch, preview)).not.toContain(MAIN_GATE);
   });
 });

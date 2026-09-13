@@ -757,6 +757,40 @@ describe("the daemon serves what M3a assembles", () => {
     }
   });
 
+  it("answers /modem/state from a reading a few seconds old rather than forking again (K-70)", async () => {
+    const seen: string[][] = [];
+    // A clock moved by hand whose timers never fire: only the memo's own
+    // reading of `now` matters here, and no periodic reader may add to `seen`.
+    let t = 0;
+    let next = 1;
+    const clock: Clock = {
+      now: () => t,
+      setTimer: () => next++,
+      clearTimer: () => {},
+    };
+    const server = await startServer({
+      socketPath, configPath, journalPath, renderers: [noop], secretsPath,
+      runner: boardRunner(seen), counters: noCounters, clock,
+    });
+    try {
+      seen.length = 0;
+      // The arming write (R-CEL-10) is not a read and is not counted.
+      const reads = () => seen.filter((argv) => argv[0] === "mmcli" && !argv.some((a) => a.startsWith("--signal-setup"))).length;
+      expect((await call(socketPath, "GET", "/modem/state")).status).toBe(200);
+      const first = reads();
+      expect(first).toBeGreaterThan(0);
+
+      expect((await call(socketPath, "GET", "/modem/state")).status).toBe(200);
+      expect(reads()).toBe(first);
+
+      t = 3_000;
+      expect((await call(socketPath, "GET", "/modem/state")).status).toBe(200);
+      expect(reads()).toBe(first * 2);
+    } finally {
+      await server.close();
+    }
+  });
+
   /**
    * R-CEL-13, at the socket rather than in the unit that decides it.
    *

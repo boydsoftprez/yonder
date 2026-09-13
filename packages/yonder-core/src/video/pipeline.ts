@@ -243,6 +243,12 @@ function previewSize(preview: Camera["preview"]): { width: number; height: numbe
  * addressed to an element that is not there does nothing and says nothing.
  */
 export const ENCODE_ELEMENT = { stream: "enc-stream", preview: "enc-preview" } as const;
+
+/**
+ * The valve in front of the full-rate encode (R-VID-21). `drop=true` in the
+ * launch line when no output is enabled; the host flips it for a recording.
+ */
+export const MAIN_GATE = "main-gate";
 export type EncodeName = keyof typeof ENCODE_ELEMENT;
 
 /**
@@ -505,7 +511,18 @@ export function compose(opts: ComposeOptions): string[] {
   // R-VID-13/16, R-CAM-17: preview remains live with no enabled full-rate
   // output and after the recorder releases main's last request pad. The
   // host's sink-pad probe observes traffic but is not a downstream consumer.
-  push("raw.", LINK, ...QUEUE, LINK, ...encode(main, "stream", camera.bitrate_kbps, null), LINK,
+  //
+  // R-VID-21: the full-rate encode runs only while something consumes it. A
+  // gate before the encoder starts closed when no output is enabled, so the
+  // frames are dropped before they cost anything — measured on the Radxa
+  // bench board, a 1080p30 branch nobody consumed was a quarter of a core in
+  // frame copies and encoder handoff (K-70). The host opens the gate the
+  // moment a recording attaches to `main` and closes it again when the last
+  // consumer leaves; an enabled output starts it open, and the preview is
+  // never behind it.
+  const consumed = camera.outputs.some((o) => o.enabled);
+  push("raw.", LINK, ...QUEUE, LINK, "valve", `name=${MAIN_GATE}`, `drop=${consumed ? "false" : "true"}`, LINK,
+    ...encode(main, "stream", camera.bitrate_kbps, null), LINK,
     parser(camera.codec), LINK, "tee", "name=main", "allow-not-linked=true");
   // A disabled output contributes no branch at all (R-VID-16) — not a branch
   // that opens a socket and sits muted, which is a different claim to an

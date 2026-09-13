@@ -26,6 +26,14 @@ SD image or a claim of physical flight acceptance.
   consistency check; configuration schema version remains `1`.
 - Recovered telemetry/installer fixes, updated browser fixtures and reviewed
   macOS/Linux layout references.
+- Keep the daemon's main thread free for telemetry on the Radxa bench board: camera probes are
+  reused between sweeps, polled modem, network and mesh readings are memoised for a few seconds,
+  ZeroTier state is read concurrently, and a missing `vcgencmd` is asked once (K-70, R-CAM-24).
+- The full-rate encode runs only while an output or a recording consumes it; a gate before the
+  encoder starts closed when no output is enabled and the pipeline host opens it for a recording
+  (R-VID-21, K-70).
+- The Pocket 2's live view is drained but neither packed nor decoded while nothing consumes it;
+  its native size and rate are observed on each USB link before it is set aside (R-VID-22, K-70).
 - Reconcile PR #7: recover two-camera/gimbal browser coverage, shared viewer
   validation and missing video requirements; repair Stills status delivery
   and narrow camera controls.
