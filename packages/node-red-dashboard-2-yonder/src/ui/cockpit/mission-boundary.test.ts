@@ -10,6 +10,16 @@ const snapshot={identity:{autopilot:3},telemetry:{},mission:{items:[home,item],r
 describe('production mission boundaries',()=>{
  it('excludes the aircraft home from authored items but preserves it on upload',()=>{const mission=aircraftMission(snapshot);expect(mission.items).toHaveLength(1);expect(mission.items[0]).toMatchObject({lat:35.01,lon:-84.02,alt:100});expect(missionWire(mission,snapshot)).toEqual([home,item])});
  it('does not erase sequence zero on an unknown autopilot',()=>{expect(aircraftMission({...snapshot,identity:{autopilot:99}}).items).toHaveLength(2)});
+ it('uses live controller home with cached mission content without rewriting authored items',()=>{
+  const original=structuredClone(snapshot),reported={lat:35.00003,lon:-84.00002,alt:282.17};
+  const state={...snapshot,telemetry:{homePosition:reported}};
+  const mission=aircraftMission(state),wire=missionWire(mission,state);
+  expect(mission.home).toEqual(reported);
+  expect(mission.homeRecord).toEqual({...home,x:reported.lat,y:reported.lon,z:reported.alt});
+  expect(wire).toEqual([{...home,x:reported.lat,y:reported.lon,z:reported.alt},item]);
+  expect(snapshot).toEqual(original);
+  expect(aircraftMission({...state,telemetry:{homePosition:{...reported,alt:NaN}}}).homeRecord).toEqual(home);
+ });
  it('preserves local edits and remaps mission jumps without changing the snapshot',()=>{const mission=aircraftMission(snapshot);mission.items.push({...mission.items[0],seq:2,command:177,frame:2,params:[1,2,0,0]});const changed=editMission(mission,{kind:'insert',afterSeq:null,item:createMissionItem(16,{lat:35,lon:-84,alt:80})});expect(changed.items.find(x=>x.command===177).params[0]).toBe(2);expect(snapshot.mission.items).toEqual([home,item])});
  it('retains all 55 parameterized command forms',()=>{expect(MISSION_COMMANDS).toHaveLength(55);for(const c of MISSION_COMMANDS){const value=createMissionItem(c.id,{lat:35,lon:-84,alt:100});expect(value.command).toBe(c.id);expect(Array.isArray(validateMissionItem(value).errors)).toBe(true)}});
  it('round trips mission coordinates and datums through WPL',()=>{const mission=aircraftMission(snapshot),text=exportWpl(mission),parsed=parseMission(text,'mission.waypoints');expect(parsed.items).toEqual(mission.items);expect(parsed.home).toEqual(mission.home)});

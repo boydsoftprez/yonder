@@ -9,6 +9,7 @@
 : "${YONDER_SEEKER_BOOT_OVERLAY_DIR:=${YONDER_SEEKER_ROOT}/boot/overlay-user}"
 : "${YONDER_SEEKER_LIB_DIR:=${YONDER_SEEKER_ROOT}/usr/local/lib/yonder-seekerhd}"
 : "${YONDER_SEEKER_SHARE_DIR:=${YONDER_SEEKER_ROOT}/usr/local/share/yonder-seekerhd}"
+: "${YONDER_SEEKER_STATE_DIR:=${YONDER_SEEKER_ROOT}/var/lib/yonder/seekerhd}"
 : "${YONDER_SEEKER_UNIT_DIR:=${YONDER_SEEKER_ROOT}/etc/systemd/system}"
 : "${YONDER_SEEKER_PROC_COMPATIBLE:=${YONDER_SEEKER_ROOT}/proc/device-tree/compatible}"
 : "${YONDER_SEEKER_ARMBIAN_ENV:=${YONDER_SEEKER_ROOT}/boot/armbianEnv.txt}"
@@ -205,6 +206,126 @@ seekerhd_validate_overlay_stack() {
     log "validated the SeekerHD overlay with the ZERO 3W base tree and UART overlay"
 }
 
+# AIQ loads its initial tuning file through the installed absolute path, but
+# live profile changes replace that file atomically.  On protected images the
+# share tree is on the read-only system filesystem while /var/lib/yonder is
+# projected from durable state before services start.  Keep the immutable
+# factory copy beside the symlink so an interrupted maintenance migration has
+# a visible recovery input rather than silently reseeding an operator choice.
+seekerhd_active_iq_path() {
+    printf '%s\n' "$YONDER_SEEKER_SHARE_DIR/iqfiles/imx462_IMX462_default.json"
+}
+
+seekerhd_state_iq_dir() {
+    printf '%s\n' "$YONDER_SEEKER_STATE_DIR/iqfiles"
+}
+
+seekerhd_provision_active_iq() {
+    spi_seed=$1
+    spi_image_mode=$2
+    spi_dir="$YONDER_SEEKER_SHARE_DIR/iqfiles"
+    spi_factory="$YONDER_SEEKER_SHARE_DIR/iqfiles.factory"
+    spi_active=$(seekerhd_active_iq_path)
+
+    if [ "$DRY_RUN" = 1 ]; then
+        log "would validate and provision the durable SeekerHD active IQ path"
+        return 0
+    fi
+
+    # Inspect links before considering a seed write.  In particular, a
+    # dangling or unexpected link must never redirect an image seed into an
+    # arbitrary location just because IMAGE_MODE requests the factory profile.
+    if [ -L "$spi_dir" ]; then
+        seekerhd_migrate_active_iq
+        return 0
+    fi
+    if [ ! -e "$spi_dir" ]; then
+        if [ -d "$spi_factory" ] && [ ! -L "$spi_factory" ]; then
+            seekerhd_migrate_active_iq
+            return 0
+        fi
+        [ ! -e "$spi_factory" ] \
+            || die "SeekerHD IQ factory backup exists without a resumable migration"
+        run mkdir "$spi_dir"
+        run chmod 0755 "$spi_dir"
+    fi
+    [ -d "$spi_dir" ] && [ ! -L "$spi_dir" ] \
+        || die "SeekerHD IQ directory is not a regular directory"
+    [ ! -e "$spi_factory" ] \
+        || die "SeekerHD IQ factory backup already exists while the live directory remains"
+    if [ "$spi_image_mode" = 1 ] || [ ! -s "$spi_active" ]; then
+        run install -m 0644 "$spi_seed" "$spi_active"
+    else
+        log "preserving the live board's active SeekerHD profile"
+    fi
+    seekerhd_migrate_active_iq
+}
+
+seekerhd_migrate_active_iq() {
+    smi_dir="$YONDER_SEEKER_SHARE_DIR/iqfiles"
+    smi_factory="$YONDER_SEEKER_SHARE_DIR/iqfiles.factory"
+    smi_state_dir=$(seekerhd_state_iq_dir)
+    smi_active=$(seekerhd_active_iq_path)
+    smi_state_active="$smi_state_dir/imx462_IMX462_default.json"
+    smi_link=/var/lib/yonder/seekerhd/iqfiles
+
+    if [ -L "$smi_dir" ]; then
+        [ "$(readlink "$smi_dir")" = "$smi_link" ] \
+            || die "SeekerHD IQ directory links somewhere other than durable Yonder state"
+        [ -d "$smi_state_dir" ] && [ ! -L "$smi_state_dir" ] && [ -s "$smi_state_active" ] \
+            || die "SeekerHD IQ link has no durable active tuning file"
+        return 0
+    fi
+
+    # Complete only the intentional, recoverable interruption after the
+    # immutable tree was renamed but before its replacement symlink appeared.
+    if [ ! -e "$smi_dir" ] && [ -d "$smi_factory" ] && [ ! -L "$smi_factory" ]; then
+        [ -d "$smi_state_dir" ] && [ ! -L "$smi_state_dir" ] && [ -s "$smi_state_active" ] \
+            || die "SeekerHD IQ migration is incomplete without durable tuning"
+        run ln -s "$smi_link" "$smi_dir"
+        return 0
+    fi
+
+    [ -d "$smi_dir" ] && [ ! -L "$smi_dir" ] \
+        || die "SeekerHD IQ directory is not a regular directory"
+    [ ! -e "$smi_factory" ] \
+        || die "SeekerHD IQ factory backup already exists while the live directory remains"
+    smi_state_parent=${smi_state_dir%/iqfiles}
+    if [ -e "$smi_state_parent" ]; then
+        [ -d "$smi_state_parent" ] && [ ! -L "$smi_state_parent" ] \
+            || die "SeekerHD durable state parent is not a regular directory"
+    else
+        run mkdir -p "$smi_state_parent"
+        run chmod 0755 "$smi_state_parent"
+    fi
+    if [ -e "$smi_state_dir" ]; then
+        [ -d "$smi_state_dir" ] && [ ! -L "$smi_state_dir" ] \
+            || die "SeekerHD durable IQ directory is not a regular directory"
+    else
+        run mkdir "$smi_state_dir"
+        run chmod 0755 "$smi_state_dir"
+    fi
+    [ -s "$smi_active" ] || die "SeekerHD source active IQ file is missing"
+    if [ -s "$smi_state_active" ]; then
+        log "preserving the durable active SeekerHD profile"
+    else
+        run install -m 0644 "$smi_active" "$smi_state_active.new"
+        run cmp "$smi_active" "$smi_state_active.new"
+        run mv "$smi_state_active.new" "$smi_state_active"
+    fi
+    # The root topology changes next.  Make the copied (or preserved) active
+    # file durable first, so a maintenance interruption keeps a complete
+    # source for the recognised factory-directory recovery path.
+    run sync -f "$smi_state_active"
+    run sync -f "$smi_state_dir"
+    run mv "$smi_dir" "$smi_factory"
+    run ln -s "$smi_link" "$smi_dir"
+    [ -L "$smi_dir" ] && [ "$(readlink "$smi_dir")" = "$smi_link" ] \
+        || die "SeekerHD durable IQ symlink was not installed"
+    [ -s "$smi_state_active" ] \
+        || die "SeekerHD active IQ file was lost while moving it to durable state"
+}
+
 seekerhd_verify_install() {
     svi_kernels=$(seekerhd_require_kernel_headers)
     seekerhd_require_notifier_blacklist_support
@@ -234,7 +355,6 @@ seekerhd_verify_install() {
         "$YONDER_SEEKER_LIB_DIR/prepare.py" \
         "$YONDER_SEEKER_PROFILE_BIN" \
         "$YONDER_SEEKER_MODULES_LOAD_CONF" \
-        "$YONDER_SEEKER_SHARE_DIR/iqfiles/imx462_IMX462_default.json" \
         "$YONDER_SEEKER_SHARE_DIR/profiles/normal-light.json" \
         "$YONDER_SEEKER_SHARE_DIR/profiles/low-light.json" \
         "$YONDER_SEEKER_SHARE_DIR/profiles/legacy-low-light.json" \
@@ -267,11 +387,43 @@ seekerhd_verify_install() {
         || die "$svi_core_dropin makes camera success a requirement for core startup"
     grep -qxF 'mode linear' "$YONDER_SEEKER_SHARE_DIR/SOURCES" \
         || die "the installed SeekerHD runtime does not record the normal linear mode"
+    svi_iq_dir="$YONDER_SEEKER_SHARE_DIR/iqfiles"
+    svi_state_iq_dir=$(seekerhd_state_iq_dir)
+    [ -L "$svi_iq_dir" ] && [ "$(readlink "$svi_iq_dir")" = /var/lib/yonder/seekerhd/iqfiles ] \
+        || die "the active SeekerHD IQ directory is not linked to durable Yonder state"
+    [ -d "$YONDER_SEEKER_SHARE_DIR/iqfiles.factory" ] && [ ! -L "$YONDER_SEEKER_SHARE_DIR/iqfiles.factory" ] \
+        || die "the immutable SeekerHD IQ factory backup is missing"
+    [ -d "$svi_state_iq_dir" ] && [ ! -L "$svi_state_iq_dir" ] \
+        || die "the durable SeekerHD IQ directory is missing"
+    svi_expected_uid=0
+    # Staged-root tests run without privilege on the build host. Production
+    # runs in the target root and always retains the root-owner requirement.
+    if [ -n "$YONDER_SEEKER_ROOT" ]; then
+        svi_expected_uid=${YONDER_SEEKER_TEST_UID:-0}
+    fi
+    YONDER_SEEKER_VERIFY_ACTIVE="$svi_state_iq_dir/imx462_IMX462_default.json" \
+        YONDER_SEEKER_VERIFY_EXPECTED_UID="$svi_expected_uid" python3 - <<'PY'
+import os
+import stat
+
+path = os.environ['YONDER_SEEKER_VERIFY_ACTIVE']
+expected_uid = int(os.environ['YONDER_SEEKER_VERIFY_EXPECTED_UID'])
+info = os.lstat(path)
+if not stat.S_ISREG(info.st_mode):
+    raise SystemExit('the durable SeekerHD active IQ file is not regular')
+if info.st_uid != expected_uid:
+    raise SystemExit('the durable SeekerHD active IQ file is not owned by root')
+if info.st_mode & 0o022:
+    raise SystemExit('the durable SeekerHD active IQ file is writable by group or other')
+if info.st_size <= 0 or info.st_size > 16 * 1024 * 1024:
+    raise SystemExit('the durable SeekerHD active IQ file has an invalid size')
+PY
     # The manifest is the generator's independently recorded content map.
     # Verify all named profiles, then ensure a newly built image begins in
     # the normal linear profile. Live reinstalls preserve an operator's
     # current profile and therefore intentionally skip the final comparison.
     YONDER_SEEKER_VERIFY_SHARE="$YONDER_SEEKER_SHARE_DIR" \
+        YONDER_SEEKER_VERIFY_ACTIVE="$svi_state_iq_dir/imx462_IMX462_default.json" \
         YONDER_SEEKER_VERIFY_IMAGE="$IMAGE_MODE" python3 - <<'PY'
 import hashlib
 import json
@@ -287,7 +439,7 @@ for name in ('normal-light', 'low-light', 'legacy-low-light'):
     if actual != expected:
         raise SystemExit(f'{name} profile is {actual}, expected {expected}')
 if os.environ['YONDER_SEEKER_VERIFY_IMAGE'] == '1':
-    active = (root / 'iqfiles/imx462_IMX462_default.json').read_bytes()
+    active = Path(os.environ['YONDER_SEEKER_VERIFY_ACTIVE']).read_bytes()
     normal = (root / 'profiles/normal-light.json').read_bytes()
     if active != normal:
         raise SystemExit('new image does not start with the normal-light profile')

@@ -1,5 +1,7 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 // R-FLT-10 / R-UI-12: user-guide walkthrough of the production Vue surfaces.
+// PFD settings, the flight director and Map, terrain & data are reached through the
+// header's Display menu (R-FLT-25); the cockpit has no PFD Menu or Display & data button.
 // Fixture mode only: aircraft HTTP is blocked, sends are collected in memory.
 import {chromium} from 'playwright';
 import assert from 'node:assert/strict';
@@ -24,6 +26,7 @@ async function shot(name,element=page){await element.screenshot({path:dir+name+'
 async function missionControls(){const regular=button('Mission controls');await (await regular.isVisible()?regular:button('Mission actions')).click()}
 async function close(){await page.keyboard.press('Escape');}
 async function calls(){return page.evaluate(()=>window.cockpitFixture.calls)}
+async function mapTerrainData(){await button('Display menu').click();await dialog().getByRole('button',{name:/^Map, terrain & data/}).click()}
 async function reviewCancel(){await page.getByRole('dialog',{name:'Review aircraft command',exact:true}).waitFor();await button('Cancel command review').click()}
 try{
  await page.goto(base);await page.getByRole('main').waitFor();
@@ -36,13 +39,13 @@ try{
   assert.equal((await calls()).length,0);
  });
  await check('Display units, transparency, strip and director controls',async()=>{
-  await button('PFD Menu').click();await shot('pfd-menu',dialog());
+  await button('Display menu').click();await shot('display-menu',dialog());await dialog().getByRole('button',{name:/^PFD settings/}).click();await shot('pfd-menu',dialog());
   await page.getByRole('button',{name:/^Attitude & display/}).click();
   await label('Speed units').selectOption('mph');await label('Altitude units').selectOption('m');await label('Vertical speed units').selectOption('mps');
   await shot('display-units',dialog());await close();
   assert.match(await page.locator('.pfd-svg').textContent(),/MPH/);
   await button('Attitude and display settings').click();await label('Speed units').selectOption('kt');await label('Altitude units').selectOption('ft');await label('Vertical speed units').selectOption('fpm');await close();
-  await button('FD').click();await label('Flight director style').selectOption('crossbar');await shot('flight-director',dialog());await label('Flight director style').selectOption('vbar');await close();
+  await button('Display menu').click();await dialog().getByRole('button',{name:/^Flight director/}).click();await label('Flight director style').selectOption('crossbar');await shot('flight-director',dialog());await label('Flight director style').selectOption('vbar');await close();
   for(const [hotspot,name] of [['Wind display settings','wind'],['Slip and skid indicator settings','slip-turn']]){await button(hotspot).click();await shot(name,dialog());await close()}
  });
  await check('All persistent flight controls reach review; cancelling never sends',async()=>{
@@ -76,7 +79,7 @@ try{
  });
  await check('Mission file export/import and arbitrary touch waypoint',async()=>{
   await missionControls();const download=page.waitForEvent('download');await button('Export .waypoints').click();const file=await download;const text=await readFile(await file.path(),'utf8');assert.match(text,/QGC WPL 110/);await close();
-  await button('Display & data').click();const chooser=page.waitForEvent('filechooser');await button('Import WPL / QGC plan').click();await(await chooser).setFiles({name:'guide-export.waypoints',mimeType:'text/plain',buffer:Buffer.from(text)});await close();
+  await mapTerrainData();const chooser=page.waitForEvent('filechooser');await button('Import WPL / QGC plan').click();await(await chooser).setFiles({name:'guide-export.waypoints',mimeType:'text/plain',buffer:Buffer.from(text)});await close();
   await missionControls();await page.getByRole('button',{name:/Add waypoint on map/}).click();await page.locator('.leaflet-container').click({position:{x:220,y:160}});await label('Alt parameter 7').fill('300');await button('Add to draft').click();
   await missionControls();await button('Undo edit').click();await close();
   assert.equal((await calls()).length,0);
@@ -96,22 +99,14 @@ try{
   await page.locator('.cockpit-map-pane footer button').nth(1).click();await shot('traffic',dialog());await close();
  });
  await check('Data setup, camera-unavailable fallback and offline states',async()=>{
-  await button('Display & data').click();await page.getByRole('group',{name:'Connection & offline data',exact:true}).evaluate(el=>el.scrollIntoView({block:'start'}));await shot('data-connection',dialog());
+  await mapTerrainData();await page.getByRole('group',{name:'Connection & offline data',exact:true}).evaluate(el=>el.scrollIntoView({block:'start'}));await shot('data-connection',dialog());
   await page.getByRole('combobox',{name:/^Background/}).selectOption('camera');await close();await button('Use synthetic terrain').click();
-  await button('Display & data').click();await label('Public data connection').selectOption('offline');await close();
+  await mapTerrainData();await label('Public data connection').selectOption('offline');await close();
   await button('Return to full PFD').click();await button('Open flight planning profile').click();await shot('profile-unavailable');
   await button('Waypoints').click();await button('Return to full PFD').click();
   await button('Aircraft and command status').click();await shot('aircraft-status',dialog());await close();
  });
- // K-69: this check has never run as part of `npm run cockpit:guide`. Checks
- // above it press `PFD Menu` (line 38) and `Display & data` (79, 99, 101),
- // neither of which exists in `src/ui` — and neither did at `ce3e449`, before
- // this work started — so the run stops before reaching here. The four images
- // it writes were made by running these steps from a temporary harness against
- // the same fixture server, which is what `docs/images/cockpit/manifest.json`
- // records as `source: "fixture-harness"`. Repair the selectors above (the
- // current path is `Display menu` -> `Map, terrain & data`, used below) and
- // this becomes a guide capture again.
+ // K-69: the header Display routes above let the complete guide reach this camera check.
  await check('The camera fills the flight display, and the Camera control opens/closes its window (R-FLT-29, K-68)',async()=>{
   await page.evaluate(camera=>window.cockpitFixture.set(camera),fixtureCamera());
   await button('Display menu').click();await page.getByRole('button',{name:/^Map, terrain & data/}).click();

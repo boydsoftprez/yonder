@@ -107,7 +107,7 @@ export class VehicleService {
       const home = this.telemetry.snapshot(now, true, this.identity).homePosition, first = this.mission.items[0];
       if (home && first?.seq === 0 && first.command === 16 && missionFrame(first.frame) === 0) {
         this.mission.items[0] = { ...first, x: home.lat, y: home.lon, z: home.alt };
-        this.mission.revision = missionRevision(this.mission.items);
+        this.mission.revision = missionRevision(this.mission.items, { ardupilotHome: true });
       }
     }
     if ((m instanceof common.MissionAck && m.type === 0 || m instanceof common.MissionRequestInt || m instanceof common.MissionRequest) && m.missionType === 0 && !this.recipient(m)) this.changedMission("Another ground station is changing the vehicle mission; download it again");
@@ -193,7 +193,7 @@ export class VehicleService {
     if (this.missionUncertain && ["mission-upload", "mission-clear"].includes(kind)) return reject(409, "Prior transfer outcome is unknown; download the vehicle mission before another upload");
     const steps = this.steps(request.action);
     if (steps.some(s => this.uncertain.has(s.command))) return reject(409, "A previous command of this type has an unknown outcome; reconnect and review aircraft state before repeating it");
-    const summary = action.kind === "mission-upload" ? { kind: "mission-upload" as const, itemCount: action.items.length, revision: missionRevision(action.items) } : structuredClone(action);
+    const summary = action.kind === "mission-upload" ? { kind: "mission-upload" as const, itemCount: action.items.length, revision: missionRevision(action.items, { ardupilotHome: isPlane(this.identity) }) } : structuredClone(action);
     const now = this.now(), op: VehicleOperation = { id: request.id, sessionId: request.sessionId, vehicleGeneration: request.vehicleGeneration, action: summary, createdAt: now, sentAt: null, updatedAt: now, state: "queued", ack: null, effect: { state: "waiting", at: null, message: "Awaiting operator-requested operation" }, message: "Queued", steps: [] };
     this.operations.push(op); this.requests.set(key, fingerprint);
     const work: Work = { op, steps, step: 0, stepSent: false, sentSequence: this.receiveSequence, stage: "command", deadline: now + COMMAND_MS, absoluteDeadline: now + (kind === "stream-setup" ? Math.max(120_000, (steps.length + 1) * COMMAND_MS) : 120_000),
@@ -423,7 +423,7 @@ export class VehicleService {
     const issues = work.expected === null ? [] : verifyMission(work.expected, items);
     // The final protocol ACK must leave before the operation reservation is released.
     this.send(Object.assign(new common.MissionAck(), { type: 0, missionType: 0 }), work, () => {
-      this.mission = { ...this.mission, items, revision: missionRevision(items), synchronization: "verified", transfer: null, message: issues.length ? "Downloaded actual vehicle mission differs from requested upload" : "Vehicle mission downloaded and verified" };
+      this.mission = { ...this.mission, items, revision: missionRevision(items, { ardupilotHome: isPlane(this.identity) }), synchronization: "verified", transfer: null, message: issues.length ? "Downloaded actual vehicle mission differs from requested upload" : "Vehicle mission downloaded and verified" };
       this.missionUncertain = false;
       if (issues.length) this.finish(work, "accepted", issues.join("; "), "mismatch");
       else this.finish(work, "observed", work.expected === null ? "Complete vehicle mission downloaded" : "Mission accepted and downloaded copy verified; home is the actual vehicle home", "observed");

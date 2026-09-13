@@ -99,14 +99,17 @@ await page.getByLabel('Wind display mode',{exact:true}).selectOption('off');
 await page.getByRole('button',{name:'Close PFD controls'}).click();
 assert.equal(await page.locator('.pfd-wind-display').count(),0);
 await page.reload();assert.equal(await page.locator('.pfd-wind-display').count(),0);
-await page.getByRole('button',{name:'PFD Menu',exact:true}).click();
+// The PFD touch menu and the cockpit palette sit behind the header's Display menu (R-FLT-25).
+await page.getByRole('button',{name:'Display menu',exact:true}).click();await page.getByRole('dialog').last().getByRole('button',{name:/^PFD settings/}).click();
 await page.getByRole('button',{name:'Wind Components · arrow · direction',exact:true}).click();
 await page.getByLabel('Wind display mode',{exact:true}).selectOption('components');
 await page.getByRole('button',{name:'Close PFD controls'}).click();
 await page.getByRole('button',{name:'Mission controls',exact:true}).click();await page.getByRole('button',{name:'Add mission item',exact:false}).click();assert.match(await page.locator('.mission-touch').innerText(),/55/);await page.getByRole('searchbox',{name:'Search mission commands'}).fill('Loiter');await page.screenshot({path:`${artifacts}/catalog.png`});await page.getByRole('button',{name:'Close mission controls'}).click();
-await page.getByRole('button',{name:'Display & data',exact:true}).click();await page.getByLabel('Palette',{exact:true}).selectOption('day');await page.screenshot({path:`${artifacts}/day-settings.png`});await page.getByRole('button',{name:'Close cockpit panel'}).click();await page.screenshot({path:`${artifacts}/day-full.png`});
+await page.getByRole('button',{name:'Display menu',exact:true}).click();await page.getByLabel('Cockpit palette',{exact:true}).selectOption('day');await page.screenshot({path:`${artifacts}/day-settings.png`});await page.getByRole('button',{name:'Close cockpit panel'}).click();
+// Park the pointer: closing the dialog leaves it over the attitude hotspot, whose :hover tint is not a palette rule.
+await page.mouse.move(0,0);await page.screenshot({path:`${artifacts}/day-full.png`});
 assert.equal(await page.locator('.pfd-hotspot').evaluateAll(nodes=>nodes.every(node=>getComputedStyle(node).backgroundColor==='rgba(0, 0, 0, 0)')),true,'day palette must preserve transparent instrument hit regions');
-await page.waitForTimeout(1000);const markerCount=await page.locator('.leaflet-tooltip').count();await page.waitForTimeout(1200);assert.equal(await page.locator('.leaflet-tooltip').count(),markerCount);assert.equal(markerCount,13);
+await page.waitForTimeout(1000);const markerCount=await page.locator('.leaflet-tooltip').count();await page.waitForTimeout(1200);assert.equal(await page.locator('.leaflet-tooltip').count(),markerCount);assert.equal(markerCount,14,'13 numbered waypoints plus the permanent HOME marker');
 await page.getByRole('button',{name:'Expand map',exact:true}).click();
 const ownTrail=page.locator('path.cockpit-own-trail');await ownTrail.waitFor({state:'attached'});
 assert.match(await ownTrail.getAttribute('d'),/L/,'ownship breadcrumb geometry must render');

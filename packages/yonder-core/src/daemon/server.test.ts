@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 import { describe, it, expect, beforeEach, afterEach, vi } from "vitest";
 import { mkdtempSync, mkdirSync, rmSync, statSync, existsSync, writeFileSync, readFileSync } from "node:fs";
-import { request } from "node:http";
+import { createServer, request } from "node:http";
 import { tmpdir } from "node:os";
 import { join, dirname } from "node:path";
 import { fileURLToPath } from "node:url";
@@ -176,20 +176,69 @@ function call(
   method: string,
   path: string,
   body?: unknown,
-): Promise<{ status: number; body: unknown }> {
+  headers?: Record<string, string>,
+): Promise<{ status: number; body: unknown; sent: boolean }> {
   return new Promise((resolve, reject) => {
-    const req = request({ socketPath, method, path }, (res) => {
+    const req = request({ socketPath, method, path, headers }, (res) => {
       const chunks: Buffer[] = [];
       res.on("data", (c: Buffer) => chunks.push(c));
       res.on("end", () => {
         const text = Buffer.concat(chunks).toString("utf8");
-        resolve({ status: res.statusCode ?? 0, body: text === "" ? undefined : JSON.parse(text) });
+        resolve({ status: res.statusCode ?? 0, body: text === "" ? undefined : JSON.parse(text), sent: req.writableFinished });
       });
     });
     req.on("error", reject);
     if (body !== undefined) req.write(typeof body === "string" ? body : JSON.stringify(body));
     req.end();
   });
+}
+
+/**
+ * Keep the final bytes and end-of-stream behind a gate. Node exposes no
+ * acknowledgement that the peer has consumed a Unix-socket write; its write
+ * callback proves the kernel accepted the prefix. Holding the tail for a
+ * bounded turn after that callback makes an early local 413 observable without
+ * leaving a test request open indefinitely.
+ */
+function slowTailCall(socketPath: string, headers?: Record<string, string>) {
+  let responseStarted = false;
+  let resolveResponse!: (value: { status: number; body: unknown; sent: boolean }) => void;
+  let rejectResponse!: (error: Error) => void;
+  const response = new Promise<{ status: number; body: unknown; sent: boolean }>((resolve, reject) => {
+    resolveResponse = resolve;
+    rejectResponse = reject;
+  });
+  const req = request({ socketPath, method: "POST", path: "/apply", headers }, (res) => {
+    responseStarted = true;
+    const chunks: Buffer[] = [];
+    res.on("data", (chunk: Buffer) => chunks.push(chunk));
+    res.on("end", () => {
+      const text = Buffer.concat(chunks).toString("utf8");
+      resolveResponse({ status: res.statusCode ?? 0, body: text === "" ? undefined : JSON.parse(text), sent: req.writableFinished });
+    });
+  });
+  req.on("error", rejectResponse);
+  return {
+    async writePrefix(prefix: string): Promise<void> {
+      await new Promise<void>((resolve, reject) => {
+        const rejectWrite = (error: Error) => { req.off("error", rejectWrite); reject(error); };
+        req.once("error", rejectWrite);
+        req.write(prefix, () => { req.off("error", rejectWrite); resolve(); });
+      });
+    },
+    async expectNoResponseWhileTailHeld(): Promise<void> {
+      await new Promise<void>(resolve => setTimeout(resolve, 50));
+      expect(responseStarted).toBe(false);
+    },
+    async expectResponseWhileTailHeld(): Promise<void> {
+      await new Promise<void>(resolve => setTimeout(resolve, 50));
+      expect(responseStarted).toBe(true);
+    },
+    async finish(tail: string): Promise<{ status: number; body: unknown; sent: boolean }> {
+      req.end(tail);
+      return response;
+    },
+  };
 }
 
 /** A clock the test drives by hand; see the equivalent in watchdog.test.ts. */
@@ -230,6 +279,84 @@ async function flushMicrotasks(): Promise<void> {
 describe("startServer", () => {
   let socketPath: string;
   beforeEach(() => { socketPath = join(dir, "core.sock"); });
+
+  it("gated slow-tail transport observes a response written before end", async () => {
+    const earlySocket = join(dir, "early-response.sock");
+    const early = createServer((req, res) => {
+      req.once("data", () => { res.writeHead(413, { "content-type": "application/json" }); res.end('{"error":"early"}'); });
+    });
+    await new Promise<void>((resolve, reject) => {
+      early.once("error", reject);
+      early.listen(earlySocket, () => { early.off("error", reject); resolve(); });
+    });
+    try {
+      const request = slowTailCall(earlySocket, { connection: "close" });
+      await request.writePrefix("x");
+      await request.expectResponseWhileTailHeld();
+      expect((await request.finish("tail")).status).toBe(413);
+    } finally {
+      await new Promise<void>((resolve, reject) => early.close(error => error === undefined ? resolve() : reject(error)));
+    }
+  });
+
+  it("holds a declared default-cap 413 until the final tail arrives", async () => {
+    const server = await startServer({ socketPath, configPath, journalPath, renderers: [noopRenderer], secretsPath: join(dir, "secrets.yaml"), runner: noopRunner });
+    try {
+      const prefix = "x".repeat(1_048_577), tail = "tail";
+      const request = slowTailCall(socketPath, { "content-length": String(Buffer.byteLength(prefix) + Buffer.byteLength(tail)) });
+      await request.writePrefix(prefix);
+      await request.expectNoResponseWhileTailHeld();
+      const response = await request.finish(tail);
+      expect(response.status).toBe(413);
+      expect(response.sent).toBe(true);
+      expect(response.body).toMatchObject({ error: expect.stringMatching(/size limit.*1048576/i) });
+      expect((await call(socketPath, "GET", "/status")).status).toBe(200);
+    } finally {
+      await server.close();
+    }
+  });
+
+  it("holds a chunked default-cap 413 until the final tail arrives", async () => {
+    const server = await startServer({ socketPath, configPath, journalPath, renderers: [noopRenderer], secretsPath: join(dir, "secrets.yaml"), runner: noopRunner });
+    try {
+      const request = slowTailCall(socketPath);
+      await request.writePrefix("x".repeat(1_048_577));
+      await request.expectNoResponseWhileTailHeld();
+      const response = await request.finish("tail");
+      expect(response.status).toBe(413);
+      expect(response.sent).toBe(true);
+      expect(response.body).toMatchObject({ error: expect.stringMatching(/size limit.*1048576/i) });
+      expect((await call(socketPath, "GET", "/status")).status).toBe(200);
+    } finally {
+      await server.close();
+    }
+  });
+
+  it("passes an exactly default-cap body to its route", async () => {
+    const server = await startServer({ socketPath, configPath, journalPath, renderers: [noopRenderer], secretsPath: join(dir, "secrets.yaml"), runner: noopRunner });
+    try {
+      const prefix = '{"pad":"';
+      const body = `${prefix}${"a".repeat(1_048_576 - Buffer.byteLength(prefix) - 2)}"}`;
+      expect(Buffer.byteLength(body)).toBe(1_048_576);
+      const response = await call(socketPath, "POST", "/apply", body);
+      expect(response.status).toBe(400);
+      expect(JSON.stringify(response.body)).not.toMatch(/size limit/i);
+    } finally {
+      await server.close();
+    }
+  });
+
+  it("keeps narrower route caps and the recovery-preview exception beside the default cap", async () => {
+    const server = await startServer({ socketPath, configPath, journalPath, renderers: [noopRenderer], secretsPath: join(dir, "secrets.yaml"), runner: noopRunner });
+    try {
+      expect((await call(socketPath, "POST", "/owner/state", "x".repeat(8193))).status).toBe(413);
+      expect((await call(socketPath, "POST", "/cockpit/test", "x".repeat(512 * 1024 + 1))).status).toBe(413);
+      const recovery = await call(socketPath, "POST", "/recovery/preview", { archiveBase64: "A".repeat(1_048_577) });
+      expect(recovery.status).not.toBe(413);
+    } finally {
+      await server.close();
+    }
+  });
 
   it("serves diagnostics but denies every persistent route when the root helper fails", async () => {
     const secretsPath = join(dir, "secrets.yaml");

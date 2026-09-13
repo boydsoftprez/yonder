@@ -190,6 +190,143 @@ else
     bad "camera overlay mutation damaged or duplicated the boot overlay list"
 fi
 
+# The protected image keeps /usr read-only and projects /var/lib/yonder from
+# durable state before AIQ starts.  Its installed absolute IQ path must follow
+# that state directory without losing either a new-image seed or an operator's
+# already-selected profile on a later install.
+iq_fresh="$tmp/iq-fresh"
+mkdir -p "$iq_fresh/usr/local/share/yonder-seekerhd"
+printf '%s\n' factory >"$iq_fresh/seed.json"
+if /bin/sh -c '
+    set -eu
+    DRY_RUN=0
+    YONDER_SEEKER_ROOT=$1
+    YONDER_SEEKER_SHARE_DIR=$1/usr/local/share/yonder-seekerhd
+    YONDER_SEEKER_STATE_DIR=$1/var/lib/yonder/seekerhd
+    . "$2/installer/lib/common.sh"; . "$2/installer/lib/seekerhd.sh"
+    seekerhd_provision_active_iq "$1/seed.json" 1
+    [ "$(readlink "$YONDER_SEEKER_SHARE_DIR/iqfiles")" = /var/lib/yonder/seekerhd/iqfiles ]
+    cmp "$YONDER_SEEKER_SHARE_DIR/iqfiles.factory/imx462_IMX462_default.json" \
+        "$YONDER_SEEKER_STATE_DIR/iqfiles/imx462_IMX462_default.json"
+    mkdir -p "$1/state"
+    cp -a "$1/var/lib/yonder" "$1/state/app"
+    cmp "$YONDER_SEEKER_STATE_DIR/iqfiles/imx462_IMX462_default.json" \
+        "$1/state/app/seekerhd/iqfiles/imx462_IMX462_default.json"
+    seekerhd_provision_active_iq "$1/seed.json" 1
+' sh "$iq_fresh" "$REPO" >"$out" 2>&1; then
+    ok "new image active IQ bytes seed the state-app copy through an idempotent absolute symlink"
+else
+    bad "new image active IQ bytes did not seed durable state safely"
+    sed 's/^/      /' "$out"
+fi
+
+iq_preserved="$tmp/iq-preserved"
+mkdir -p "$iq_preserved/usr/local/share/yonder-seekerhd/iqfiles" \
+    "$iq_preserved/var/lib/yonder/seekerhd/iqfiles"
+printf '%s\n' factory >"$iq_preserved/usr/local/share/yonder-seekerhd/iqfiles/imx462_IMX462_default.json"
+printf '%s\n' operator >"$iq_preserved/var/lib/yonder/seekerhd/iqfiles/imx462_IMX462_default.json"
+printf '%s\n' seed >"$iq_preserved/seed.json"
+if /bin/sh -c '
+    set -eu
+    DRY_RUN=0
+    YONDER_SEEKER_ROOT=$1
+    YONDER_SEEKER_SHARE_DIR=$1/usr/local/share/yonder-seekerhd
+    YONDER_SEEKER_STATE_DIR=$1/var/lib/yonder/seekerhd
+    . "$2/installer/lib/common.sh"; . "$2/installer/lib/seekerhd.sh"
+    seekerhd_provision_active_iq "$1/seed.json" 0
+    [ "$(cat "$YONDER_SEEKER_STATE_DIR/iqfiles/imx462_IMX462_default.json")" = operator ]
+    [ "$(cat "$YONDER_SEEKER_SHARE_DIR/iqfiles.factory/imx462_IMX462_default.json")" = factory ]
+' sh "$iq_preserved" "$REPO" >"$out" 2>&1; then
+    ok "existing durable active IQ bytes survive a later installer run"
+else
+    bad "installer replaced an existing durable active IQ file"
+    sed 's/^/      /' "$out"
+fi
+
+iq_conflict="$tmp/iq-conflict"
+mkdir -p "$iq_conflict/usr/local/share/yonder-seekerhd/iqfiles" \
+    "$iq_conflict/usr/local/share/yonder-seekerhd/iqfiles.factory"
+printf '%s\n' live >"$iq_conflict/usr/local/share/yonder-seekerhd/iqfiles/imx462_IMX462_default.json"
+printf '%s\n' backup >"$iq_conflict/usr/local/share/yonder-seekerhd/iqfiles.factory/imx462_IMX462_default.json"
+printf '%s\n' seed >"$iq_conflict/seed.json"
+if /bin/sh -c '
+    set -eu
+    DRY_RUN=0
+    YONDER_SEEKER_ROOT=$1
+    YONDER_SEEKER_SHARE_DIR=$1/usr/local/share/yonder-seekerhd
+    YONDER_SEEKER_STATE_DIR=$1/var/lib/yonder/seekerhd
+    . "$2/installer/lib/common.sh"; . "$2/installer/lib/seekerhd.sh"
+    seekerhd_provision_active_iq "$1/seed.json" 1
+' sh "$iq_conflict" "$REPO" >"$out" 2>&1; then
+    bad "IQ migration accepted conflicting live and factory directories"
+else
+    if [ "$(cat "$iq_conflict/usr/local/share/yonder-seekerhd/iqfiles/imx462_IMX462_default.json")" = live ] \
+            && [ "$(cat "$iq_conflict/usr/local/share/yonder-seekerhd/iqfiles.factory/imx462_IMX462_default.json")" = backup ]; then
+        ok "IQ migration rejects conflicting paths without replacing either input"
+    else
+        bad "IQ migration damaged a conflicting-path fixture"
+    fi
+fi
+
+iq_order="$tmp/iq-order"
+mkdir -p "$iq_order/wrong/usr/local/share/yonder-seekerhd" \
+    "$iq_order/wrong/var/lib/yonder/seekerhd/iqfiles" \
+    "$iq_order/dangling/usr/local/share/yonder-seekerhd" \
+    "$iq_order/resume/usr/local/share/yonder-seekerhd/iqfiles.factory" \
+    "$iq_order/resume/var/lib/yonder/seekerhd/iqfiles"
+printf '%s\n' seed >"$iq_order/seed.json"
+printf '%s\n' operator >"$iq_order/wrong/var/lib/yonder/seekerhd/iqfiles/imx462_IMX462_default.json"
+ln -s /unexpected/iqfiles "$iq_order/wrong/usr/local/share/yonder-seekerhd/iqfiles"
+ln -s /var/lib/yonder/seekerhd/iqfiles "$iq_order/dangling/usr/local/share/yonder-seekerhd/iqfiles"
+printf '%s\n' factory >"$iq_order/resume/usr/local/share/yonder-seekerhd/iqfiles.factory/imx462_IMX462_default.json"
+printf '%s\n' operator >"$iq_order/resume/var/lib/yonder/seekerhd/iqfiles/imx462_IMX462_default.json"
+if /bin/sh -c '
+    set -eu
+    DRY_RUN=0
+    . "$3/installer/lib/common.sh"; . "$3/installer/lib/seekerhd.sh"
+    for name in wrong dangling; do
+        YONDER_SEEKER_ROOT=$1/$name
+        YONDER_SEEKER_SHARE_DIR=$YONDER_SEEKER_ROOT/usr/local/share/yonder-seekerhd
+        YONDER_SEEKER_STATE_DIR=$YONDER_SEEKER_ROOT/var/lib/yonder/seekerhd
+        export YONDER_SEEKER_ROOT YONDER_SEEKER_SHARE_DIR YONDER_SEEKER_STATE_DIR
+        if ( seekerhd_provision_active_iq "$2/seed.json" 1 ); then exit 1; fi
+    done
+    [ "$(cat "$1/wrong/var/lib/yonder/seekerhd/iqfiles/imx462_IMX462_default.json")" = operator ]
+    [ ! -e "$1/dangling/var/lib/yonder/seekerhd/iqfiles/imx462_IMX462_default.json" ]
+    YONDER_SEEKER_ROOT=$1/resume
+    YONDER_SEEKER_SHARE_DIR=$YONDER_SEEKER_ROOT/usr/local/share/yonder-seekerhd
+    YONDER_SEEKER_STATE_DIR=$YONDER_SEEKER_ROOT/var/lib/yonder/seekerhd
+    export YONDER_SEEKER_ROOT YONDER_SEEKER_SHARE_DIR YONDER_SEEKER_STATE_DIR
+    seekerhd_provision_active_iq "$2/seed.json" 1
+    [ "$(readlink "$YONDER_SEEKER_SHARE_DIR/iqfiles")" = /var/lib/yonder/seekerhd/iqfiles ]
+    [ "$(cat "$YONDER_SEEKER_STATE_DIR/iqfiles/imx462_IMX462_default.json")" = operator ]
+    [ "$(cat "$YONDER_SEEKER_SHARE_DIR/iqfiles.factory/imx462_IMX462_default.json")" = factory ]
+' sh "$iq_order" "$iq_order" "$REPO" >"$out" 2>&1; then
+    ok "role provisioning validates wrong or dangling links before seeding and resumes only the recognised migration"
+else
+    bad "role provisioning wrote through an invalid link or failed the recognised migration resume"
+    sed 's/^/      /' "$out"
+fi
+
+iq_dry="$tmp/iq-dry"
+mkdir -p "$iq_dry/usr/local/share/yonder-seekerhd"
+printf '%s\n' seed >"$iq_dry/seed.json"
+if /bin/sh -c '
+    set -eu
+    DRY_RUN=1
+    YONDER_SEEKER_ROOT=$1
+    YONDER_SEEKER_SHARE_DIR=$1/usr/local/share/yonder-seekerhd
+    YONDER_SEEKER_STATE_DIR=$1/var/lib/yonder/seekerhd
+    . "$2/installer/lib/common.sh"; . "$2/installer/lib/seekerhd.sh"
+    seekerhd_provision_active_iq "$1/seed.json" 1
+    [ ! -e "$YONDER_SEEKER_SHARE_DIR/iqfiles" ]
+' sh "$iq_dry" "$REPO" >"$out" 2>&1; then
+    ok "dry-run reports durable IQ provisioning without requiring a staged directory"
+else
+    bad "dry-run durable IQ provisioning attempted or required a filesystem write"
+    sed 's/^/      /' "$out"
+fi
+
 # Post-install verification checks the module for every target-root kernel and
 # checks generated profiles rather than trusting that files were copied.
 root="$tmp/root"
@@ -198,6 +335,7 @@ mkdir -p "$root/lib/modules/6.1.115-vendor-rk35xx/updates/dkms" \
     "$root/boot/overlay-user" "$root/usr/local/lib/yonder-seekerhd" \
     "$root/usr/local/share/yonder-seekerhd/iqfiles" \
     "$root/usr/local/share/yonder-seekerhd/profiles" \
+    "$root/var/lib/yonder/seekerhd" \
     "$root/usr/local/bin" "$root/etc/modules-load.d" "$root/boot" \
     "$root/etc/systemd/system/yonder-core.service.d" \
     "$root/etc/systemd/system/multi-user.target.wants" "$root/usr/src/imx462-yonder-1.0.0"
@@ -280,8 +418,10 @@ if /bin/sh -c '
     YONDER_SEEKER_ARMBIAN_ENV=$1/boot/armbianEnv.txt
     YONDER_SEEKER_MODULES_LOAD_CONF=$1/etc/modules-load.d/yonder-seekerhd.conf
     YONDER_SEEKER_PROFILE_BIN=$1/usr/local/bin/yonder-camera-profile
+    YONDER_SEEKER_TEST_UID=$(id -u)
     . "$2/installer/lib/common.sh"
     . "$2/installer/lib/seekerhd.sh"
+    seekerhd_provision_active_iq "$1/usr/local/share/yonder-seekerhd/iqfiles/imx462_IMX462_default.json" 0
     seekerhd_verify_install
 ' sh "$root" "$REPO" >"$out" 2>&1; then
     ok "post-install verifier covers target kernels, camera assets, profiles and units"
@@ -310,6 +450,43 @@ else
 fi
 printf '%s\n' 'ffff000000000000 t rkisp_clr_unready_dev' \
     >"$root/boot/System.map-6.1.115-vendor-rk35xx"
+trusted_active="$root/var/lib/yonder/seekerhd/iqfiles/imx462_IMX462_default.json"
+mv "$trusted_active" "$trusted_active.saved"
+ln -s imx462_IMX462_default.json.saved "$trusted_active"
+if /bin/sh -c '
+    set -eu
+    DRY_RUN=0 IMAGE_MODE=1 YONDER_TARGET=radxa-zero3w YONDER_SEEKER_ROOT=$1
+    YONDER_SEEKER_MODULES_DIR=$1/lib/modules YONDER_SEEKER_BOOT_OVERLAY_DIR=$1/boot/overlay-user
+    YONDER_SEEKER_LIB_DIR=$1/usr/local/lib/yonder-seekerhd YONDER_SEEKER_SHARE_DIR=$1/usr/local/share/yonder-seekerhd
+    YONDER_SEEKER_STATE_DIR=$1/var/lib/yonder/seekerhd YONDER_SEEKER_UNIT_DIR=$1/etc/systemd/system
+    YONDER_SEEKER_DKMS_SOURCE_DIR=$1/usr/src/imx462-yonder-1.0.0 YONDER_SEEKER_ARMBIAN_ENV=$1/boot/armbianEnv.txt
+    YONDER_SEEKER_MODULES_LOAD_CONF=$1/etc/modules-load.d/yonder-seekerhd.conf YONDER_SEEKER_PROFILE_BIN=$1/usr/local/bin/yonder-camera-profile
+    YONDER_SEEKER_TEST_UID=$(id -u)
+    . "$2/installer/lib/common.sh"; . "$2/installer/lib/seekerhd.sh"; seekerhd_verify_install
+' sh "$root" "$REPO" >"$out" 2>&1; then
+    bad "post-install verification accepted a symlink active IQ leaf"
+else
+    ok "post-install verification rejects a symlink active IQ leaf"
+fi
+rm "$trusted_active"
+mv "$trusted_active.saved" "$trusted_active"
+chmod 0664 "$trusted_active"
+if /bin/sh -c '
+    set -eu
+    DRY_RUN=0 IMAGE_MODE=1 YONDER_TARGET=radxa-zero3w YONDER_SEEKER_ROOT=$1
+    YONDER_SEEKER_MODULES_DIR=$1/lib/modules YONDER_SEEKER_BOOT_OVERLAY_DIR=$1/boot/overlay-user
+    YONDER_SEEKER_LIB_DIR=$1/usr/local/lib/yonder-seekerhd YONDER_SEEKER_SHARE_DIR=$1/usr/local/share/yonder-seekerhd
+    YONDER_SEEKER_STATE_DIR=$1/var/lib/yonder/seekerhd YONDER_SEEKER_UNIT_DIR=$1/etc/systemd/system
+    YONDER_SEEKER_DKMS_SOURCE_DIR=$1/usr/src/imx462-yonder-1.0.0 YONDER_SEEKER_ARMBIAN_ENV=$1/boot/armbianEnv.txt
+    YONDER_SEEKER_MODULES_LOAD_CONF=$1/etc/modules-load.d/yonder-seekerhd.conf YONDER_SEEKER_PROFILE_BIN=$1/usr/local/bin/yonder-camera-profile
+    YONDER_SEEKER_TEST_UID=$(id -u)
+    . "$2/installer/lib/common.sh"; . "$2/installer/lib/seekerhd.sh"; seekerhd_verify_install
+' sh "$root" "$REPO" >"$out" 2>&1; then
+    bad "post-install verification accepted a group-writable active IQ leaf"
+else
+    ok "post-install verification rejects a group-writable active IQ leaf"
+fi
+chmod 0644 "$trusted_active"
 rm -f "$root/lib/modules/6.1.115-vendor-rk35xx/updates/dkms/imx462_yonder.ko"
 if /bin/sh -c '
     set -eu
@@ -323,6 +500,7 @@ if /bin/sh -c '
     YONDER_SEEKER_ARMBIAN_ENV=$1/boot/armbianEnv.txt
     YONDER_SEEKER_MODULES_LOAD_CONF=$1/etc/modules-load.d/yonder-seekerhd.conf
     YONDER_SEEKER_PROFILE_BIN=$1/usr/local/bin/yonder-camera-profile
+    YONDER_SEEKER_TEST_UID=$(id -u)
     . "$2/installer/lib/common.sh"; . "$2/installer/lib/seekerhd.sh"
     seekerhd_verify_install
 ' sh "$root" "$REPO" >"$out" 2>&1; then
