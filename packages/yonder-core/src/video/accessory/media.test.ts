@@ -64,3 +64,31 @@ it('serves a private framed IDR boundary, refuses a second owner, and ends clien
     expect(media.dimensions).toBeNull();
   } finally { client?.destroy(); await media.close(); await rm(root, { recursive: true, force: true }); }
 });
+
+it('counts its consumers, tells the source on every change, and treats a resumed clock as a fresh start (R-VID-22)', async () => {
+  const { mkdtemp, rm } = await import('node:fs/promises');
+  const { tmpdir } = await import('node:os');
+  const { join } = await import('node:path');
+  const { createConnection } = await import('node:net');
+  const { once } = await import('node:events');
+  const { AccessoryMedia } = await import('./media.js');
+  const root = await mkdtemp(join(tmpdir(), 'ym-'));
+  const media = new AccessoryMedia(join(root, 'c.sock'));
+  const seen: number[] = []; media.onClients = () => seen.push(media.consumers);
+  const settle = async (want: number) => { for (let i = 0; i < 200 && media.consumers !== want; i++) await new Promise(r => setTimeout(r, 5)); };
+  let client: ReturnType<typeof createConnection> | undefined;
+  try {
+    await media.start();
+    expect(media.consumers).toBe(0);
+    client = createConnection(media.endpoint); await once(client, 'connect'); await settle(1);
+    expect(media.consumers).toBe(1); expect(seen).toEqual([1]);
+    client.destroy(); await settle(0);
+    expect(seen).toEqual([1, 0]);
+    // Forty-nine seconds of silence the daemon asked for is not a discontinuity once it says so.
+    expect(media.push({ data: Buffer.from([0,0,1,0x41,1]), timestamp: 1000, metadata: 0 })).toBe(true);
+    expect(media.push({ data: Buffer.from([0,0,1,0x41,1]), timestamp: 50_000, metadata: 0 })).toBe(false);
+    media.push({ data: Buffer.from([0,0,1,0x41,1]), timestamp: 50_033, metadata: 0 });
+    media.expectResume();
+    expect(media.push({ data: Buffer.from([0,0,1,0x41,1]), timestamp: 99_000, metadata: 0 })).toBe(true);
+  } finally { client?.destroy(); await media.close(); await rm(root, { recursive: true, force: true }); }
+});

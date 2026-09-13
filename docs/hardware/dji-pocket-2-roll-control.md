@@ -74,3 +74,18 @@ Before that pulse, a full-status read timed out without issuing any motion; the
 initial read timeout was raised to 5 seconds, outside the gesture. Motion request
 timeouts and credentials remain unchanged. All versions' results are preserved
 as measured.
+
+## Coexistence with the video CPU update
+
+The first roll activation was replaced by a separate, completed deployment of
+the video CPU changes. A requested 30-degree check found the public roll
+capability missing and issued no motion. Comparing the runtime files identified
+the replacement: the gimbal files were back at their previous versions, while
+the accessory source contained the new consumer-dependent video forwarding.
+The operator confirmed that deployment was finished.
+
+The roll branch incorporates the CPU changes from `claude/mule-cpu-fix`
+(`385651c`) and retains both behaviors. The combined source regression explicitly
+proves that, after video has been set aside for ten seconds, fresh FPV joint
+feedback still offers roll and admits its public rate request without resuming
+video forwarding. The merge retains the 1°/s limit and all motion checks.

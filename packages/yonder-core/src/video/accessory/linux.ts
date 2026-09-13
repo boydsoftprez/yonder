@@ -139,6 +139,8 @@ export class Pocket2Device {
   private started = false;
   private externalPending = false;
   private cleanupFailure?: Error;
+  /** Whether the helper packs the live view up the pipe (R-VID-22). Every generation starts forwarding, as the helper does. */
+  private videoForwarding = true;
 
   constructor(private readonly options: Pocket2DeviceOptions) {
     if (!/^[a-zA-Z0-9_.:-]{1,128}$/.test(options.controller)) throw new Error("invalid USB controller name");
@@ -161,6 +163,7 @@ export class Pocket2Device {
     this.status = { ...this.status, generation: this.status.generation + 1,
       manufacturer: null, model: null, lastCommandAt: null, lastVideoAt: null };
     this.enabledAt = undefined; this.control = undefined; this.handshakeStarted = false;
+    this.videoForwarding = true;
     const generation = this.status.generation;
     this.update("preparing");
     this.armStartupTimeout();
@@ -267,6 +270,7 @@ export class Pocket2Device {
       onVideo: unit => { this.traffic("lastVideoAt"); this.options.onVideo?.(unit); },
     });
     this.session.enable();
+    if (!this.videoForwarding) this.helper!.send({ type: "video", forward: false });
     this.freshnessTimer = setInterval(() => {
       const newest = Math.max(this.status.lastCommandAt ?? this.enabledAt!, this.status.lastVideoAt ?? this.enabledAt!);
       if (this.now() - newest >= TRAFFIC_TIMEOUT_MS) void this.retire("stale", "Pocket 2 protocol traffic stopped");
@@ -275,6 +279,24 @@ export class Pocket2Device {
   private traffic(field: "lastCommandAt" | "lastVideoAt"): void {
     this.status = { ...this.status, [field]: this.now() };
     if (this.status.state !== "live") { clearTimeout(this.startupTimer); this.update("live"); }
+  }
+  /**
+   * Whether the helper forwards the camera's live view (R-VID-22).
+   *
+   * The Pocket pushes its live view for as long as the 1 Hz ping keeps the
+   * link alive and offers no lever to stop it while keeping the link, so the
+   * helper drains it either way. What this decides is whether those bytes are
+   * packed as text, shipped up the pipe and decoded here — a third of a core
+   * in the helper and a sixth of this daemon's main thread on the bench board
+   * for a view nobody was watching (K-70). Presence, commands and the status
+   * the camera pushes on its own travel on the other route and are untouched.
+   */
+  forwardVideo(on: boolean): void {
+    if (this.videoForwarding === on) return;
+    this.videoForwarding = on;
+    if (!this.helper || !this.session?.enabled || this.stopping || this.closed) return;
+    try { this.helper.send({ type: "video", forward: on }); }
+    catch { void this.retire("fault", "Pocket 2 video forwarding request failed"); }
   }
   /** One caller command in flight; no unbounded motion queue behind endpoint backpressure. */
   async sendCommand(command: Omit<DumlCommand, "sequence">, options: AccessoryCommandOptions = {}): Promise<void> {

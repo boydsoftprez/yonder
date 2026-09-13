@@ -208,7 +208,10 @@ describe("the pipeline host runs the pipeline it was given", () => {
     const host = startHost(argvFor().slice(1));
     await host.flowing();
     const probes = host.traced().filter((e) => e.event === "add_probe");
-    expect(probes.map((e) => e.pad)).toEqual(["main.sink"]);
+    // Two probes on pads the launch line already has, and no element added
+    // to hold either: `main`'s sink for continuity, and the preview encoder's
+    // output for progress while the full-rate encode is gated (R-VID-21).
+    expect(probes.map((e) => e.pad)).toEqual(["main.sink", "enc-preview.src"]);
     const parsed = host.traced().find((e) => e.event === "parse_launchv");
     expect(parsed?.tokens).not.toContain("identity");
   });
@@ -497,6 +500,33 @@ describe("the pipeline host records off the encoded tee", () => {
     const settled = statSync(path).size;
     await sleep(60);
     expect(statSync(path).size).toBe(settled);
+  }, 30_000);
+
+  it("opens the gate before the full-rate encode for a recording and closes it after (R-VID-21)", async () => {
+    // No output enabled, so `compose()` closed the gate in the launch line
+    // and the encoder has had nothing to do. A recording is the consumer
+    // that opens it — after the muxer is on the tee, so the encoder's first
+    // frame is the recording's first frame — and the stop, once its
+    // continuity window has passed, is what closes it again.
+    const host = startHost(argvFor({ ...CAMERA, outputs: [] }).slice(1));
+    await host.flowing();
+    const gate = () => host.traced()
+      .filter((e) => e.event === "set_property" && e.element === "main-gate" && e.name === "drop")
+      .map((e) => e.value);
+    expect(gate()).toEqual([]);
+
+    const path = join(dir, "gated.mkv");
+    expect(await host.ask({ id: 60, camera: "cam0", op: "record", path }))
+      .toMatchObject({ continuous: true, observed: { path, recording: true } });
+    expect(gate()).toEqual([false]);
+    const joined = host.traced().findIndex((e) => e.event === "request_pad" && e.element === "main");
+    const opened = host.traced().findIndex((e) => e.event === "set_property" && e.element === "main-gate");
+    expect(joined).toBeGreaterThanOrEqual(0);
+    expect(opened).toBeGreaterThan(joined);
+
+    expect(await host.ask({ id: 61, camera: "cam0", op: "record-stop" }))
+      .toMatchObject({ continuous: true, observed: { path, recording: false } });
+    expect(gate()).toEqual([false, true]);
   }, 30_000);
 
   it("releases the fork pad before the end-of-stream, so the tee never carries one", async () => {

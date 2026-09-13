@@ -1,6 +1,6 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 import { describe, it, expect } from "vitest";
-import { boundedRunner, inFlightRunner, redactArgv, redactText, systemRunner } from "./runner.js";
+import { boundedRunner, inFlightRunner, memoRunner, redactArgv, redactText, systemRunner } from "./runner.js";
 
 describe("redactArgv", () => {
   it("redacts the value after a wifi-security psk key", () => {
@@ -195,5 +195,72 @@ describe("systemRunner", () => {
     );
     expect(r.code).toBe(0);
     expect(r.stdout).toBe(process.env.PATH ?? "");
+  });
+});
+
+describe("memoRunner", () => {
+  it("keeps an observation for the memo window and gives each caller its own copy", async () => {
+    let calls = 0;
+    let t = 0;
+    const observed = memoRunner(async () => ({
+      code: 0, stdout: `reading ${++calls}`, stderr: "",
+    }), { ttlMs: 3000, now: () => t });
+
+    const a = await observed(["mmcli", "-L", "--output-keyvalue"]);
+    t = 2999;
+    const b = await observed(["mmcli", "-L", "--output-keyvalue"]);
+    expect(calls).toBe(1);
+    expect(b).toEqual(a);
+    expect(b).not.toBe(a);
+    a.stdout = "caller one changed its copy";
+    expect(b.stdout).toBe("reading 1");
+
+    t = 3000;
+    await expect(observed(["mmcli", "-L", "--output-keyvalue"])).resolves.toMatchObject({ stdout: "reading 2" });
+    expect(calls).toBe(2);
+  });
+
+  it("keys on the command line and the environment it asked for", async () => {
+    let calls = 0;
+    const observed = memoRunner(async () => ({ code: 0, stdout: `${++calls}`, stderr: "" }), { ttlMs: 3000, now: () => 0 });
+
+    await observed(["nmcli", "device", "status"]);
+    await observed(["nmcli", "device", "show"]);
+    await observed(["nmcli", "device", "status"], { env: { LC_ALL: "C" } });
+    await observed(["nmcli", "device", "status"]);
+    expect(calls).toBe(3);
+  });
+
+  it("keeps a non-zero exit as an answer but forgets a runner that threw", async () => {
+    let calls = 0;
+    const observed = memoRunner(async () => {
+      calls += 1;
+      if (calls === 1) throw new Error("ModemManager disappeared");
+      return { code: 1, stdout: "", stderr: "no modem" };
+    }, { ttlMs: 3000, now: () => 0 });
+
+    await expect(observed(["mmcli", "-L"])).rejects.toThrow("ModemManager disappeared");
+    await expect(observed(["mmcli", "-L"])).resolves.toMatchObject({ code: 1, stderr: "no modem" });
+    await expect(observed(["mmcli", "-L"])).resolves.toMatchObject({ code: 1, stderr: "no modem" });
+    expect(calls).toBe(2);
+  });
+
+  it("shares a pending observation the way inFlightRunner does", async () => {
+    let started = 0;
+    let release: (() => void) | undefined;
+    const gate = new Promise<void>((resolve) => { release = resolve; });
+    const observed = memoRunner(async () => {
+      started += 1;
+      await gate;
+      return { code: 0, stdout: "one", stderr: "" };
+    }, { ttlMs: 3000, now: () => 0 });
+
+    const first = observed(["zerotier-cli", "-j", "info"]);
+    const second = observed(["zerotier-cli", "-j", "info"]);
+    expect(started).toBe(1);
+    release?.();
+    const [a, b] = await Promise.all([first, second]);
+    expect(a).toEqual(b);
+    expect(a).not.toBe(b);
   });
 });

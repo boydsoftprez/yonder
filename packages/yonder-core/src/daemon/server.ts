@@ -74,7 +74,7 @@ import type { OpenPort } from "../mav/detect.js";
 import { AP_CONNECTION, DEFAULT_AP_PASSPHRASE } from "../net/profiles.js";
 import { scanForNetworks } from "../net/scan.js";
 import { ping, reachable } from "../diag/probe.js";
-import { inFlightRunner, redactArgv, systemRunner, type CommandRunner } from "../net/runner.js";
+import { inFlightRunner, memoRunner, redactArgv, systemRunner, type CommandRunner } from "../net/runner.js";
 import { systemClock, type Clock, type Renderer } from "../apply/types.js";
 import { DEFAULT_CONFIG, type Config } from "../schema/config.js";
 import { randomUUID } from "node:crypto";
@@ -1022,6 +1022,31 @@ export async function startServer(opts: ServerOptions): Promise<{ close(): Promi
   const observationModemClient = new MmcliClient(observationRunner);
 
   /**
+   * The readers the console polls on fixed timers, answered from a reading
+   * a few seconds old (K-70, R-CAM-24).
+   *
+   * Measured on the Radxa bench board before this existed: the Cellular
+   * page's 5 s poll, the instruments' own 5 s modem read and the 2 s and 5 s
+   * mesh-state polls each forked their own `mmcli` and `zerotier-cli`, about
+   * six processes a second, and each fork of this daemon held its main
+   * thread for tens of milliseconds — half of everything that thread did,
+   * while the telemetry socket behind it dropped a hundred datagrams a
+   * second. Nothing those pages show changes faster than these windows.
+   *
+   * Only reads land here, on client instances of their own. `modemClient`
+   * keeps `armSignal` (a write, R-CEL-10), `modemPort` and the reach monitor
+   * keep the unmemoised observation runner (R-CEL-13 says *now*), and
+   * `built.zerotier` keeps join and leave.
+   */
+  const OBSERVATION_MEMO_MS = 3_000;
+  const REMOTE_MEMO_MS = 5_000;
+  const memoNow = () => (opts.clock ?? systemClock).now();
+  const modemReads = new MmcliClient(memoRunner(observationRunner, { ttlMs: OBSERVATION_MEMO_MS, now: memoNow }));
+  // No trace of its own: the observation runner underneath logs the
+  // processes that actually ran, which is the number the journal should say.
+  const zerotierReads = new ZeroTierCli(memoRunner(observationRunner, { ttlMs: REMOTE_MEMO_MS, now: memoNow }));
+
+  /**
    * Turn on ModemManager's detailed signal reporting, once per modem.
    *
    * R-CEL-10. A modem reports only a coarse quality percentage until this is
@@ -1061,12 +1086,12 @@ export async function startServer(opts: ServerOptions): Promise<{ close(): Promi
   };
   const readModemState = async (configureSignal: boolean) => {
     const config = loadConfig(opts.configPath);
-    const paths = await modemClient.modems();
+    const paths = await modemReads.modems();
     if (paths.length === 0) return modemState(config, null, null, { rssi: null, rsrq: null, rsrp: null, snr: null });
-    const modem = await modemClient.modem(paths[0]);
+    const modem = await modemReads.modem(paths[0]);
     if (configureSignal) await armSignal(modem.path);
-    const bearer = await modemClient.connectedBearer(modem);
-    const signal = await modemClient.signal(modem.path);
+    const bearer = await modemReads.connectedBearer(modem);
+    const signal = await modemReads.signal(modem.path);
     return modemState(config, modem, bearer, signal);
   };
 
@@ -1504,6 +1529,10 @@ export async function startServer(opts: ServerOptions): Promise<{ close(): Promi
   // use. Built here rather than defaulted inside the router so that a test
   // injecting a fake runner cannot reach a real `ping` — see DiagProbes.
   const probeRunner = opts.runner ?? systemRunner;
+  // Camera sweeps from the cockpit, the Cameras page and autostart can land
+  // together; an identical `v4l2-ctl` still in flight is shared rather than
+  // forked again (K-70). Reads only — see `inFlightRunner`'s own rule.
+  const cameraProbeRunner = inFlightRunner(probeRunner);
   const interfaces = () => readInterfaces(probeRunner, () => client.devices(), () => clock.now());
   const diagnosticJobs = new DiagnosticJobs({
     runner: opts.diagnosticRunner ?? systemDiagnosticRunner,
@@ -1596,7 +1625,7 @@ export async function startServer(opts: ServerOptions): Promise<{ close(): Promi
       // every other phase. `throughput` hands the sampler the same interface
       // name so its rate matches the byte counters beside it, and is the only
       // way anything in this daemon reaches into the sampler.
-      remoteState: () => readRemoteState(loadConfig(opts.configPath), built.zerotier, {
+      remoteState: () => readRemoteState(loadConfig(opts.configPath), zerotierReads, {
         readTraffic,
         throughput: (iface) => sampler.forInterface(iface),
       }),
@@ -1604,8 +1633,8 @@ export async function startServer(opts: ServerOptions): Promise<{ close(): Promi
       // injecting a fake runner gets a fake v4l2-ctl for free, and nothing
       // reaches a real one by omission.
       cameras: {
-        detect: () => detectWithAccessory(() => detectCameras({ runner: probeRunner }), () => accessory?.detect() ?? { found: [], rejected: [] }),
-        probe: async (node, card) => node.startsWith('pocket2:') && accessory ? accessory.probe(node) : probeCamera(node, card, { runner: probeRunner }),
+        detect: () => detectWithAccessory(() => detectCameras({ runner: cameraProbeRunner }), () => accessory?.detect() ?? { found: [], rejected: [] }),
+        probe: async (node, card) => node.startsWith('pocket2:') && accessory ? accessory.probe(node) : probeCamera(node, card, { runner: cameraProbeRunner }),
       },
       // The very same successful answer the pipeline renderer uses. Camera
       // page polls and an apply can arrive together; both share one in-flight
@@ -1632,7 +1661,7 @@ export async function startServer(opts: ServerOptions): Promise<{ close(): Promi
         const config = reachConfig();
         const [local, mesh, devices, net] = await Promise.all([
           observationClient.activeIpv4(),
-          readRemoteState(config, built.zerotier, { readTraffic }),
+          readRemoteState(config, zerotierReads, { readTraffic }),
           observationClient.devices(),
           modemPort.interfaceFor(config),
         ]);

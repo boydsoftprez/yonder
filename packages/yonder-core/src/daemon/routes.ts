@@ -59,7 +59,7 @@ import {
   SAFE_CAPTURE_NAME, isRefusal,
   type Capture, type Recorder, type RecordingState, type Refusal,
 } from "../video/recorder.js";
-import type { Detection, DetectResult, Rejection } from "../video/probe/camera.js";
+import { forgetProbes, type Detection, type DetectResult, type Rejection } from "../video/probe/camera.js";
 import type { Encoder } from "../video/probe/encoder.js";
 import type { SupplyFlags, SupplyState } from "../system/supply.js";
 import { RTSP_BASE, RTSP_PORT } from "../media/ports.js";
@@ -1542,6 +1542,9 @@ export function createRouter(deps: RouterDeps): Router {
         controls: requested,
         capabilities: found.capabilities,
       });
+      // A write can move a control's `inactive` flag; the sweeps that reuse
+      // probes (R-CAM-24) must not keep the pre-write reading.
+      forgetProbes();
 
       // R-CTL-10: the whole device, read again — not the pre-write snapshot
       // patched in memory with what `applied` says. A page showing three

@@ -131,6 +131,78 @@ class Events:
         return events
 
 
+# The accessory pipe's 8-byte envelope: magic, a two-byte route, a little-endian
+# length, then that many payload bytes (docs/hardware/dji-pocket-2-over-usb.md).
+# Route 4a 57 carries the camera's live view; 49 57 carries commands and the
+# status the camera pushes on its own.
+ENVELOPE_MAGIC = b'\x55\xcc'
+ENVELOPE_HEADER = 8
+VIDEO_ROUTE = b'\x4a\x57'
+MAX_AOA_PAYLOAD = 16 * 1024 * 1024
+
+
+class RouteFilter:
+    """
+    The pipe's envelopes, passed through byte for byte -- except the media
+    route, which is counted past when the parent has said nobody is watching
+    (R-VID-22). The camera pushes its live view for as long as the 1 Hz ping
+    keeps the link alive and offers no way to stop it while keeping the link,
+    so the endpoint is drained either way; what this decides is whether those
+    bytes get packed as text and shipped up the pipe to be decoded.
+
+    Nothing of a payload is buffered: forwarded bytes leave in the same push
+    they arrived in, dropped ones are counted, and only the eight header bytes
+    of an envelope that straddles two reads are held back. With forwarding on,
+    the output is the input, byte for byte. A byte that is not the start of an
+    envelope where one was expected passes through alone and the search
+    resumes at the next byte, so the parent's own splitter sees exactly the
+    stretch it would have seen; and a media envelope already being dropped when
+    forwarding is switched back on is dropped to its end, because the parent
+    never saw its header.
+    """
+
+    def __init__(self):
+        self.drop_video = False
+        self.header = bytearray()
+        self.remaining = 0
+        self.dropping = False
+
+    def push(self, chunk):
+        # Forwarding with nothing held back is the pipe as it always was:
+        # the read leaves whole, in one line, boundaries untouched. The
+        # state machine only runs while a header or a payload is in flight
+        # or while media envelopes are to be dropped.
+        if not self.drop_video and not self.remaining and not self.header:
+            return bytes(chunk)
+        out = bytearray()
+        i = 0
+        n = len(chunk)
+        while i < n:
+            if self.remaining:
+                take = min(self.remaining, n - i)
+                if not self.dropping:
+                    out += chunk[i:i + take]
+                i += take
+                self.remaining -= take
+                continue
+            taken = chunk[i:i + ENVELOPE_HEADER - len(self.header)]
+            self.header += taken
+            i += len(taken)
+            if len(self.header) < ENVELOPE_HEADER:
+                break
+            length = struct.unpack_from('<I', self.header, 4)[0]
+            if self.header[:2] != ENVELOPE_MAGIC or length > MAX_AOA_PAYLOAD:
+                out.append(self.header[0])
+                del self.header[0]
+                continue
+            self.dropping = self.drop_video and bytes(self.header[2:4]) == VIDEO_ROUTE
+            if not self.dropping:
+                out += self.header
+            self.header = bytearray()
+            self.remaining = length
+        return bytes(out)
+
+
 class PendingWrite:
     def __init__(self, ident, data, deadline):
         if not isinstance(deadline, (int, float)) or not math.isfinite(deadline):
@@ -289,6 +361,7 @@ class Helper:
         self.output_partial = False
         self.priority_end = 0
         self.bulk_factory = bulk_factory
+        self.route_filter = RouteFilter()
         self.bulk = None
         self.read_token = None
         self.write_token = None
@@ -311,6 +384,15 @@ class Helper:
             self.priority_end = boundary + len(line)
         else:
             self.output.extend(line)
+
+    def emit_bulk(self, data):
+        """One USB read is at most MAX_CHUNK bytes; a filtered read can carry a
+        few bytes more, an envelope header held from the previous read. Each
+        line stays within MAX_LINE by slicing at MAX_CHUNK; the parent joins
+        lines back into one stream, so where a line ends does not matter."""
+        for start in range(0, len(data), MAX_CHUNK):
+            piece = bytes(data[start:start + MAX_CHUNK])
+            self.emit(type='data', data=base64.b64encode(piece).decode())
 
     def consumed_output(self, count):
         if not 0 <= count <= len(self.output):
@@ -340,7 +422,7 @@ class Helper:
                 self.read_token = None
                 # Zero-length USB packets are valid, not an endpoint EOF.
                 if data:
-                    self.emit(type='data', data=base64.b64encode(data).decode())
+                    self.emit_bulk(self.route_filter.push(data))
             else:
                 raise ValueError('Unexpected asynchronous USB token')
 
@@ -437,6 +519,11 @@ class Helper:
                 raise ValueError('duplicate control policy')
             control['action'] = message['action']
             control['data'] = decode(message.get('data', ''))
+        elif typ == 'video':
+            forward = message.get('forward')
+            if not isinstance(forward, bool):
+                raise ValueError('invalid video forwarding request')
+            self.route_filter.drop_video = not forward
         else:
             raise ValueError('unknown IPC request')
 

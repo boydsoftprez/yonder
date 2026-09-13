@@ -1,7 +1,8 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 import { readFileSync } from "node:fs";
 import { describe, expect, it } from "vitest";
-import { probeRockchipCsi } from "./csi.js";
+import { csiTransient, probeRockchipCsi } from "./csi.js";
+import type { Rejection } from "./camera.js";
 import type { CommandRunner } from "../../net/runner.js";
 
 const graph = readFileSync(new URL("./fixtures/seekerhd-media.txt", import.meta.url), "utf8");
@@ -71,5 +72,28 @@ describe("Rockchip CSI discovery from the SeekerHD board", () => {
     for (const fake of [runner(graph, format.replace(/NM12|NV12/g, "RG10")), runner(graph, format, "rkisp_selfpath")]) {
       expect(await probeRockchipCsi("/dev/video0", "rkisp_mainpath", fake, names)).toHaveProperty("reason");
     }
+  });
+});
+
+describe("which CSI rejections a sweep may reuse (R-CAM-24)", () => {
+  const names = new Map([["/dev/video3", "platform-rkisp-vir0-video-index3"]]);
+  it("an auxiliary ISP node is a fact about the node, kept for the next sweep", async () => {
+    const runner: CommandRunner = async () => ({ code: 0, stdout: "Card type      : rkisp_selfpath\nBus info       : platform:rkisp-vir0\n", stderr: "" });
+    const outcome = await probeRockchipCsi("/dev/video3", "rkisp_selfpath", runner, names);
+    expect("capabilities" in outcome).toBe(false);
+    expect(csiTransient.has(outcome as Rejection)).toBe(false);
+  });
+  it("a node that did not answer --info is asked again next sweep", async () => {
+    const runner: CommandRunner = async () => ({ code: 1, stdout: "", stderr: "Device or resource busy" });
+    const outcome = await probeRockchipCsi("/dev/video3", "rkisp_mainpath", runner, names);
+    expect(csiTransient.has(outcome as Rejection)).toBe(true);
+  });
+  it("a main path whose sensor graph is not up yet is asked again next sweep", async () => {
+    const runner: CommandRunner = async (argv) => argv.includes("--info")
+      ? { code: 0, stdout: "Card type      : rkisp_mainpath\nBus info       : platform:rkisp-vir0\n", stderr: "" }
+      : { code: 0, stdout: "", stderr: "" };
+    const outcome = await probeRockchipCsi("/dev/video0", "rkisp_mainpath", runner, new Map([["/dev/video0", "platform-rkisp-vir0-video-index0"]]));
+    expect("capabilities" in outcome).toBe(false);
+    expect(csiTransient.has(outcome as Rejection)).toBe(true);
   });
 });
