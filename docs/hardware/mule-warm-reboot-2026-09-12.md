@@ -172,3 +172,48 @@ down: its missing video is not evidence of a software startup regression, and
 its return cannot be attributed solely to the service restart. Both cameras then
 passed the 16-buffer decode check with zero pipeline restarts and kernel taint
 unchanged at 4096. No further board reboot was issued during this recovery.
+
+## ZeroTier startup regression after a later deployment
+
+The September 13 afternoon boot (`1bfd4538-df5d-493e-8668-a21b114d064b`)
+joined Wi-Fi at 192.168.68.72 and acquired a cellular address, but ZeroTier
+remained stopped. The protected-mode marker was present. The admin helper
+repeatedly failed initialization, reaching 59 restarts before repair.
+
+The installed `dist/recovery/zerotier.js` no longer contained the native-account
+ownership fix from `e82a231`. Its SHA-256 was
+`5b58c746e0263ceeeeacd94a068ce475b084969a33d2736f0aae1babdb389c66`.
+A direct read-only adapter check reproduced `ZEROTIER_STATE_INVALID` at
+`privateFile`, rejecting the unchanged identity owned by `zerotier-one` UID 995.
+The specific later deployment that replaced this module was not established.
+
+The unchanged corrected source was compiled into an isolated output directory;
+compilation and its 17 adapter tests passed. Only the deployed adapter module
+was replaced, with SHA-256
+`6b7ecbf9d7d3bf2b0b3a5dc3831998ee311b8c7e2886368af54da9b4c63023c0`.
+The prior module and verification records are retained on the Mule under
+`/var/lib/yonder-state/backups/zerotier-owner-20260913-1618`.
+The write used a private mount namespace; PID 1's root remained read-only.
+
+The admin socket/service were stopped for replacement. Because the core requires
+that socket, systemd also stopped the core; it was explicitly started again
+after admin recovery. Final checks showed admin, core, console and ZeroTier
+active, no failed units, and zero admin restarts since activation. The same
+read-only adapter check now passed with one membership. ZeroTier reported ONLINE,
+its network reported OK at the original 10.113.83.24 address, and SSH and console
+HTTP 200 succeeded over the mesh from the Mac.
+
+Configuration, secrets, both mesh identity files, the installed Pocket guard,
+camera IQ data, boot arguments and the checked SSH host key retained their
+pre-repair hashes. Kernel taint remained 4096. This repair did not reboot the
+board or qualify the unresolved warm-reset path. Subsequent full application
+deployments must include `e82a231` in their actual built adapter, rather than
+overwriting it with an older artifact.
+
+The PR audit found the fix in PR #16, but absent from the then-current heads of
+its dependent PRs #17 (`385651c`) and #18 (`f72a029`). A PR base relationship
+does not update the dependent branch's build inputs. Before deploying a stacked
+branch, merge the updated base into that branch, rebuild the application, and
+run the inherited ZeroTier ownership/recovery tests. The installer consumes a
+prebuilt application, so copying an older application tree can reintroduce this
+failure even when the corrected source exists on another branch.
