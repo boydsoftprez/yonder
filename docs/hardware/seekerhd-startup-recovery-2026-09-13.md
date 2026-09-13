@@ -41,9 +41,9 @@ The regression test reproduced all four unsafe driver-binding writes on the
 old preparation code. The corrected preparation passes the test without any
 sysfs write or attempt to open a video device when the graph is absent.
 
-Hardware acceptance is pending the corrected reboot: confirm the command line,
-normal sensor registration and notifier completion, stable capture device,
-RKAIQ readiness, advancing decoded frames, and sustained pipeline operation.
+The corrected boot subsequently confirmed the command line, normal sensor
+registration and notifier completion, stable capture device and RKAIQ readiness.
+A separate decoded-frame and sustained-pipeline acceptance run remains pending.
 
 The bench deployment replaced only `prepare.py` and added the boot argument.
 Original files were backed up, replacements were read back by hash, and root
@@ -55,5 +55,19 @@ A software reboot was requested after verifying the vehicle was disarmed and
 idle and synchronizing storage. Because the current kernel had already faulted,
 the reboot skipped userspace service teardown to avoid the separately observed
 USB gadget cleanup Oops. The board did not return over either known network
-path; a physical power cycle is required before hardware acceptance can finish.
-This shutdown result does not establish whether the corrected startup works.
+path. This shutdown result did not establish whether the corrected startup works.
+
+The board subsequently returned with a new boot identity. At 178 seconds uptime,
+the command line contained the blacklist, the DPHY matched the IMX462 sensor,
+and RKISP reported completed asynchronous notifier registration. All ten video
+nodes were present, including the stable main-path capture link. Camera
+preparation and RKAIQ were active; the kernel taint was 4096 (the external
+module), with no Oops bit. Core, console, media and telemetry services were
+active. The saved configuration and deployed decoder hashes were intact, and
+root remained read-only.
+
+The console initially reported CSI running with zero supervisor restarts.
+The later explicit RTSP frame-count attempt returned 404 after CSI was stopped;
+it is not counted as decoded-frame acceptance. The board's USB gadget teardown
+fault is a separate unresolved restart issue. Successful CSI registration on
+this boot does not establish reliable warm reboot behavior.
