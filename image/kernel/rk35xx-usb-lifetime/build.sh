@@ -11,7 +11,7 @@ work=$1
     echo 'Work directory must be new and contain no whitespace.' >&2
     exit 2
 }
-for tool in git sha256sum patch make aarch64-linux-gnu-gcc dpkg bison flex bc pahole; do
+for tool in git sha256sum patch make aarch64-linux-gnu-gcc dpkg bison flex bc pahole depmod readelf tar gzip sort xargs; do
     command -v "$tool" >/dev/null
 done
 [[ $(aarch64-linux-gnu-gcc -dumpfullversion) = 14.2.0 ]]
@@ -80,5 +80,50 @@ make -j"$jobs" ARCH=arm64 CROSS_COMPILE=aarch64-linux-gnu- LOCALVERSION=-vendor-
 mkdir "$work/output"
 cp arch/arm64/boot/Image System.map Module.symvers "$work/output/"
 cp .config "$work/output/kernel.config"
-(cd "$work/output" && sha256sum Image System.map Module.symvers kernel.config >SHA256SUMS)
+release=$(make -s ARCH=arm64 CROSS_COMPILE=aarch64-linux-gnu- LOCALVERSION=-vendor-rk35xx kernelrelease)
+[[ $release = 6.1.115-vendor-rk35xx ]]
+module_stage=$work/modules-stage
+make -s ARCH=arm64 CROSS_COMPILE=aarch64-linux-gnu- LOCALVERSION=-vendor-rk35xx \
+    INSTALL_MOD_PATH="$module_stage" INSTALL_MOD_STRIP=1 modules_install
+module_root=$module_stage/lib/modules/$release
+[[ -d $module_root ]]
+# modules_install adds links for local module development.  They must never point
+# from a deployment archive back at the builder's source tree.
+rm -f "$module_root/build" "$module_root/source"
+[[ -z $(find "$module_stage" -type l -print -quit) ]]
+for module in \
+    kernel/net/ipv6/ipv6.ko \
+    kernel/net/bluetooth/hidp/hidp.ko \
+    kernel/net/bluetooth/rfcomm/rfcomm.ko; do
+    readelf -SW "$module_root/$module" | grep -q '[[:space:]][.]BTF[[:space:]]'
+done
+for metadata in modules.order modules.builtin modules.builtin.modinfo; do
+    [[ -s $module_root/$metadata ]]
+done
+module_manifest=$module_stage/MODULES.SHA256
+(cd "$module_stage" && find lib -type f -print0 | LC_ALL=C sort -z | xargs -0 sha256sum >"$module_manifest")
+module_metadata=$module_stage/PAYLOAD-METADATA.txt
+{
+    printf 'release=%s\n' "$release"
+    printf 'image_sha256=%s\n' "$(sha256sum arch/arm64/boot/Image | awk '{print $1}')"
+    printf 'config_sha256=%s\n' "$(sha256sum .config | awk '{print $1}')"
+    printf 'module_symvers_sha256=%s\n' "$(sha256sum Module.symvers | awk '{print $1}')"
+    printf 'system_map_sha256=%s\n' "$(sha256sum System.map | awk '{print $1}')"
+    printf 'modules_install=INSTALL_MOD_STRIP=1\n'
+    printf 'in_tree_ko_count=%s\n' "$(find "$module_root/kernel" -type f -name '*.ko' | wc -l)"
+    printf 'builder_path_symlinks=none\n'
+    printf 'external_dkms=excluded\n'
+    printf 'btf_verified=ipv6,hidp,rfcomm\n'
+} >"$module_metadata"
+module_archive=$work/output/kernel-modules-$release.tar.gz
+tar --sort=name --mtime='@0' --owner=0 --group=0 --numeric-owner \
+    -C "$module_stage" -cf - lib MODULES.SHA256 PAYLOAD-METADATA.txt | gzip -n >"$module_archive"
+tar -tzf "$module_archive" | grep -Fx "lib/modules/$release/modules.order" >/dev/null
+tar -tzf "$module_archive" | grep -Fx "lib/modules/$release/modules.builtin" >/dev/null
+tar -tzf "$module_archive" | grep -Fx "lib/modules/$release/modules.builtin.modinfo" >/dev/null
+cp "$module_manifest" "$work/output/kernel-modules-$release.manifest.sha256"
+cp "$module_metadata" "$work/output/kernel-modules-$release.metadata"
+(cd "$work/output" && sha256sum Image System.map Module.symvers kernel.config \
+    "kernel-modules-$release.tar.gz" "kernel-modules-$release.manifest.sha256" \
+    "kernel-modules-$release.metadata" >SHA256SUMS)
 printf 'Built %s/output; installation and hardware qualification are separate.\n' "$work"

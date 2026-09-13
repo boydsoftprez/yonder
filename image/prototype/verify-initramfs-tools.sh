@@ -22,6 +22,9 @@ namespace_test() {
     mounted_bind=0
     mounted_tmpfs=0
     mounted_ext4=0
+    handoff_root=/handoff-root
+    handoff_root_mounted=0
+    fresh_run_mounted=0
 
     loop_is_backed_by() {
         local candidate=$1 backing=$2 associated
@@ -45,6 +48,14 @@ namespace_test() {
 
     cleanup_namespace() {
         set +e
+        # The fresh initramfs /run hides $fixture until initramfs-tools moves
+        # it onto the root. On an error before that move, unmount the root
+        # handoff first, then the fresh /run, so loop backing files are visible
+        # before their owned loops are detached.
+        (( handoff_root_mounted == 0 )) || umount --recursive "$initrd_root$handoff_root"
+        handoff_root_mounted=0
+        (( fresh_run_mounted == 0 )) || umount "$initrd_root/run"
+        fresh_run_mounted=0
         umount "$initrd_root$fixture/script-root/var/lib/yonder-state" 2>/dev/null || true
         umount "$initrd_root$fixture/script-root" 2>/dev/null || true
         (( mounted_ext4 == 0 )) || umount "$initrd_root$fixture/ext4"
@@ -334,9 +345,6 @@ EOF
     [[ ! -e $initrd_root$fixture/grow-called ]] || \
         fail 'the packaged yonder mount script grew media for mismatched legacy terrain'
     umount --recursive "$initrd_root$fixture/script-root"
-    detach_owned_loop "$script_loop" "$script_loop_backing"
-    script_loop=''
-    script_loop_backing=''
 
     printf '%s\n' archived >"$initrd_root$fixture/copy-source/nested/value"
     ln -s nested/value "$initrd_root$fixture/copy-source/link"
@@ -356,6 +364,43 @@ EOF
         fail 'the extracted initramfs rmdir did not remove an empty directory'
     initrd_tool umount "$fixture/tmpfs"
     mounted_tmpfs=0
+
+    # initramfs-tools moves its own /run onto the mounted root after every
+    # init-bottom script has completed. Keep this boundary separate from the
+    # earlier rootfs-style calls: mounting a fresh initramfs /run here makes a
+    # stale root-side /run mount observable instead of papering it over.
+    initrd_tool mkdir -p "$handoff_root"
+    mount -o rw "${script_loop}p1" "$initrd_root$handoff_root"
+    handoff_root_mounted=1
+    sed -i "s/^TERRAIN_UUID=.*/TERRAIN_UUID=$terrain_uuid/" \
+        "$initrd_root$handoff_root/etc/yonder-storage-prototype.conf"
+    initrd_tool mount -t tmpfs -o size=1m,mode=0755,nosuid,nodev tmpfs /run
+    fresh_run_mounted=1
+    set +e
+    # shellcheck disable=SC2016 # $1 is expanded by the initramfs shell
+    chroot "$initrd_root" /bin/sh -c \
+        'PATH=/run/yonder-initramfs-tool-test/empty-path; export PATH; exec /bin/sh /scripts/yonder-mount-storage "$1"' \
+        yonder-initramfs-handoff "$handoff_root" \
+        2>"$initrd_root/handoff-script-error"
+    script_status=$?
+    set -e
+    [[ $script_status == 0 ]] || \
+        fail "the packaged yonder mount script returned $script_status before the /run handoff"
+    [[ ${YONDER_INITRAMFS_INJECT_PRE_MOVE_FAILURE:-0} != 1 ]] || \
+        fail 'injected failure before the initramfs /run handoff'
+    # This is the exact initramfs-tools handoff before run-init/PID 1.
+    initrd_tool mount -n -o move /run "$handoff_root/run"
+    fresh_run_mounted=0
+    [[ $(<"$initrd_root$handoff_root/run/yonder-storage-mode") == protected ]] || \
+        fail 'the initramfs /run handoff lost the protected storage marker'
+    handoff_options=$(findmnt -n -T "$initrd_root$handoff_root" -o OPTIONS)
+    [[ ,$handoff_options, == *,ro,* ]] || \
+        fail 'the /run handoff accepted a writable protected root'
+    umount --recursive "$initrd_root$handoff_root"
+    handoff_root_mounted=0
+    detach_owned_loop "$script_loop" "$script_loop_backing"
+    script_loop=''
+    script_loop_backing=''
     cleanup_namespace
     trap - EXIT INT TERM
 }
@@ -378,5 +423,25 @@ mapfile -t mount_scripts < <(find "$scratch/extracted" -type f -path '*/scripts/
 [[ ${#mount_scripts[@]} == 1 ]] || fail 'generated initramfs does not contain exactly one yonder mount script'
 initrd_root=${mount_scripts[0]%/scripts/yonder-mount-storage}
 [[ -x $initrd_root/scripts/yonder-grow-media ]] || fail 'generated initramfs lacks the media grow script'
+if [[ -n ${YONDER_INITRAMFS_STORAGE_SCRIPT_OVERLAY:-} ]]; then
+    [[ -f $YONDER_INITRAMFS_STORAGE_SCRIPT_OVERLAY && ! -L $YONDER_INITRAMFS_STORAGE_SCRIPT_OVERLAY ]] ||
+        fail 'storage-script overlay is not a regular file'
+    cp "$YONDER_INITRAMFS_STORAGE_SCRIPT_OVERLAY" "$initrd_root/scripts/yonder-mount-storage"
+    chmod 0755 "$initrd_root/scripts/yonder-mount-storage"
+fi
+inject_pre_move_failure=${YONDER_INITRAMFS_INJECT_PRE_MOVE_FAILURE:-0}
+[[ $inject_pre_move_failure == 0 || $inject_pre_move_failure == 1 ]] || exit 2
+if [[ $inject_pre_move_failure == 1 ]]; then
+    set +e
+    unshare --mount --fork /bin/bash "$0" --namespace "$initrd_root"
+    injected_status=$?
+    set -e
+    [[ $injected_status == 1 ]] || fail "injected pre-move failure returned $injected_status"
+    if losetup --list --noheadings --output BACK-FILE | grep -Fq "$initrd_root/run/yonder-initramfs-tool-test/script-disk.img"; then
+        fail 'injected pre-move failure retained an owned script loop'
+    fi
+    printf '%s\n' 'PASS: injected pre-move /run failure detached its owned script loop.'
+    exit
+fi
 unshare --mount --fork /bin/bash "$0" --namespace "$initrd_root"
-printf '%s\n' 'PASS: generated initramfs full tools performed bind, tmpfs and ext4 mounts, UUID lookup, archive copy, durable sync, rename and text operations; packaged storage script rejected untrusted p5 and selected p2 from an explicit legacy ZERO 3W p1-p5 root disk.'
+printf '%s\n' 'PASS: generated initramfs full tools performed bind, tmpfs and ext4 mounts, UUID lookup, archive copy, durable sync, rename and text operations; packaged storage script rejected untrusted p5 and selected p2 from an explicit legacy ZERO 3W p1-p5 root disk, then preserved its storage-mode marker through the exact /run handoff.'

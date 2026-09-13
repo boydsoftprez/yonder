@@ -1,19 +1,28 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 // Disposable Linux-only ZeroTier identity integration. Never uses host /etc or /var.
 import assert from "node:assert/strict";
-import { chmodSync, copyFileSync, existsSync, mkdirSync, readFileSync, readdirSync, rmSync, writeFileSync } from "node:fs";
+import { chmodSync, chownSync, copyFileSync, existsSync, mkdirSync, readFileSync, readdirSync, rmSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { ZeroTierStateAdapter } from "../dist/recovery/zerotier.js";
 import { runSensitiveProcess } from "../dist/admin/sensitive-process.js";
 
 assert(process.platform === "linux" && process.getuid() === 0 && existsSync("/.dockerenv"));
 const root = "/lab/zerotier-integration", stateDirectory = join(root, "state"), scratchDirectory = join(root, "scratch");
-const idtool = "/lab/package/usr/sbin/zerotier-idtool", fakeCli = "/lab/fixed/zerotier-cli", fakeSystemctl = "/lab/fixed/systemctl", fakeEnv = "/lab/fixed/env";
+const idtool = "/lab/package/usr/sbin/zerotier-idtool", fakeCli = "/lab/fixed/zerotier-cli", fakeSystemctl = "/lab/fixed/systemctl", fakeEnv = "/lab/fixed/env", fakeGetent = "/lab/fixed/getent";
 assert(existsSync(idtool));
 mkdirSync(stateDirectory, { recursive: true, mode: 0o700 }); mkdirSync(scratchDirectory, { mode: 0o700 });
 mkdirSync("/lab/fixed", { mode: 0o700 });
-for (const file of [fakeCli, fakeSystemctl, fakeEnv]) writeFileSync(file, "fixed test endpoint", { mode: 0o700 });
-let active = true, enabled = false, failList = false;
+for (const file of [fakeCli, fakeSystemctl, fakeEnv, fakeGetent]) writeFileSync(file, "fixed test endpoint", { mode: 0o700 });
+let active = true, enabled = true, failList = false;
+const nativeUid = 995, nativeGid = 985;
+function nativeOwnState() {
+  chownSync(stateDirectory, nativeUid, nativeGid);
+  for (const name of readdirSync(stateDirectory)) {
+    const path = join(stateDirectory, name);
+    chownSync(path, nativeUid, nativeGid);
+    if (name === "networks.d") for (const network of readdirSync(path)) chownSync(join(path, network), nativeUid, nativeGid);
+  }
+}
 const native = { async run(rawCommand, rawArgs) {
   let command = rawCommand, args = rawArgs;
   if (command === fakeEnv) { command = args[1]; args = args.slice(2); }
@@ -21,11 +30,12 @@ const native = { async run(rawCommand, rawArgs) {
   if (command === fakeSystemctl) {
     if (args[0] === "show") return Buffer.from(args.includes("--property=ActiveState") ? (active ? "active\n" : "inactive\n") : (enabled ? "enabled\n" : "disabled\n"));
     if (args[0] === "stop") active = false;
-    if (args[0] === "start") active = true;
+    if (args[0] === "start") { active = true; nativeOwnState(); }
     if (args[0] === "enable") enabled = true;
     if (args[0] === "disable") enabled = false;
     return Buffer.alloc(0);
   }
+  if (command === fakeGetent) return Buffer.from("zerotier-one:x:995:985::/var/lib/zerotier-one:/usr/sbin/nologin\n");
   if (command === fakeCli) {
     if (failList) throw new Error("injected native verification failure");
     return Buffer.from(JSON.stringify(readdirSync(join(stateDirectory, "networks.d"))
@@ -34,7 +44,7 @@ const native = { async run(rawCommand, rawArgs) {
   throw new Error("unexpected fixed command");
 } };
 const adapter = new ZeroTierStateAdapter({ stateDirectory, scratchDirectory, idtoolPath: idtool,
-  cliPath: fakeCli, systemctlPath: fakeSystemctl, envPath: fakeEnv, native, expectedUid: 0, clientWaitMs: 0 });
+  cliPath: fakeCli, systemctlPath: fakeSystemctl, envPath: fakeEnv, getentPath: fakeGetent, native, expectedUid: 0, clientWaitMs: 0 });
 
 async function generate(prefix) {
   const folder = join(root, prefix); mkdirSync(folder, { mode: 0o700 });
@@ -52,7 +62,21 @@ mkdirSync(join(stateDirectory, "networks.d"), { mode: 0o700 });
 writeFileSync(join(stateDirectory, "networks.d", "aaaaaaaaaaaaaaaa.conf"), "", { mode: 0o600 });
 const captured = await adapter.capture();
 assert.deepEqual(captured, { ...first, memberships: [{ networkId: "aaaaaaaaaaaaaaaa" }] });
-assert.deepEqual({ active, enabled }, { active: true, enabled: false });
+// Restarting the native daemon changes its live state from helper ownership
+// to its own fixed account. The following verify reads that post-start shape.
+assert.deepEqual({ active, enabled }, { active: true, enabled: true });
+
+// The packaged service owns live state after it starts. Capture and verify
+// must accept exactly its verified fixed account, without granting that owner
+// access to the helper's /run scratch.
+chownSync(scratchDirectory, nativeUid, nativeGid);
+await assert.rejects(adapter.validate({ ...first, memberships: [] }), error => error?.code === "ZEROTIER_STATE_INVALID");
+chownSync(scratchDirectory, 0, 0);
+chownSync(join(stateDirectory, "identity.secret"), nativeUid - 1, nativeGid);
+await assert.rejects(adapter.capture(), error => error?.code === "ZEROTIER_STATE_INVALID");
+chownSync(join(stateDirectory, "identity.secret"), nativeUid, nativeGid);
+await adapter.verify({ operationId: "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa",
+  expected: { config: {}, secrets: {}, linuxOwner: null, zeroTier: captured } });
 
 const second = await generate("second");
 failList = true;
@@ -62,7 +86,7 @@ await assert.rejects(adapter.apply({ operationId: "aaaaaaaa-aaaa-4aaa-8aaa-aaaaa
     zeroTier: { ...second, memberships: [{ networkId: "bbbbbbbbbbbbbbbb" }] } }, context: "activation" }));
 assert.equal(readFileSync(join(stateDirectory, "identity.secret"), "utf8"), first.identitySecret);
 assert.deepEqual(readdirSync(join(stateDirectory, "networks.d")).filter(name => name.endsWith(".conf")), ["aaaaaaaaaaaaaaaa.conf"]);
-assert.deepEqual({ active, enabled }, { active: true, enabled: false });
+assert.deepEqual({ active, enabled }, { active: true, enabled: true });
 
 const recovered = { ...second, memberships: [{ networkId: "bbbbbbbbbbbbbbbb" }, { networkId: "cccccccccccccccc" }] };
 for (const cut of ["secret", "public", "membership"]) {
@@ -87,4 +111,4 @@ for (const cut of ["secret", "public", "membership"]) {
     ["bbbbbbbbbbbbbbbb.conf", "cccccccccccccccc.conf"]);
   assert.deepEqual({ active, enabled }, { active: true, enabled: true });
 }
-process.stdout.write("PASS: pinned ZeroTier idtool validated capture, activation rollback, and authoritative recovery after each identity/membership write boundary.\n");
+process.stdout.write("PASS: ZeroTier Linux fixture validated service-owned capture and post-start verify, strict helper scratch, activation rollback, and authoritative recovery.\n");

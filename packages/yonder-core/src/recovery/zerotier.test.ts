@@ -28,7 +28,7 @@ function fixture(input: { active?: boolean; enabled?: boolean; state?: ZeroTierS
   const root = mkdtempSync(join(tmpdir(), "yonder-zt-test-"));
   const stateDirectory = join(root, "state"), scratchDirectory = join(root, "scratch"), bin = join(root, "bin");
   mkdirSync(stateDirectory, { mode: 0o700 }); mkdirSync(scratchDirectory, { mode: 0o700 }); mkdirSync(bin, { mode: 0o700 });
-  for (const name of ["idtool", "cli", "systemctl", "env"]) writeFileSync(join(bin, name), "fixture", { mode: 0o700 });
+  for (const name of ["idtool", "cli", "systemctl", "env", "getent"]) writeFileSync(join(bin, name), "fixture", { mode: 0o700 });
   let active = input.active ?? false, enabled = input.enabled ?? false, failList = false;
   const calls: string[] = [];
   const write = (state: ZeroTierState) => {
@@ -72,12 +72,13 @@ function fixture(input: { active?: boolean; enabled?: boolean; state?: ZeroTierS
         .map(name => ({ nwid: name.slice(0, 16) }));
       return Buffer.from(JSON.stringify(list));
     }
+    if (command.endsWith("getent")) return Buffer.alloc(0);
     throw new Error("unexpected command");
   } };
   const adapter = new ZeroTierStateAdapter({ stateDirectory, scratchDirectory,
     idtoolPath: join(bin, "idtool"), cliPath: join(bin, "cli"), systemctlPath: join(bin, "systemctl"),
-    envPath: join(bin, "env"), native, clientWaitMs: 0 });
-  return { root, stateDirectory, adapter, calls, service: () => ({ active, enabled }), failList() { failList = true; } };
+    envPath: join(bin, "env"), getentPath: join(bin, "getent"), native, clientWaitMs: 0 });
+  return { root, stateDirectory, scratchDirectory, bin, native, adapter, calls, service: () => ({ active, enabled }), failList() { failList = true; } };
 }
 
 describe("ZeroTier durable-state adapter", () => {
@@ -180,6 +181,21 @@ describe("ZeroTier durable-state adapter", () => {
     const result = await bootstrapWithZeroTier(async () => durable(null), f.adapter)();
     expect(result.zeroTier).toEqual({ identitySecret: "secret-generated", identityPublic: "public-generated", memberships: [] });
     expect(f.service()).toEqual({ active: false, enabled: false });
+  });
+
+  it("keeps validation scratch helper-owned even when a verified native account owns live state", async () => {
+    const f = fixture();
+    const helperUid = (process.getuid?.() ?? 0) + 1;
+    const native: ZeroTierNative = { async run(command, args) {
+      if (command.endsWith("getent")) {
+        return Buffer.from(`zerotier-one:x:${process.getuid?.() ?? 0}:985::/var/lib/zerotier-one:/usr/sbin/nologin\n`);
+      }
+      return f.native.run(command, args);
+    } };
+    const adapter = new ZeroTierStateAdapter({ stateDirectory: f.stateDirectory, scratchDirectory: f.scratchDirectory,
+      idtoolPath: join(f.bin, "idtool"), cliPath: join(f.bin, "cli"), systemctlPath: join(f.bin, "systemctl"),
+      envPath: join(f.bin, "env"), getentPath: join(f.bin, "getent"), native, expectedUid: helperUid, clientWaitMs: 0 });
+    await expect(adapter.validate(stateA)).rejects.toMatchObject({ code: "ZEROTIER_STATE_INVALID" });
   });
 
   it("adds the configured membership to a freshly generated bootstrap identity", async () => {

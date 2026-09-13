@@ -169,10 +169,9 @@ else
     mount -o remount,ro "$root"
     ram_copy etc 32m 755
 fi
-# The initramfs runs before systemd establishes the normal volatile /run.
-# Mount it here so the storage-mode handoff is writable even with a protected
-# root and survives switch_root for the administrator service to observe.
-ram_copy run 8m 755
+# initramfs-tools moves its own /run onto the mounted root after init-bottom.
+# Write the handoff there; mounting a second $root/run here would be covered by
+# that move and leave PID 1 without the observed storage mode.
 for mapping in 'config etc/yonder' 'ssh etc/ssh' 'app var/lib/yonder' \
         'networkmanager var/lib/NetworkManager' 'zerotier var/lib/zerotier-one' \
         'systemd var/lib/systemd'; do
@@ -235,5 +234,5 @@ if { [ "$maintenance_mode" -eq 1 ] && [ "$observed_mode" != maintenance ]; } ||
     echo 'Yonder storage prototype: system filesystem mode differs from boot request.' >&2
     exit 1
 fi
-printf '%s\n' "$observed_mode" >"$root/run/yonder-storage-mode"
+printf '%s\n' "$observed_mode" >/run/yonder-storage-mode
 echo 'Yonder storage prototype: mounts ready; physical qualification pending.'

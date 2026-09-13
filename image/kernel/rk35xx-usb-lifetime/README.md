@@ -37,12 +37,23 @@ image/kernel/rk35xx-usb-lifetime/build.sh /work/yonder-usb-kernel
 ```
 
 `YONDER_KERNEL_JOBS` defaults to 6. Output includes Image, System.map,
-Module.symvers, configuration and hashes. This command does not install or reboot.
+Module.symvers, configuration, hashes, and a verified
+`kernel-modules-6.1.115-vendor-rk35xx.tar.gz`. The module archive contains only
+matching in-tree modules and their `modules.order`/built-in metadata. It is made
+with `INSTALL_MOD_STRIP=1`, retains `.BTF`, and excludes the builder-only `build`
+and `source` links. Its adjacent manifest and metadata record every payload hash,
+the linked kernel inputs, the in-tree module count, and BTF checks for IPv6, HIDP,
+and RFCOMM. This command does not install or reboot.
+
 It retains `6.1.115-vendor-rk35xx`; compare every exported symbol CRC against the
-installed kernel before considering existing modules compatible. Preserve DTBs,
-overlays, camera tuning, boot arguments and external camera/Wi-Fi modules if that
-comparison proves compatibility. Otherwise rebuild the external modules and
-validate the complete replacement before activation.
+installed kernel before considering external modules compatible. Matching
+`Module.symvers` alone does **not** permit retaining old in-tree modules when the
+replacement kernel's split BTF changed: their BTF references the old `vmlinux`.
+Deploy the matching kernel and this complete in-tree module payload together, then
+regenerate the initrd. Preserve DTBs, overlays, camera tuning and boot arguments.
+External DKMS modules, including camera and Wi-Fi modules, are deliberately not in
+the archive: preserve or rebuild them separately against the replacement kernel
+and validate the complete replacement before activation.
 
 A rebuild is not physical qualification. Retain original boot files and a rollback
 path; verify normal FunctionFS teardown, CSI/DJI pictures, and repeated warm reboot

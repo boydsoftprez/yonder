@@ -9,6 +9,8 @@ trap report_error ERR
 [[ -f /.dockerenv && ( $# == 1 || ( $# == 2 && $2 == production ) ) \
     && $1 =~ ^/dev/loop[0-9]+$ ]]
 offset_root_loop=$1
+mount --make-rprivate /
+initramfs_run_mounted=0
 production=0
 [[ ${2:-} == production ]] && production=1
 [[ $(losetup -n -O BACK-FILE "$offset_root_loop") == /work/disk.img ]]
@@ -47,6 +49,7 @@ cleanup() {
     set +e
     cleanup_state_smoke
     unmount_prototype
+    if [[ $initramfs_run_mounted == 1 ]]; then umount /run; fi
     if loop_is_ours "$disk_loop"; then
         losetup -d "$disk_loop"
         for partition in {1..4}; do
@@ -71,7 +74,12 @@ boot_mount() {
     mount -o rw "$root_loop" /prototype
     touch /prototype/usr/.yonder-write-precondition
     rm /prototype/usr/.yonder-write-precondition
+    # Give this disposable container the same source /run as initramfs-tools.
+    mount -t tmpfs -o size=8m,mode=0755,nosuid,nodev tmpfs /run
+    initramfs_run_mounted=1
     /bin/sh /prototype/usr/lib/yonder/storage-prototype/mount-storage.sh /prototype
+    mount -n -o move /run /prototype/run
+    initramfs_run_mounted=0
     options=$(findmnt -n -T /prototype -o OPTIONS)
     case "$expected_mode:,$options," in
         protected:*,ro,*) ;;
