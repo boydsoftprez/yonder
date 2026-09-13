@@ -12,6 +12,7 @@
 : "${YONDER_SEEKER_UNIT_DIR:=${YONDER_SEEKER_ROOT}/etc/systemd/system}"
 : "${YONDER_SEEKER_PROC_COMPATIBLE:=${YONDER_SEEKER_ROOT}/proc/device-tree/compatible}"
 : "${YONDER_SEEKER_ARMBIAN_ENV:=${YONDER_SEEKER_ROOT}/boot/armbianEnv.txt}"
+: "${YONDER_SEEKER_BOOTARGS:=${YONDER_SEEKER_LIB_DIR}/bootargs.py}"
 : "${YONDER_SEEKER_MODULES_LOAD_CONF:=${YONDER_SEEKER_ROOT}/etc/modules-load.d/yonder-seekerhd.conf}"
 : "${YONDER_SEEKER_PROFILE_BIN:=${YONDER_SEEKER_ROOT}/usr/local/bin/yonder-camera-profile}"
 
@@ -45,6 +46,23 @@ seekerhd_require_kernel_headers() {
             || die "kernel $srkh_kernel has no matching build headers; refusing a camera image whose next boot could not load its sensor driver"
     done
     printf '%s\n' "$srkh_kernels"
+}
+
+seekerhd_require_notifier_blacklist_support() {
+    snbs_kernels=$(seekerhd_kernel_releases)
+    [ -n "$snbs_kernels" ] || die "the target root contains no vendor-rk35xx kernel modules"
+    for snbs_kernel in $snbs_kernels; do
+        snbs_config="$YONDER_SEEKER_ROOT/boot/config-$snbs_kernel"
+        snbs_map="$YONDER_SEEKER_ROOT/boot/System.map-$snbs_kernel"
+        [ -r "$snbs_config" ] \
+            || die "kernel $snbs_kernel has no installed boot config at $snbs_config; cannot verify initcall_blacklist support"
+        grep -qxF 'CONFIG_KALLSYMS=y' "$snbs_config" \
+            || die "kernel $snbs_kernel lacks CONFIG_KALLSYMS=y; initcall_blacklist=rkisp_clr_unready_dev is unsupported"
+        [ -r "$snbs_map" ] \
+            || die "kernel $snbs_kernel has no installed System.map at $snbs_map; cannot verify the RKISP callback"
+        grep -Eq '[[:space:]]rkisp_clr_unready_dev$' "$snbs_map" \
+            || die "kernel $snbs_kernel System.map does not contain rkisp_clr_unready_dev; refusing an unsupported SeekerHD boot correction"
+    done
 }
 
 seekerhd_validate_module_version() {
@@ -189,6 +207,9 @@ seekerhd_validate_overlay_stack() {
 
 seekerhd_verify_install() {
     svi_kernels=$(seekerhd_require_kernel_headers)
+    seekerhd_require_notifier_blacklist_support
+    python3 "$YONDER_SEEKER_BOOTARGS" --check "$YONDER_SEEKER_ARMBIAN_ENV" \
+        || die "$YONDER_SEEKER_ARMBIAN_ENV does not preserve the RKISP notifier correction"
     for svi_kernel in $svi_kernels; do
         svi_module=$(find "$YONDER_SEEKER_MODULES_DIR/$svi_kernel" -type f \
             -name 'imx462_yonder.ko*' -print -quit 2>/dev/null || true)
@@ -209,6 +230,7 @@ seekerhd_verify_install() {
         "$YONDER_SEEKER_BOOT_OVERLAY_DIR/seekerhd-imx462.dtbo" \
         "$YONDER_SEEKER_LIB_DIR/librkaiq.so" \
         "$YONDER_SEEKER_LIB_DIR/rkaiq_3A_server" \
+        "$YONDER_SEEKER_BOOTARGS" \
         "$YONDER_SEEKER_LIB_DIR/prepare.py" \
         "$YONDER_SEEKER_PROFILE_BIN" \
         "$YONDER_SEEKER_MODULES_LOAD_CONF" \

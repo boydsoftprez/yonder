@@ -12,6 +12,13 @@ failures=0
 ok() { printf 'ok - %s\n' "$*"; }
 bad() { printf 'not ok - %s\n' "$*"; failures=$((failures + 1)); }
 
+if python3 -m unittest "$REPO/installer/seekerhd/test_bootargs.py" >"$out" 2>&1; then
+    ok "boot arguments preserve and verify the RKISP notifier correction"
+else
+    bad "boot argument correction contract failed"
+    sed 's/^/      /' "$out"
+fi
+
 # The payload builder exposes SeekerHD as an explicit ARM64-only component.
 # This stops before network or container work and proves the selector routes
 # to the camera component rather than rejecting the name or building for x64.
@@ -199,6 +206,7 @@ for fixture in \
     "$root/boot/overlay-user/seekerhd-imx462.dtbo" \
     "$root/usr/local/lib/yonder-seekerhd/librkaiq.so" \
     "$root/usr/local/lib/yonder-seekerhd/rkaiq_3A_server" \
+    "$root/usr/local/lib/yonder-seekerhd/bootargs.py" \
     "$root/usr/local/lib/yonder-seekerhd/prepare.py" \
     "$root/usr/local/bin/yonder-camera-profile" \
     "$root/etc/modules-load.d/yonder-seekerhd.conf" \
@@ -217,9 +225,15 @@ for fixture in \
     "$root/usr/src/imx462-yonder-1.0.0/imx462_hdr2.h"; do
     printf '%s\n' fixture >"$fixture"
 done
+cp "$REPO/installer/seekerhd/bootargs.py" "$root/usr/local/lib/yonder-seekerhd/bootargs.py"
+chmod 0755 "$root/usr/local/lib/yonder-seekerhd/bootargs.py"
 printf '%s\n' 'mode linear' >"$root/usr/local/share/yonder-seekerhd/SOURCES"
 printf '%s\n' imx462_yonder >"$root/etc/modules-load.d/yonder-seekerhd.conf"
-printf '%s\n' 'user_overlays=uart2-m0 seekerhd-imx462' >"$root/boot/armbianEnv.txt"
+printf '%s\n' 'user_overlays=uart2-m0 seekerhd-imx462' \
+    'extraargs=initcall_blacklist=rkisp_clr_unready_dev' >"$root/boot/armbianEnv.txt"
+printf '%s\n' 'CONFIG_KALLSYMS=y' >"$root/boot/config-6.1.115-vendor-rk35xx"
+printf '%s\n' 'ffff000000000000 t rkisp_clr_unready_dev' \
+    >"$root/boot/System.map-6.1.115-vendor-rk35xx"
 printf '%s\n' normal >"$root/usr/local/share/yonder-seekerhd/profiles/normal-light.json"
 printf '%s\n' low >"$root/usr/local/share/yonder-seekerhd/profiles/low-light.json"
 printf '%s\n' legacy >"$root/usr/local/share/yonder-seekerhd/profiles/legacy-low-light.json"
@@ -275,6 +289,27 @@ else
     bad "a complete staged camera stack failed post-install verification"
     sed 's/^/      /' "$out"
 fi
+
+printf '%s\n' 'ffff000000000000 t unrelated_initcall' \
+    >"$root/boot/System.map-6.1.115-vendor-rk35xx"
+if /bin/sh -c '
+    set -eu
+    DRY_RUN=0 IMAGE_MODE=1 YONDER_TARGET=radxa-zero3w
+    YONDER_SEEKER_ROOT=$1
+    YONDER_SEEKER_MODULES_DIR=$1/lib/modules
+    . "$2/installer/lib/common.sh"
+    . "$2/installer/lib/seekerhd.sh"
+    seekerhd_require_notifier_blacklist_support
+' sh "$root" "$REPO" >"$out" 2>&1; then
+    bad "an unsupported kernel without the RKISP callback was accepted"
+elif grep -q 'System.map does not contain rkisp_clr_unready_dev' "$out"; then
+    ok "kernel verification rejects a target without the RKISP initcall callback"
+else
+    bad "missing RKISP callback failed without identifying the unsupported kernel"
+    sed 's/^/      /' "$out"
+fi
+printf '%s\n' 'ffff000000000000 t rkisp_clr_unready_dev' \
+    >"$root/boot/System.map-6.1.115-vendor-rk35xx"
 rm -f "$root/lib/modules/6.1.115-vendor-rk35xx/updates/dkms/imx462_yonder.ko"
 if /bin/sh -c '
     set -eu
@@ -292,8 +327,11 @@ if /bin/sh -c '
     seekerhd_verify_install
 ' sh "$root" "$REPO" >"$out" 2>&1; then
     bad "post-install verification accepted a missing kernel module"
-else
+elif grep -q 'kernel 6.1.115-vendor-rk35xx has no installed imx462_yonder module' "$out"; then
     ok "post-install verification rejects a kernel without the camera module"
+else
+    bad "missing camera module failed without identifying the module"
+    sed 's/^/      /' "$out"
 fi
 
 if [ "$failures" -ne 0 ]; then
