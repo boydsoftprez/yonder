@@ -5,8 +5,9 @@ Requirements: R-DIA-08, R-CAM-05, R-STO-04, R-STO-07 and R-FLT-27.
 The Mule runs a private ZERO 3W bench image with protected system storage,
 persistent configuration, and a separate p5 terrain filesystem. Its application
 upgrade uses the consolidated branch containing main `5c783e9` and the September
-camera/cockpit fixes. The update is installed; physical qualification is pending
-the first boot of the replacement kernel.
+camera/cockpit fixes. The repaired kernel has booted on the Mule. Both CSI and DJI
+deliver decoded frames, and ZeroTier recovered with its original identity.
+Ordinary warm-reboot qualification remains incomplete.
 
 ## Kernel diagnosis and build
 
@@ -29,8 +30,12 @@ lookup; the revised patch has no remaining review findings.
 
 `make -j6 Image modules` passed with the installed configuration unchanged.
 All 19,567 exported symbols have identical CRCs; none were added or removed.
-This supports retaining the installed headers, external IMX462/AIC8800 modules,
-DTBs and camera overlays. The rebuilt Image SHA-256 is
+The installed headers, external IMX462/AIC8800 modules, DTBs and camera overlays
+are retained. Identical CRCs do not establish split-BTF compatibility: the first
+replacement-kernel boot rejected the old IPv6, HIDP and RFCOMM modules.
+Installing all 2,300 matching in-tree modules fixed those load failures; five
+external module files were preserved. The build recipe now packages matching
+modules, checks their BTF sections and emits a manifest. The rebuilt Image SHA-256 is
 `e22f69c3a205c4c1bbf0037930eb2cb0bfd9f363b4f81542776200e2f193ab28`.
 Its build identifier is `yonder@mule-usb-lifetime-fix`, dated
 `2026-09-13 02:09:01 UTC`, with release `6.1.115-vendor-rk35xx`.
@@ -49,12 +54,19 @@ The expanded generated-initramfs verifier covers extra partitions, a missing ben
 marker, malformed terrain identity, successful p5 mounting without growth, and
 read-only fallback after a terrain UUID mismatch. Shell syntax/ShellCheck and the
 six image build tests passed. The static maintenance-token tests passed.
-The generated ARM64 initramfs passed the privileged, isolated loop-device tests,
-including exact p1–p5 admission, p6 rejection, UUID-bound terrain mounting and
-read-only fallback. Its SHA-256 is
-`1daa85540e590f929e48610a5d83553fe34e617461166586e187d6fb32bc29b4`.
+The first archive passed isolated mount tests but lost its storage-mode marker
+at the actual initramfs-to-root handoff. initramfs-tools moves its own /run onto
+the root after init-bottom, covering a second root-side /run. The fix writes the
+observed marker into the existing initramfs /run. The verifier now executes that
+exact move. An injected pre-move failure also verifies owned-loop cleanup.
+
+The regenerated archive contains matching kernel modules and passed the actual
+archive tests without a source overlay, including p1-p5 admission, p6 rejection,
+UUID-bound terrain mounting, read-only fallback and the /run handoff. Its SHA-256 is
+`84aeefb1507823572c842135b20c4a5d10eda5c260674175ff5b7535c054d9db`.
 The U-Boot wrapper uses the original board's ARM64/gzip flags; both header and
-payload CRCs were verified. Physical reboot qualification is pending.
+payload CRCs were verified. Its SHA-256 is
+`7d452eefc01ff88cec4baa0d7a3858089615a213f43182c7cd025522a93d77dd`.
 
 ## Deployment boundaries
 
@@ -77,7 +89,7 @@ EOF race into cleanup. Ordinary FunctionFS teardown and normal warm reboots must
 then pass on the replacement kernel; that activation procedure is not a permanent
 service behavior change.
 
-## Installed state and first reboot
+## Initial activation and cold boot
 
 The installed application matches all 901 first-party files from `2b4ff75`.
 The kernel/storage repair is retained in branch commit `069f0a0`. Boot now selects
@@ -96,5 +108,36 @@ SIGTERM policy restored before reboot. PID 1's root mount remained read-only.
 An ordinary `systemctl reboot --no-block` request was accepted, and SSH closed.
 The Mule did not return during the initial observation window. A physical power
 cycle was requested to load the replacement from the already-faulted old kernel.
-There is no verified replacement-kernel boot, camera result or successful warm
-reboot yet; those checks remain required before calling the hardware repaired.
+The subsequent cold boot loaded the replacement kernel, with boot ID
+`6f6ab25d-d6fb-4fa0-89ab-6d0dea9914a5`. It joined local Wi-Fi at 192.168.68.72.
+The missing /run marker and native ZeroTier ownership check blocked admin
+startup, explaining the absent mesh address. The board itself had booted.
+
+## Startup recovery on the replacement kernel
+
+The installed ZeroTier 1.16.2 daemon owns its live identity and membership files
+as its fixed non-login service account. The new recovery adapter incorrectly
+required root ownership. It now accepts the verified native account for live
+state while retaining helper-owned scratch, strict file types/modes, and existing
+identity validation. The pinned real ZeroTier package passed the Linux fixture
+covering native ownership, activation rollback and interrupted recovery.
+All 17 adapter unit tests and the core build passed.
+
+The normal admin service captured the existing identity and restored ZeroTier
+without rejoining or regenerating it. The console returned on 10.113.83.24.
+Nine protected file hashes still matched. The diagnostic startup override was
+removed. Normal core shutdown/startup completed with kernel taint unchanged at
+4096 (external modules only), without an Oops.
+
+Source commit `e82a231` records the startup fixes and matching-module packaging.
+The deployed application retains the consolidated `2b4ff75` build plus its rebuilt
+ZeroTier adapter. Boot selects the repaired usb1 Image and usb2 initramfs.
+Both CSI and DJI passed a local GStreamer read/decode test through their actual
+MediaMTX preview paths, reaching EOS after 16 decoded buffers. The camera API
+reports `mppvideodec` hardware H.264 decoding and zero pipeline restarts.
+Early frame probes returned 404 before the publishers became ready; the bounded
+retry test verified actual frames once publication began.
+
+An ordinary warm reboot was then requested from the repaired kernel. SSH closed,
+but neither known address returned during the first observation window. The
+kernel cleanup repair and working cameras do not yet establish reliable reboot.
