@@ -24,6 +24,30 @@ export async function prepareCameraPair(page, selected) {
   assert.equal(await page.locator('.y-pg__ptr').count(), 0, 'no pointer for an unreported position');
   assert.equal(await page.locator('.y-strip__age').count(), 2, 'both actual frames have a reported age');
 
+  if (await page.locator('.y-deck--workspace').count()) {
+    const handle = page.locator('.y-aimpanel__handle');
+    const picture = await page.locator('img.y-pic__video').elementHandle();
+    const openWidth = (await page.locator('#nrdb-ui-group-group-cam-picture').boundingBox()).width;
+    await handle.click();
+    await page.locator('.y-aimpanel[data-aim-state="closed"]').waitFor({state: 'attached'});
+    const card = await page.locator('#nrdb-ui-group-group-cam-aim > .v-card').evaluate(el => {
+      const style = getComputedStyle(el);
+      return {background: style.backgroundColor, border: style.borderTopWidth, padding: style.paddingTop, shadow: style.boxShadow};
+    });
+    assert.deepEqual(card, {background: 'rgba(0, 0, 0, 0)', border: '0px', padding: '0px', shadow: 'none'}, 'collapsed Aim has no empty dashboard frame');
+    assert.equal(await page.locator('#nrdb-ui-group-group-cam-aim .v-card-text').evaluate(el => getComputedStyle(el).padding), '0px', 'collapsed Aim has no inner card padding');
+    const handleBox = await handle.boundingBox();
+    assert(handleBox.width >= 44 && handleBox.height === 44, 'collapsed Aim is a compact touch target');
+    assert((await page.locator('.y-aimpanel').boundingBox()).height >= handleBox.height, 'collapsed Aim contains its touch target');
+    const closedWidth = (await page.locator('#nrdb-ui-group-group-cam-picture').boundingBox()).width;
+    assert(closedWidth >= openWidth, 'collapse preserves or expands preview width');
+    assert(await picture.evaluate(el => el === document.querySelector('img.y-pic__video')), 'collapse preserves the preview element');
+    await handle.click();
+    await page.locator('.y-aimpanel[data-aim-state="open"]').waitFor({state: 'attached'});
+    assert(await picture.evaluate(el => el === document.querySelector('img.y-pic__video')), 'reopen preserves the preview element');
+    await picture.dispose();
+  }
+
   if (selected === 'tail') {
     const previous = await page.locator('img.y-pic__video').getAttribute('src');
     await thumbs.filter({hasText: 'Tail camera'}).click();

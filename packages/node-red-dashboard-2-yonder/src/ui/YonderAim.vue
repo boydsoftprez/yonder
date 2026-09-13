@@ -684,6 +684,18 @@ export default {
     outline: none;
 }
 .y-aimpanel__handle i { display: block; margin-top: 5px; font-size: 16px; font-style: normal; line-height: 1; }
+.y-aimpanel[data-aim-state='closed'] .y-aimpanel__handle {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    gap: 5px;
+    box-sizing: border-box;
+    width: 56px;
+    height: 44px;
+    padding: 8px 6px;
+    border-radius: 3px;
+}
+.y-aimpanel[data-aim-state='closed'] .y-aimpanel__handle i { order: -1; margin: 0; }
 .y-aimpanel__drawer { order: 1; min-width: 0; flex: 1; padding: 0 4px; }
 
 /* A narrow screen keeps the receiver at its normal width. The drawer sits

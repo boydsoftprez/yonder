@@ -1,0 +1,116 @@
+{
+  "recordedAt": "2026-09-13T15:19:43.295734+00:00",
+  "baseCommit": "a001780",
+  "board": "Mule / Radxa Zero 3W",
+  "model": "DJI HG211",
+  "rollMaximumDegS": 120,
+  "rollDefaultDegS": 30,
+  "rollPreference": "yonder:aim:roll-speed",
+  "panTiltDefaultDegS": 60,
+  "changedFiles": [
+    {
+      "source": "packages/yonder-core/dist/video/accessory/guard.js",
+      "target": "/opt/yonder/packages/yonder-core/dist/video/accessory/guard.js",
+      "before": "ccc2fa9878d655e02b6e9f0382df2ca2ae776de0056990db34941906373c9e9f",
+      "after": "6f6bfe42675fc509459da644e096d70f4db2c1b7332b997159148024c87fb6d2"
+    },
+    {
+      "source": "packages/node-red-dashboard-2-yonder/resources/ui-yonder-aim.umd.js",
+      "target": "/opt/yonder/console/node_modules/node-red-dashboard-2-yonder/resources/ui-yonder-aim.umd.js",
+      "before": "6ed310baf67ef0bdf525a841d5a65e8f7ac8cacdcfc70ba7e941505a3ce27cce",
+      "after": "6e99e37b0478409cb42dea6c0849d66edc7e1cb04e155e177dbf73d699b912ad"
+    },
+    {
+      "source": "packages/node-red-dashboard-2-yonder/resources/ui-yonder-picture.umd.js",
+      "target": "/opt/yonder/console/node_modules/node-red-dashboard-2-yonder/resources/ui-yonder-picture.umd.js",
+      "before": "432f8d6e2ea31ca6f11689dafdffaa4fc49194c0a4cadf4eb5a0d9d14d27c573",
+      "after": "f507b3791b5af8efd6dc4fb66635c452d0935ce0cbef2aecf0982cf552c1621e"
+    }
+  ],
+  "verifiedRuntimeFiles": [
+    {
+      "source": "packages/yonder-core/dist/video/accessory/guard.js",
+      "target": "/opt/yonder/packages/yonder-core/dist/video/accessory/guard.js",
+      "hash": "6f6bfe42675fc509459da644e096d70f4db2c1b7332b997159148024c87fb6d2"
+    },
+    {
+      "source": "packages/yonder-core/dist/video/accessory/intent.js",
+      "target": "/opt/yonder/packages/yonder-core/dist/video/accessory/intent.js",
+      "hash": "7da6a59c5810ae32305c576153766a7f1287406c5529826925ddd17a14bb256a"
+    },
+    {
+      "source": "packages/yonder-core/dist/video/accessory/gimbal.js",
+      "target": "/opt/yonder/packages/yonder-core/dist/video/accessory/gimbal.js",
+      "hash": "de0c8842454c21e1c28dcc801ba9d65758e7cc2aa2021fe28430f97f73ce227f"
+    },
+    {
+      "source": "packages/yonder-core/dist/video/accessory/rotation-progress.js",
+      "target": "/opt/yonder/packages/yonder-core/dist/video/accessory/rotation-progress.js",
+      "hash": "c3c605b2990b9033fcb8995e415eb5e010bd61095bdbe78c261f053b3aa307a0"
+    },
+    {
+      "source": "packages/yonder-core/dist/video/accessory/requests.js",
+      "target": "/opt/yonder/packages/yonder-core/dist/video/accessory/requests.js",
+      "hash": "b3f54e5d195f670b04257d132bf4d331b2b02bca9b043ad1ec10c875686c4510"
+    },
+    {
+      "source": "packages/yonder-core/dist/video/accessory/source.js",
+      "target": "/opt/yonder/packages/yonder-core/dist/video/accessory/source.js",
+      "hash": "551fbb30c0d4e190ec7764d8c265619be6f8eeeabc91188a82dfc9c3482ea820"
+    },
+    {
+      "source": "packages/yonder-core/dist/video/present.js",
+      "target": "/opt/yonder/packages/yonder-core/dist/video/present.js",
+      "hash": "c07fde088e1c03dcdad1996b850c14ac02274ec2856a2b9dff075fb631797339"
+    },
+    {
+      "source": "packages/node-red-dashboard-2-yonder/resources/ui-yonder-aim.umd.js",
+      "target": "/opt/yonder/console/node_modules/node-red-dashboard-2-yonder/resources/ui-yonder-aim.umd.js",
+      "hash": "6e99e37b0478409cb42dea6c0849d66edc7e1cb04e155e177dbf73d699b912ad"
+    },
+    {
+      "source": "packages/node-red-dashboard-2-yonder/resources/ui-yonder-picture.umd.js",
+      "target": "/opt/yonder/console/node_modules/node-red-dashboard-2-yonder/resources/ui-yonder-picture.umd.js",
+      "hash": "f507b3791b5af8efd6dc4fb66635c452d0935ce0cbef2aecf0982cf552c1621e"
+    }
+  ],
+  "services": {
+    "yonder-core": "active",
+    "yonder-console": "active"
+  },
+  "rootMount": "read-only",
+  "configurationAndSecretsHashesUnchanged": true,
+  "activationUsbPauseSeconds": 45,
+  "backup": "/var/lib/yonder/maintenance/pocket-roll-120-collapse-20260913",
+  "videoBeforeInstall": "stopped",
+  "videoAfterInstall": "stopped",
+  "modeBeforeInstall": 1,
+  "modeAfterInstall": 1,
+  "reportedRollControl": {
+    "available": true,
+    "reason": null,
+    "maxRate": 120
+  },
+  "measurementStatus": "No gimbal motion, mode or recenter command sent. Operator retains control. Mechanical speed and post-release travel at 120 degrees per second remain unmeasured.",
+  "automatedChecks": {
+    "coreFocusedPassed": 156,
+    "widgetPassed": 1174,
+    "browserCasesPassed": 8,
+    "fullSweep": {
+      "passed": 217,
+      "failed": 2,
+      "failureScope": "Initial night camera-pair checks exposed inner card padding and a background transition; corrected before installation. Later day checks passed."
+    },
+    "finalCameraPairRerun": {
+      "passed": 100,
+      "failed": 0,
+      "palettes": [
+        "night",
+        "day"
+      ]
+    },
+    "acceptedNewGeometry": false,
+    "workspaceBuild": "passed",
+    "finalWidgetBuild": "passed"
+  }
+}

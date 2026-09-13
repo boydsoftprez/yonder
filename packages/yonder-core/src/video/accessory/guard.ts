@@ -1,8 +1,8 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 /** Published Pocket 2 controllable speed; native joint/fault/intent guards still apply. */
 export const HG211_MAX_RATE_DEG_S = 120;
-/** Engineering ceiling; higher-rate stop response remains pending bounded HG211 measurement. */
-export const HG211_MAX_ROLL_RATE_DEG_S = 30;
+/** Roll shares the configured rate ceiling; native joint/fault/intent guards still apply. */
+export const HG211_MAX_ROLL_RATE_DEG_S = HG211_MAX_RATE_DEG_S;
 /** R-CAM-11 / R-TEL-15: unknown measurements remain unknown. */
 export interface GimbalAttitude {
   pitch: number; roll: number; yaw: number; mode: number; at: number;

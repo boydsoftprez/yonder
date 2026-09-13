@@ -1893,6 +1893,23 @@ export default {
 :global(#nrdb-page-page-camera #nrdb-ui-group-group-cam-aim) { grid-row: 1 !important; grid-column: 1 / -1 !important; justify-self: end; align-self: start; width: min(340px, 100%); z-index: 5; }
 :global(#nrdb-page-page-camera #nrdb-ui-group-group-cam-aim:has([data-aim-state="absent"])) { display: none !important; }
 :global(#nrdb-page-page-camera #nrdb-ui-group-group-cam-aim:has([data-aim-state="closed"])) { width: 56px; background: transparent; border: 0; }
+/* The Dashboard's card owns the bezel, not the outer group. A closed Aim
+   leaves only its edge tab; no empty display or card padding surrounds it. */
+:global(#nrdb-page-page-camera #nrdb-ui-group-group-cam-aim:has([data-aim-state="closed"]) > .v-card) {
+    background: transparent !important;
+    border: 0 !important;
+    box-shadow: none !important;
+    padding: 0 !important;
+    min-height: 0;
+    overflow: visible;
+    transition: none;
+}
+:global(#nrdb-page-page-camera #nrdb-ui-group-group-cam-aim:has([data-aim-state="closed"]) .v-card-text),
+:global(#nrdb-page-page-camera #nrdb-ui-group-group-cam-aim:has([data-aim-state="closed"]) .nrdb-ui-group-content) {
+    padding: 0 !important;
+    gap: 0;
+    min-height: 0;
+}
 :global(#nrdb-page-page-camera #nrdb-ui-group-group-cam-aim .nrdb-ui-group-content) { padding: 0; }
 @container camera-workspace (min-width: 900px) {
     :global(#nrdb-page-page-camera:has(.y-aimpanel[data-aim-state="open"]) #nrdb-ui-group-group-cam-picture) { margin-right: 352px; }

@@ -298,10 +298,10 @@ const BELLY_CAPABILITIES = {
 export const SPECIMENS = [
   { id: "roll-live", title: "Roll — verified rate control", component: YonderRollStrip, part: true,
     note: "Separate spring-return roll rate control; synthetic measured feedback. Release or interruption stops the hold.",
-    props: { roll: 28.8, maxRate: 30, available: true, reason: "" } },
+    props: { roll: 28.8, maxRate: 120, available: true, reason: "" } },
   { id: "roll-unavailable", title: "Roll — awaiting verification", component: YonderRollStrip, part: true,
     note: "Native roll remains visible while rate control is unavailable; no command is emitted.",
-    props: { roll: -4.5, maxRate: 30, available: false, reason: "Roll control has not been verified for this camera." } },
+    props: { roll: -4.5, maxRate: 120, available: false, reason: "Roll control has not been verified for this camera." } },
   {
     title: "Aim — six saved positions",
     note: "Handle-relative positions, with explicit recall and Stop. Fixture data only; no camera connection.",

@@ -51,14 +51,15 @@ deadlines were not extended.
 The public roll capability is enabled only for a live, identified DJI HG211 in
 FPV with native joint feedback. The initial maximum was 1°/s, the first tested
 speed. The operator subsequently approved a 30°/s operating maximum and an
-independent roll speed setting; see the operating-speed evaluation below.
+independent roll speed setting, then requested the same 120°/s ceiling as pan/tilt;
+see the operating-speed evaluation below.
 Free and Follow continue to offer their existing pan/tilt controls; the roll
 strip explains that FPV is required.
 
 Roll uses the existing single-use 500 ms intent chain and native fault, limit,
 freshness, mode and dispatch checks. Mixed pan/tilt/roll requests are rejected.
 The independent strip springs to center on release. Roll has its own saved
-speed preference (30°/s default, selectable 1–30°/s); expo remains shared with
+speed preference (30°/s default, selectable 1–120°/s); expo remains shared with
 pan/tilt. Each control remains bounded by its reported capability. Shift requests one quarter
 speed; input below the 0.1°/s wire resolution remains at rest. Starting another
 manual surface or a preset retires the previous hold. Saved presets remain
@@ -175,3 +176,35 @@ eight offline tests; no physical higher-rate result is inferred from them.
 
 The [installation record](evidence/pocket2-roll-speed-install-2026-09-13.json)
 identifies the installed files and the pending hardware evidence.
+
+## Common 120°/s ceiling
+
+The operator subsequently requested the same 120°/s maximum for roll as for
+pan/tilt. The default remains 30°/s, with an independent saved setting from
+1 to 120°/s. The mode gate, ordinary native rate flags, intent lifetime and Stop
+behavior are unchanged. This is a configured command ceiling; neither the
+earlier low-speed checks nor software tests establish mechanical roll speed or
+post-release travel at 120°/s. The operator retained control, and this update
+sends no gimbal motion or mode command.
+
+Boundary tests admit both ±120°/s and reject values above the ceiling. They
+check the native roll wire field at offset two and retain mixed-axis rejection.
+Browser checks cover the 30°/s default, selecting 120°/s, persistence and release.
+The accompanying Aim layout change removes the closed Dashboard card's frame
+and inner padding, leaving a 56 × 44 px tab. Real Dashboard checks exercise
+collapse and reopen while preserving the preview element; component-fixture
+checks also preserve the receiver stream at desktop and phone widths in both
+palettes.
+
+Verification passed 156 focused core tests, 1,174 widget tests, the workspace
+build and the final widget rebuild. Eight browser cases covered roll and the
+collapsed tab. The full dashboard sweep initially returned 217 passes and two
+night camera-pair failures, which exposed the actual card body's padding and
+background transition. After correcting those layers, its day camera-pair
+checks passed and a final focused real-Dashboard rerun passed all 100 checks in
+both palettes. Unaffected full-sweep evidence was retained; no geometry baseline
+was accepted. The [120°/s installation record](evidence/pocket2-roll-120-install-2026-09-13.json)
+records runtime hashes and preservation of the operator's video state. Video
+was stopped immediately before installation and remained stopped afterward.
+The camera returned in FPV with roll available and a reported 120°/s ceiling;
+all nine runtime hashes matched the build.

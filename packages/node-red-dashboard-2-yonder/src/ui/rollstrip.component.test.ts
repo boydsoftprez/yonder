@@ -108,7 +108,7 @@ describe('Roll strip', () => {
 
     it('defaults to 30 independently of pan/tilt speed and retains fine movement near centre', () => {
         localStorage.setItem(SPEED_KEY, '20')
-        const wrapper = strip()
+        const wrapper = strip({ maxRate: 120 })
         const track = wrapper.find('.y-roll__track').element
         track.dispatchEvent(pointer('pointerdown', 100))
         expect(slews(wrapper)[0]!.roll).toBeGreaterThan(1)
@@ -124,6 +124,27 @@ describe('Roll strip', () => {
         window.dispatchEvent(new CustomEvent(AIM_RESPONSE_CHANGED, { detail: { key: EXPO_KEY, value: 100 } }))
         expect(stops(wrapper)).toHaveLength(1)
         wrapper.unmount()
+    })
+
+    it('offers the backend 120 cap and restores it for both directions without changing pan/tilt speed', async () => {
+        localStorage.setItem(SPEED_KEY, '60')
+        const wrapper = strip({ maxRate: 120 })
+        const slider = wrapper.find('input[aria-label="Maximum roll speed"]')
+        expect(slider.attributes('max')).toBe('120')
+        expect((slider.element as HTMLInputElement).value).toBe('30')
+        await slider.setValue('120')
+        expect(localStorage.getItem(ROLL_SPEED_KEY)).toBe('120')
+        expect(localStorage.getItem(SPEED_KEY)).toBe('60')
+        wrapper.unmount()
+        const restored = strip({ maxRate: 120 })
+        const track = restored.find('.y-roll__track').element
+        track.dispatchEvent(pointer('pointerdown', 156))
+        expect(slews(restored).at(-1)!.roll).toBe(120)
+        track.dispatchEvent(pointer('pointermove', 4))
+        expect(slews(restored).at(-1)!.roll).toBe(-120)
+        fire(track, 'pointerup')
+        expect(stops(restored)).toHaveLength(1)
+        restored.unmount()
     })
 
     it('persists the roll slider, stops its active hold and leaves pan/tilt speed alone', async () => {

@@ -94,8 +94,8 @@ describe('intent-bound gimbal dispatcher', () => {
     f.controller.close();
   });
   it.each([
-    [30, [0,0,0x2c,0x01,0,0,0x80]],
-    [-30, [0,0,0xd4,0xfe,0,0,0x80]],
+    [120, [0,0,0xb0,0x04,0,0,0x80]],
+    [-120, [0,0,0x50,0xfb,0,0,0x80]],
   ])('encodes public roll rate %s at offset two without changing the ordinary native rate flags', (roll, bytes) => {
     const f = fixture(); f.context.rollRateVerified = true;
     f.context.attitude!.joints = { pan: 0, tilt: 0, roll: 0 };

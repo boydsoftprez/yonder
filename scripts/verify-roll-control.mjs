@@ -59,7 +59,15 @@ try {
     await rollSpeed.waitFor({ state: 'visible' });
     assert.equal(await rollSpeed.inputValue(), '12', 'Roll preference survives reload');
     await rollSpeed.focus(); await rollSpeed.press('End');
-    assert.equal(await rollSpeed.inputValue(), '30');
+    assert.equal(await rollSpeed.inputValue(), '120');
+    await track.scrollIntoViewIfNeeded();
+    const maxBox = await track.boundingBox();
+    await page.mouse.move(maxBox.x + maxBox.width / 2, maxBox.y + maxBox.height / 2);
+    await page.mouse.down();
+    await page.mouse.move(maxBox.x + maxBox.width / 2 + 78, maxBox.y + maxBox.height / 2);
+    await page.waitForFunction(() => window.__aimFixture.calls.some(c => c.op === 'slew' && c.roll === 120));
+    await page.mouse.up();
+    await page.waitForFunction(() => window.__aimFixture.calls.at(-1)?.op === 'stop');
     await page.getByLabel('Theme', { exact: true }).selectOption(palette);
     await page.waitForFunction(p => document.querySelector('#theme').sheet?.cssRules.length > 0
       && document.querySelector('#theme').href.endsWith(`theme.${p}.css`), palette);
@@ -76,7 +84,44 @@ try {
     const disabled = await page.evaluate(measure, [[], '.fixture-fixed', {}, {}, [], '.y-deck']);
     assert.deepEqual(disabled.unreadable.filter(c => c.key.startsWith('y-roll')), [], 'Unavailable roll text contrast >=4.5:1');
     await page.locator('.y-roll').screenshot({ path: new URL(`roll-unavailable-${width}-${palette}.png`, artifacts).pathname });
-    evidence.push({ width, palette, sustained: positive.length, defaultRate: 30, independentSpeed: true, persistence: true, release: true, blur: true, disabled: true, legible: true });
+    evidence.push({ width, palette, sustained: positive.length, defaultRate: 30, maximumRate: 120, independentSpeed: true, persistence: true, release: true, blur: true, disabled: true, legible: true });
+  }
+  for (const width of [1440, 390]) for (const palette of ['day', 'night']) {
+    await page.setViewportSize({ width, height: 1100 });
+    const drawerUrl = new URL(url); drawerUrl.searchParams.set('layout', 'drawer');
+    await page.goto(drawerUrl.href);
+    await page.evaluate(() => localStorage.clear()); await page.reload();
+    await page.getByLabel('Theme', { exact: true }).selectOption(palette);
+    await page.waitForFunction(p => document.querySelector('#theme').sheet?.cssRules.length > 0
+      && document.querySelector('#theme').href.endsWith(`theme.${p}.css`), palette);
+    const handle = page.locator('.y-aimpanel__handle');
+    const preview = page.locator('video.y-pic__video');
+    await page.waitForFunction(() => {
+      const video = document.querySelector('video.y-pic__video');
+      return video?.srcObject && video.videoWidth === 1280 && video.currentTime > 0.3;
+    });
+    const receiver = await preview.evaluateHandle(el => ({element: el, stream: el.srcObject}));
+    const openWidth = (await page.locator('.fixture-picture').boundingBox()).width;
+    await handle.click();
+    assert.equal(await handle.getAttribute('aria-expanded'), 'false');
+    const card = await page.locator('#nrdb-ui-group-group-cam-aim > .v-card').evaluate(el => {
+      const s = getComputedStyle(el);
+      return {background: s.backgroundColor, border: s.borderTopWidth, padding: s.paddingTop, shadow: s.boxShadow};
+    });
+    assert.deepEqual(card, {background: 'rgba(0, 0, 0, 0)', border: '0px', padding: '0px', shadow: 'none'});
+    const box = await handle.boundingBox();
+    assert.equal(box.width, 56); assert.equal(box.height, 44);
+    const closedWidth = (await page.locator('.fixture-picture').boundingBox()).width;
+    assert(width < 900 ? closedWidth === openWidth : closedWidth > openWidth, 'desktop collapse reclaims preview width');
+    assert(await receiver.evaluate(r => r.element === document.querySelector('video.y-pic__video') && r.element.srcObject === r.stream), 'collapse preserves receiver and stream');
+    assert(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth), 'collapsed layout fits');
+    await page.screenshot({path: new URL(`aim-collapsed-${width}-${palette}.png`, artifacts).pathname});
+    await handle.click();
+    assert(await receiver.evaluate(r => r.element === document.querySelector('video.y-pic__video') && r.element.srcObject === r.stream), 'reopen preserves receiver and stream');
+    await receiver.dispose();
+    await handle.click(); await page.reload();
+    assert.equal(await handle.getAttribute('aria-expanded'), 'false', 'collapsed preference survives reload');
+    evidence.push({width, palette, collapsedFrameRemoved: true, compactTouchTarget: true, receiverPreserved: true, collapsedPersistence: true});
   }
   assert.deepEqual(errors, [], 'No browser errors');
   await writeFile(new URL('results.json', artifacts), JSON.stringify(evidence, null, 2));
