@@ -29,7 +29,7 @@
     {
       "source": "packages/yonder-core/dist/video/accessory/source.js",
       "target": "/opt/yonder/packages/yonder-core/dist/video/accessory/source.js",
-      "sha256": "96eaa80d5aaa4b0e2ce7dbef8f6cb5930a474c7fd6608b9ef7e1459a6d54fab9"
+      "sha256": "551fbb30c0d4e190ec7764d8c265619be6f8eeeabc91188a82dfc9c3482ea820"
     },
     {
       "source": "packages/yonder-core/dist/video/present.js",
@@ -46,5 +46,8 @@
       "target": "/opt/yonder/console/node_modules/node-red-dashboard-2-yonder/resources/ui-yonder-picture.umd.js",
       "sha256": "432f8d6e2ea31ca6f11689dafdffaa4fc49194c0a4cadf4eb5a0d9d14d27c573"
     }
-  ]
+  ],
+  "rollCommit": "c068556",
+  "mergedVideoCommit": "385651c",
+  "integrationCommit": "9fff668"
 }
