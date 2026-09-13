@@ -5,7 +5,8 @@ Requirements: R-DIA-08, R-CAM-05, R-STO-04, R-STO-07 and R-FLT-27.
 The Mule runs a private ZERO 3W bench image with protected system storage,
 persistent configuration, and a separate p5 terrain filesystem. Its application
 upgrade uses the consolidated branch containing main `5c783e9` and the September
-camera/cockpit fixes. Deployment and physical qualification are still in progress.
+camera/cockpit fixes. The update is installed; physical qualification is pending
+the first boot of the replacement kernel.
 
 ## Kernel diagnosis and build
 
@@ -75,3 +76,25 @@ freezes the identified helper before terminating the old core group, avoiding an
 EOF race into cleanup. Ordinary FunctionFS teardown and normal warm reboots must
 then pass on the replacement kernel; that activation procedure is not a permanent
 service behavior change.
+
+## Installed state and first reboot
+
+The installed application matches all 901 first-party files from `2b4ff75`.
+The kernel/storage repair is retained in branch commit `069f0a0`. Boot now selects
+the verified Image and initramfs under the `6.1.115-vendor-rk35xx-yonder-usb1`
+filenames. Original boot files, application tree and console seed are retained.
+Nine protected configuration, credential, identity, boot-argument and camera-IQ
+files remained byte-identical during activation.
+
+All old core/helper tasks were confirmed stopped before the one-time SIGKILL
+stop. Application and persistent console directories were exchanged atomically.
+The console's tmpfs overmount initially blocked its directory exchange with
+`EBUSY`; removing that overmount in the private activation namespace allowed the
+persistent seed exchange. The runtime SIGKILL override was removed and the normal
+SIGTERM policy restored before reboot. PID 1's root mount remained read-only.
+
+An ordinary `systemctl reboot --no-block` request was accepted, and SSH closed.
+The Mule did not return during the initial observation window. A physical power
+cycle was requested to load the replacement from the already-faulted old kernel.
+There is no verified replacement-kernel boot, camera result or successful warm
+reboot yet; those checks remain required before calling the hardware repaired.
