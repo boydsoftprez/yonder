@@ -27,10 +27,13 @@ The overlay describes the Zero 3's I2C2 M1 pins, GPIO3_C6 camera enable,
 `fdtoverlay` against the installed base tree and other active overlays before use.
 Never substitute a Raspberry Pi overlay for this board's device tree.
 
-The vendor ISP removes unready sensor links during a kernel late-init call.
-Loading this module after boot therefore requires rebuilding the ISP/DPHY
-bindings before its sensor appears in the media graph. Initializing the
-sensor alone is not proof of a complete capture path.
+The vendor ISP removes unready sensor links during a kernel late-init call,
+before this sensor module loads. The ZERO 3W installer preserves those links
+with `initcall_blacklist=rkisp_clr_unready_dev` in the boot arguments. The sensor
+can then join the original media graph when its module loads. Preparation must
+never unbind/rebind the vendor ISP or DPHY: their remove paths retain references
+and can crash the kernel. If the graph is missing, preparation fails without
+touching those bindings. See the [startup recovery evidence](../../../docs/hardware/seekerhd-startup-recovery-2026-09-13.md).
 
 ## Observed on 2026-09-09
 
@@ -98,8 +101,8 @@ Input SHA-256 values recorded on 2026-09-09:
 The board stores the built library and 3A executable under
 `/usr/local/lib/yonder-seekerhd`, and the generated profile at
 `/usr/local/share/yonder-seekerhd/iqfiles/imx462_IMX462_default.json`.
-Its systemd units are included here. `prepare.py` rebuilds the media bindings
-when necessary, then sets and reads back the sensor controls and prepares the
+Its systemd units are included here. `prepare.py` checks the existing media
+graph, then sets and reads back the sensor controls and prepares the
 ISP's NV12 output. The AIQ unit repeats mode preparation **after** AIQ signals
 readiness because AIQ's own initialization resets sensor timing.
 

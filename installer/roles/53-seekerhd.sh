@@ -15,6 +15,8 @@ ensure_pkgs dkms device-tree-compiler libdrm2 libstdc++6 \
 seeker_src="$YONDER_SRC/scripts/spikes/seekerhd"
 seeker_installer="$YONDER_SRC/installer/seekerhd"
 seeker_payload=$(seekerhd_payload_dir)
+[ -s "$seeker_installer/bootargs.py" ] \
+    || die "the SeekerHD install source is missing $seeker_installer/bootargs.py"
 for seeker_file in imx462_yonder.c imx462_hdr2.h seekerhd-imx462.dts prepare.py \
         select-profile.py yonder-seekerhd.service yonder-seekerhd-aiq.service \
         core-camera-order.conf; do
@@ -27,6 +29,7 @@ done
 seeker_kernels=$(seekerhd_require_kernel_headers)
 seekerhd_validate_module_version "$seeker_src/imx462_yonder.c" \
     "$seeker_src/imx462_hdr2.h"
+seekerhd_require_notifier_blacklist_support
 ensure_dir "$YONDER_SEEKER_DKMS_SOURCE_DIR" 0755
 run install -m 0644 "$seeker_src/imx462_yonder.c" \
     "$YONDER_SEEKER_DKMS_SOURCE_DIR/imx462_yonder.c"
@@ -71,6 +74,7 @@ else
     seekerhd_validate_overlay_stack "$seeker_base" "$seeker_uart" "$seeker_dtbo"
 fi
 run seekerhd_add_user_overlay "$YONDER_ARMBIAN_ENV" seekerhd-imx462
+run python3 "$seeker_installer/bootargs.py" "$YONDER_ARMBIAN_ENV"
 
 # Runtime and profiles are fully offline payload files. Preserve the active IQ
 # on a live reinstall; an image begins in the measured normal-light profile.
@@ -81,6 +85,7 @@ run install -m 0755 "$seeker_payload/bin/rkaiq_3A_server" \
     "$YONDER_SEEKER_LIB_DIR/rkaiq_3A_server"
 run install -m 0644 "$seeker_payload/lib/librkaiq.so" \
     "$YONDER_SEEKER_LIB_DIR/librkaiq.so"
+run install -m 0755 "$seeker_installer/bootargs.py" "$YONDER_SEEKER_BOOTARGS"
 run install -m 0755 "$seeker_src/prepare.py" "$YONDER_SEEKER_LIB_DIR/prepare.py"
 ensure_dir "$(dirname "$YONDER_SEEKER_PROFILE_BIN")"
 run install -m 0755 "$seeker_src/select-profile.py" \
@@ -115,7 +120,7 @@ if [ "$IMAGE_MODE" != "1" ]; then
 fi
 
 if [ "$DRY_RUN" = "1" ]; then
-    log "would verify the installed SeekerHD module, overlay, ISP runtime, profiles and services"
+    log "would verify the installed SeekerHD module, overlay, boot correction, ISP runtime, profiles and services"
 else
     seekerhd_verify_install
 fi
