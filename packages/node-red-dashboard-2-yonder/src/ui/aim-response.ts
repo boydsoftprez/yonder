@@ -19,6 +19,15 @@ export function screenToCamera(rate: { pan: number; tilt: number }, direction = 
   }
 }
 
+/** Image reflections reverse perceived roll; in-plane image rotations do not. */
+export function screenRollToCamera(roll: number, direction = 'identity'): number | null {
+  switch (direction) {
+    case 'identity': case '180': case '90r': case '90l': return roll;
+    case 'horiz': case 'vert': case 'ul-lr': case 'ur-ll': return -roll;
+    default: return null;
+  }
+}
+
 export function savedNumber(key: string, fallback: number, minimum: number, maximum: number): number {
   try {
     const saved = localStorage.getItem(key);
@@ -58,6 +67,8 @@ export function aimFailure(reason: string): string {
     'preset-position': 'Fresh position relative to the handle is unavailable.',
     'preset-timeout': 'The preset move timed out and stopped.',
     'preset-stalled': 'The saved position could not be reached. Movement stopped.',
+    'roll-unavailable': 'Roll control is not available for this camera.',
+    'roll-mode': 'Choose FPV mode to control roll.',
   };
   return messages[reason] ?? reason;
 }

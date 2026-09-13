@@ -1,14 +1,23 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 import { expireCameraSession } from './camera-session.js';
-import { screenToCamera, aimFailure } from './aim-response.js';
-export interface AimTarget { url?: string; generation?: number; inhibited?: string | null; maxRate?: number; imageDirection?: string }
-function withinRate(target: AimTarget, rate: { pan: number; tilt: number }): boolean {
+import { screenToCamera, screenRollToCamera, aimFailure } from './aim-response.js';
+type AimRate = { pan: number; tilt: number; roll?: number };
+export interface AimTarget {
+  url?: string; generation?: number; inhibited?: string | null; maxRate?: number; imageDirection?: string; mode?: string | null;
+  rollControl?: { available: boolean; reason: string | null; maxRate: number };
+}
+function withinRate(target: AimTarget, rate: AimRate): boolean {
   const limit = target.maxRate === undefined ? 10 : target.maxRate;
+  const roll = rate.roll ?? 0;
+  if (!Number.isFinite(roll)) return false;
+  if (roll !== 0 && (!target.rollControl?.available || rate.pan !== 0 || rate.tilt !== 0
+    || !Number.isFinite(target.rollControl.maxRate) || target.rollControl.maxRate <= 0
+    || Math.abs(roll) > target.rollControl.maxRate)) return false;
   return Number.isFinite(limit) && limit > 0 && [rate.pan, rate.tilt].every(Number.isFinite)
-    && Math.hypot(rate.pan, rate.tilt) <= Math.min(limit, 120);
+    && Math.hypot(rate.pan, rate.tilt, roll) <= Math.min(limit, 120);
 }
 type Grant = { gesture: string; credential: string; deadline: number };
-type Held = { client: string; pan: number; tilt: number; target: string; generation?: number; imageDirection: string; grant?: Grant; seq: number;
+type Held = AimRate & { client: string; target: string; generation?: number; mode?: string | null; imageDirection: string; grant?: Grant; seq: number;
   preset?: {slot:number;revision:number;maxRate:number} };
 export type RecallState = {slot:number;state:'moving'|'reached';name?:string}|null;
 let recallSerial=0;
@@ -24,21 +33,23 @@ export class AimTransport {
   private readonly lost = () => { if (typeof document === 'undefined' || document.hidden) this.stop(); };
   private readonly blur = () => this.stop();
   constructor(private readonly target: () => AimTarget | null | undefined,
-    private readonly changed: (rate: { pan: number; tilt: number }, reason: string | null) => void = () => {},
+    private readonly changed: (rate: AimRate, reason: string | null) => void = () => {},
     private readonly fetcher: typeof fetch = (...args) => fetch(...args),
     private readonly recallChanged: (state:RecallState)=>void = () => {}) {
     if (typeof window !== 'undefined') { window.addEventListener('blur', this.blur); window.addEventListener('offline', this.blur); document.addEventListener('visibilitychange', this.lost); }
   }
-  update(rate: { gesture: string; pan: number; tilt: number }): void {
+  update(rate: AimRate & { gesture: string }): void {
     if (this.disposed || this.blocked === rate.gesture) return;
     const target = this.target();
-    const mapped = screenToCamera(rate, target?.imageDirection);
+    const axes = screenToCamera(rate, target?.imageDirection);
+    const roll = rate.roll === undefined ? undefined : screenRollToCamera(rate.roll, target?.imageDirection);
+    const mapped = axes && roll !== null ? { ...axes, ...(roll === undefined ? {} : { roll }) } : null;
     if (!target?.url || target.inhibited || !mapped || !withinRate(target, mapped)
-      || (!rate.pan && !rate.tilt)) { this.stop(); this.blocked = rate.gesture; return; }
+      || ![mapped.pan, mapped.tilt, mapped.roll ?? 0].some(v => Math.trunc(v * 10) !== 0)) { this.stop(); this.blocked = rate.gesture; return; }
     if (this.held?.client !== rate.gesture) {
       this.stop();
-      this.held = { client: rate.gesture, pan: mapped.pan, tilt: mapped.tilt, target: target.url, generation: target.generation, imageDirection: target.imageDirection ?? 'identity', seq: 0 };
-    } else { this.held.pan = mapped.pan; this.held.tilt = mapped.tilt; }
+      this.held = { client: rate.gesture, ...mapped, target: target.url, generation: target.generation, mode: target.mode, imageDirection: target.imageDirection ?? 'identity', seq: 0 };
+    } else { this.held.pan = mapped.pan; this.held.tilt = mapped.tilt; this.held.roll = mapped.roll; }
     if (!this.pending && !this.timer) void this.tick();
   }
   recall(slot:number,revision:number,maxRate:number):void {
@@ -46,7 +57,7 @@ export class AimTransport {
     if(this.disposed || !target?.url || target.inhibited || !Number.isInteger(slot) || slot<1 || slot>6
       || !Number.isSafeInteger(revision) || revision<0 || !Number.isFinite(maxRate) || maxRate<1)return;
     this.held={client:`preset-${Date.now().toString(36)}-${++recallSerial}`,pan:0,tilt:0,target:target.url,
-      generation:target.generation,imageDirection:target.imageDirection??'identity',seq:0,preset:{slot,revision,maxRate:Math.min(60,maxRate)}};
+      generation:target.generation,mode:target.mode,imageDirection:target.imageDirection??'identity',seq:0,preset:{slot,revision,maxRate:Math.min(60,maxRate)}};
     this.recallChanged({slot,state:'moving'});
     if(!this.pending && !this.timer)void this.tick();
   }
@@ -55,6 +66,7 @@ export class AimTransport {
     const target = this.target();
     return !this.disposed && this.held === held && !!target && !target.inhibited && target.url === held.target
       && target.generation === held.generation && (target.imageDirection ?? 'identity') === held.imageDirection
+      && target.mode === held.mode
       && withinRate(target, held) && !(typeof document !== 'undefined' && document.hidden);
   }
   private async request(url: string, body: object): Promise<any> {
@@ -82,7 +94,7 @@ export class AimTransport {
       }
       if (this.current(held)) {
         // Sample after the preceding response, never retain an old queued rate.
-        const sent = { pan: held.pan, tilt: held.tilt };
+        const sent = { pan: held.pan, tilt: held.tilt, ...(held.roll === undefined ? {} : { roll: held.roll }) };
         this.nextRequestAt = performance.now() + 100;
         const reply = await this.request(held.target, held.preset ? {op:'recall',...held.grant,seq:++held.seq} : { op: 'slew', ...held.grant, seq: ++held.seq, ...sent });
         if (!this.current(held)) return;

@@ -23,7 +23,7 @@ function fixture() {
   const writes: { command: DumlCommand; options: AccessoryCommandOptions; resolve: () => void; reject: (e: Error) => void }[] = [];
   const controller = new GimbalController({ clock, context: () => context, write: (command, options) => new Promise<void>((resolve, reject) => writes.push({ command, options, resolve, reject })) });
   const issue = (owner = 'alice') => { const r = controller.issue(owner); if (!r.accepted) throw new Error(r.reason); return r.grant; };
-  const admit = (grant: IntentGrant, pan = 5, tilt = -2, seq = 0) => controller.admit('alice', { ...grant, seq, rate: { pan, tilt } });
+  const admit = (grant: IntentGrant, pan = 5, tilt = -2, seq = 0, roll?: number) => controller.admit('alice', { ...grant, seq, rate: { pan, tilt, ...(roll === undefined ? {} : { roll }) } });
   const freshAdvance = (ms: number) => { context.attitude!.at = clock.time + ms; clock.advance(ms); };
   return { clock, context, writes, controller, issue, admit, freshAdvance };
 }
@@ -91,6 +91,13 @@ describe('intent-bound gimbal dispatcher', () => {
     expect(f.writes[0].options.deadline).toBe(1500); expect(f.writes[0].options.admission!()).toBe(true);
     f.writes[0].resolve(); await settle(); f.freshAdvance(99); expect(f.writes).toHaveLength(1);
     f.freshAdvance(1); expect(f.writes).toHaveLength(2);
+    f.controller.close();
+  });
+  it('encodes verified roll at offset two without changing the ordinary native rate flags', () => {
+    const f = fixture(); f.context.rollRateVerified = true;
+    f.context.attitude!.joints = { pan: 0, tilt: 0, roll: 0 };
+    expect(f.admit(f.issue(), 0, 0, 0, -1)).toMatchObject({ accepted: true });
+    expect(Buffer.from(f.writes[0].command.payload!)).toEqual(Buffer.from([0,0,0xf6,0xff,0,0,0x80]));
     f.controller.close();
   });
   it('renewal cancels the old queued write and cannot exceed the frame cadence', async () => {
@@ -398,6 +405,61 @@ describe('bounded extended-range bench probe', () => {
   it('retains native limit admission and cancellation of queued probe writes',()=>{
     const f=fixture();const g=f.controller.issueRangeProbe('alice','probe');if(!g.accepted)throw new Error('issue refused');f.admit(g.grant,3,0);
     f.context.attitude!.yawLimit=true;expect(f.writes[0].options.admission!()).toBe(false);expect(f.writes[0].options.signal!.aborted).toBe(true);f.controller.close();
+  });
+  it('does not accept roll',()=>{
+    const f=fixture();const g=f.controller.issueRangeProbe('alice','probe');if(!g.accepted)throw new Error('issue refused');
+    expect(f.admit(g.grant,3,0,0,0)).toMatchObject({accepted:false});expect(f.writes).toHaveLength(0);f.controller.close();
+  });
+});
+
+describe('bounded private roll probe',()=>{
+  it('authorizes only its own roll-only epoch with ordinary flags and a two-second ceiling',()=>{
+    const f=fixture();f.context.attitude!.joints={pan:0,tilt:0,roll:0};
+    const g=f.controller.issueRollProbe('bench-roll-test','probe');if(!g.accepted)throw new Error('issue refused');
+    expect(f.controller.admit('bench-roll-test',{...g.grant,seq:0,rate:{pan:0,tilt:0,roll:1}})).toMatchObject({accepted:true});
+    expect(Buffer.from(f.writes[0].command.payload!)).toEqual(Buffer.from([0,0,10,0,0,0,0x80]));
+    expect(f.writes[0].options.deadline).toBeLessThanOrEqual(3000);
+    f.controller.close();
+  });
+  it.each([{pan:0,tilt:0,roll:3.1},{pan:1,tilt:0,roll:1},{pan:0,tilt:1,roll:0}])('refuses unsafe probe rate $pan/$tilt/$roll',rate=>{
+    const f=fixture();f.context.attitude!.joints={pan:0,tilt:0,roll:0};
+    const g=f.controller.issueRollProbe('bench-roll-test','probe');if(!g.accepted)throw new Error('issue refused');
+    expect(f.controller.admit('bench-roll-test',{...g.grant,seq:0,rate})).toMatchObject({accepted:false});expect(f.writes).toHaveLength(0);f.controller.close();
+  });
+  it('expires after two seconds despite continuously renewed credentials',async()=>{
+    const f=fixture();f.context.attitude!.joints={pan:0,tilt:0,roll:0};
+    const issued=f.controller.issueRollProbe('bench-roll-test','probe');if(!issued.accepted)throw new Error('issue refused');let grant=issued.grant;
+    for(let seq=0;seq<20;seq++){
+      const reply=f.controller.admit('bench-roll-test',{...grant,seq,rate:{pan:0,tilt:0,roll:1}});
+      expect(reply.accepted).toBe(true);if(reply.accepted&&reply.next)grant=reply.next;
+      for(const write of f.writes)write.resolve();await settle();f.freshAdvance(100);
+    }
+    expect(f.writes.every(write=>write.options.deadline<=3000)).toBe(true);
+    expect(f.controller.admit('bench-roll-test',{...grant,seq:20,rate:{pan:0,tilt:0,roll:1}})).toMatchObject({accepted:false,reason:'inactive'});
+    f.controller.close();
+  });
+  it('revokes a queued roll write at its original grant deadline',()=>{
+    const f=fixture();f.context.attitude!.joints={pan:0,tilt:0,roll:0};
+    const issued=f.controller.issueRollProbe('bench-roll-test','probe');if(!issued.accepted)throw new Error('issue refused');
+    expect(f.controller.admit('bench-roll-test',{...issued.grant,seq:0,rate:{pan:0,tilt:0,roll:1}})).toMatchObject({accepted:true});
+    f.clock.advance(500,false);
+    expect(f.writes[0].options.signal!.aborted).toBe(false);
+    expect(f.writes[0].options.admission!()).toBe(false);
+    expect(f.writes[0].options.signal!.aborted).toBe(true);
+    f.controller.close();
+  });
+  it.each(['mode','fault','stale','joints'] as const)('retires queued and renewable roll on %s loss',change=>{
+    const f=fixture();f.context.attitude!.joints={pan:0,tilt:0,roll:0};
+    const issued=f.controller.issueRollProbe('bench-roll-test','probe');if(!issued.accepted)throw new Error('issue refused');
+    const reply=f.controller.admit('bench-roll-test',{...issued.grant,seq:0,rate:{pan:0,tilt:0,roll:1}});if(!reply.accepted||!reply.next)throw new Error('admit refused');
+    if(change==='mode')f.context.attitude!.mode=2;
+    if(change==='fault')f.context.attitude!.fault=true;
+    if(change==='stale')f.clock.advance(200,false);
+    if(change==='joints')delete f.context.attitude!.joints;
+    f.controller.refresh();
+    expect(f.writes[0].options.signal!.aborted).toBe(true);
+    expect(f.controller.admit('bench-roll-test',{...reply.next,seq:1,rate:{pan:0,tilt:0,roll:1}})).toMatchObject({accepted:false,reason:'inactive'});
+    f.controller.close();
   });
 });
 

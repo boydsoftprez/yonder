@@ -7,7 +7,7 @@ import type { Detection, DetectResult } from '../probe/camera.js';
 import { Pocket2Device, monotonicMilliseconds, type Pocket2DeviceOptions, type Pocket2Status } from './linux.js';
 import { CameraController, cameraControlDescriptors } from './controls.js';
 import { GimbalController, decodeGimbalAttitude } from './gimbal.js';
-import { guard, type GimbalAttitude, type GuardContext } from './guard.js';
+import { guard, HG211_MAX_ROLL_RATE_DEG_S, type GimbalAttitude, type GuardContext } from './guard.js';
 import type { IntentClock } from './intent.js';
 import { AccessoryMedia } from './media.js';
 import type { RecordingState, CameraMedium } from '../recorder.js';
@@ -44,9 +44,11 @@ const HG211_NATIVE_ACTIONS = Object.freeze([
   Object.freeze({ kind: 'recentre' as const }),
   ...([0, 1, 2] as const).map(mode => Object.freeze({ kind: 'mode' as const, mode })),
 ]);
+/** Opposing 1 deg/s pulses were measured; see docs/hardware/dji-pocket-2-roll-control.md. */
+export const HG211_ROLL_RATE_VERIFIED = true;
 type Owned = { device: ReturnType<NonNullable<AccessorySourceOptions['deviceFactory']>>; media: AccessoryMedia;
   camera: CameraController; gimbal: GimbalController; attitude: GimbalAttitude | null; generation: number | null; error: string | null;
-  streamGeneration: number; rawAttitude?: string; admitted?: { owner: string; gesture: string; pan: number; tilt: number; until: number } };
+  streamGeneration: number; rawAttitude?: string; admitted?: { owner: string; gesture: string; pan: number; tilt: number; roll?: number; until: number } };
 
 /** R-CAM-15: exactly one asynchronous USB owner shared by all daemon consumers. */
 export class AccessorySources {
@@ -146,6 +148,7 @@ export class AccessorySources {
   }
   private context(source: Owned): GuardContext {
     const status = source.device.snapshot();
+    const identifiedHG211 = status.state === 'live' && status.manufacturer === 'DJI' && status.model === 'HG211';
     // This runs on every attitude push and dispatch admission. Native motion
     // uses only live device state; reading the obsolete world profile here
     // would synchronously reload/parse configuration inside the intent budget.
@@ -153,7 +156,8 @@ export class AccessorySources {
       mount: null, envelopes: [], signs: { pan: null, tilt: null },
       limitDirections: {}, actions: [], intentAllowanceMs: 500, deviceStopAllowanceMs: 800,
       discreteApplicable: false,
-      nativeActions: status.state === 'live' && status.manufacturer === 'DJI' && status.model === 'HG211' ? HG211_NATIVE_ACTIONS : [] };
+      rollRateVerified: HG211_ROLL_RATE_VERIFIED && identifiedHG211,
+      nativeActions: identifiedHG211 ? HG211_NATIVE_ACTIONS : [] };
   }
   input(identity: string): AccessoryInput | undefined {
     const source = this.owned.get(identity); if (!source) return undefined;
@@ -165,6 +169,7 @@ export class AccessorySources {
   snapshot(identity: string) {
     const source = this.owned.get(identity); if (!source) return null;
     const context = this.context(source), status = source.device.snapshot();
+    const identifiedHG211 = status.state === 'live' && status.manufacturer === 'DJI' && status.model === 'HG211';
     const attitude = source.attitude && this.clock.now() - source.attitude.at < 500 ? source.attitude : null;
     // A directional stopping margin is not a global interlock. Zero tests
     // shared prerequisites; every actual rate is still guarded at dispatch.
@@ -175,10 +180,19 @@ export class AccessorySources {
       'Tilt +': guard({ kind: 'rate', pan: 0, tilt: 0.1 }, context), 'Tilt −': guard({ kind: 'rate', pan: 0, tilt: -0.1 }, context),
     };
     const admitted = source.admitted;
-    const rate = !source.gimbal.motionNotice && admitted && admitted.until > this.clock.now() && guard({ kind: 'rate', pan: admitted.pan, tilt: admitted.tilt }, context).allowed
-      ? { pan: admitted.pan, tilt: admitted.tilt } : { pan: 0, tilt: 0 };
+    const reportedRate = admitted ? source.gimbal.reportedRate(admitted.owner, admitted.gesture) : null;
+    const rate = !source.gimbal.motionNotice && admitted && reportedRate && admitted.until > this.clock.now()
+      ? { pan: admitted.pan, tilt: admitted.tilt, ...(admitted.roll === undefined ? {} : { roll: admitted.roll }) } : { pan: 0, tilt: 0 };
+    const rollControl = status.model === 'HG211' ? {
+      available: HG211_ROLL_RATE_VERIFIED && identifiedHG211 && attitude?.mode === 1 && !!attitude.joints,
+      reason: !HG211_ROLL_RATE_VERIFIED ? 'Roll control is unavailable until HG211 hardware validation is complete.'
+        : !identifiedHG211 ? 'Roll control requires a live identified DJI HG211 camera.'
+        : !attitude?.joints ? 'Fresh native roll feedback is unavailable.'
+        : attitude.mode !== 1 ? 'Choose FPV mode to use roll control.' : null,
+      maxRate: HG211_MAX_ROLL_RATE_DEG_S,
+    } : undefined;
     return { ...status, controlGeneration: status.generation, generation: status.generation * 1_000_000 + source.streamGeneration,
-      input: this.input(identity), state: source.camera.readState(), attitude, admitted: rate, directions,
+      input: this.input(identity), state: source.camera.readState(), attitude, admitted: rate, directions, ...(rollControl ? { rollControl } : {}),
       mount: context.mount, envelope: null as import('./guard.js').MeasuredEnvelope | null, motionNotice: source.gimbal.motionNotice,
       recentre: guard({ kind: 'recentre' }, context), modes: ([0,1,2] as const).map(mode => guard({ kind: 'mode', mode }, context)),
       inhibition: verdict.allowed ? nativeLimits.length ? `${nativeLimits.join(' / ')} travel limit reported. Movement is paused.` : null : verdict.reason, controls: accessoryControls(source.camera.readState()), descriptors: cameraControlDescriptors().map(d => d.kind === 'menu'
@@ -198,19 +212,21 @@ export class AccessorySources {
   }
   async capturePosition(identity:string):Promise<{pan:number;tilt:number}> {
     const source=this.owned.get(identity);if(!source)throw new Error('Camera position is unavailable');
-    let previous:{pan:number;tilt:number;at:number}|undefined,quietSince:number|undefined;
+    let previous:{pan:number;tilt:number;roll:number;at:number}|undefined,quietSince:number|undefined;
     for(let attempt=0;attempt<20;attempt++){
       const s=this.snapshot(identity),a=s?.attitude,now=this.clock.now();
       if(s?.model!=='HG211' || !a?.joints)throw new Error('Fresh position relative to the handle is unavailable');
       if(a.mode!==1)throw new Error('Choose FPV mode before saving a position');
       if(a.fault || a.pitchLimit || a.rollLimit || a.yawLimit || s.inhibition)throw new Error('Resolve the gimbal limit or fault before saving a position');
-      if(source.gimbal.recalling || s.admitted.pan || s.admitted.tilt)throw new Error('Stop movement before saving a position');
+      const moving = source.admitted && source.admitted.until > now
+        && (source.admitted.pan !== 0 || source.admitted.tilt !== 0 || (source.admitted.roll ?? 0) !== 0);
+      if(source.gimbal.recalling || moving)throw new Error('Stop movement before saving a position');
       if(now-source.gimbal.lastMotionAt>=800 && previous && a.at>previous.at){
-        if(Math.max(Math.abs(a.joints.pan-previous.pan),Math.abs(a.joints.tilt-previous.tilt))<=.2)quietSince??=previous.at;
+        if(Math.max(Math.abs(a.joints.pan-previous.pan),Math.abs(a.joints.tilt-previous.tilt),Math.abs(a.joints.roll-previous.roll))<=.2)quietSince??=previous.at;
         else quietSince=undefined;
         if(quietSince!==undefined && a.at-quietSince>=300)return {pan:a.joints.pan,tilt:a.joints.tilt};
       } else quietSince=undefined;
-      previous={pan:a.joints.pan,tilt:a.joints.tilt,at:a.at};
+      previous={pan:a.joints.pan,tilt:a.joints.tilt,roll:a.joints.roll,at:a.at};
       await new Promise<void>(resolve=>this.clock.setTimer(100,resolve));
     }
     throw new Error('The gimbal is still moving; release the control and save again');
@@ -234,6 +250,15 @@ export class AccessorySources {
       if (reply.accepted) source.admitted = undefined;
       return reply;
     }
+    if (probe?.op === 'probe-roll-issue' && /^bench-roll-[a-z0-9-]{1,64}$/.test(owner)
+      && Object.keys(probe).length === 2 && typeof probe.clientGesture === 'string'
+      && /^[A-Za-z0-9_.:-]{1,128}$/.test(probe.clientGesture)) {
+      const status = source.device.snapshot();
+      if (status.state !== 'live' || status.manufacturer !== 'DJI' || status.model !== 'HG211') return { accepted: false, reason: 'unavailable' };
+      const reply = source.gimbal.issueRollProbe(owner, probe.clientGesture);
+      if (reply.accepted) source.admitted = undefined;
+      return reply;
+    }
     if (!validAimRequest(body)) return { accepted: false, reason: 'malformed' };
     const b = body as Record<string, unknown>;
     switch (b.op) {
@@ -253,9 +278,11 @@ export class AccessorySources {
       }
       case 'issue': { const reply = source.gimbal.issue(owner, typeof b.clientGesture === 'string' ? b.clientGesture : undefined); if (reply.accepted) source.admitted = undefined; return reply; }
       case 'slew': {
-        const { gesture, credential, deadline, seq, pan, tilt } = b;
-        const reply = source.gimbal.admit(owner, { gesture, credential, deadline, seq, rate: { pan, tilt } });
-        if (reply.accepted) source.admitted = reply.next ? { owner, gesture: b.gesture as string, pan: b.pan as number, tilt: b.tilt as number, until: Math.min(b.deadline as number, this.clock.now() + 500) } : undefined;
+        const { gesture, credential, deadline, seq, pan, tilt, roll } = b;
+        const rate = { pan, tilt, ...(Object.hasOwn(b, 'roll') ? { roll } : {}) };
+        const reply = source.gimbal.admit(owner, { gesture, credential, deadline, seq, rate });
+        if (reply.accepted) source.admitted = reply.next ? { owner, gesture: b.gesture as string, pan: b.pan as number, tilt: b.tilt as number,
+          ...(Object.hasOwn(b, 'roll') ? { roll: b.roll as number } : {}), until: Math.min(b.deadline as number, this.clock.now() + 500) } : undefined;
         if (!reply.accepted && source.gimbal.motionNotice) return { ...reply, reason: source.gimbal.motionNotice };
         return reply;
       }

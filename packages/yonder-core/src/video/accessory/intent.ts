@@ -27,7 +27,7 @@ export interface IntentGrant {
   credential: string;
 }
 
-export interface IntentRate { pan: number; tilt: number }
+export interface IntentRate { pan: number; tilt: number; roll?: number }
 export type IntentRejectionReason = "malformed" | "busy" | "gesture" | "owner" | "credential" | "deadline" | "sequence" | "inactive";
 export interface IntentRejected { accepted: false; reason: IntentRejectionReason }
 export type IntentIssued = { accepted: true; grant: IntentGrant } | IntentRejected;
@@ -105,7 +105,8 @@ export class Intent {
 
   admit(owner: string, request: unknown): IntentAdmitted {
     if (!validId(owner) || !record(request) || !record(request.rate)
-      || !Number.isFinite(request.rate.pan) || !Number.isFinite(request.rate.tilt)) return reject("malformed");
+      || !Number.isFinite(request.rate.pan) || !Number.isFinite(request.rate.tilt)
+      || (request.rate.roll !== undefined && !Number.isFinite(request.rate.roll))) return reject("malformed");
     const now = this.clock.now();
     this.expire(now);
     const active = this.active;
@@ -117,7 +118,7 @@ export class Intent {
     if (!Number.isSafeInteger(request.seq) || (request.seq as number) <= active.lastSequence) return reject("sequence");
 
     // Zero is cancellation, not a fresh grant from which motion can resume.
-    if (request.rate.pan === 0 && request.rate.tilt === 0) {
+    if (request.rate.pan === 0 && request.rate.tilt === 0 && (request.rate.roll === undefined || request.rate.roll === 0)) {
       this.reset();
       return { accepted: true, next: null };
     }
@@ -131,7 +132,8 @@ export class Intent {
         gesture: active.grant.gesture,
         deadline: active.grant.deadline,
         expiresAt: Math.min(active.grant.deadline, now + this.leaseMs),
-        rate: Object.freeze({ pan: request.rate.pan as number, tilt: request.rate.tilt as number }),
+        rate: Object.freeze({ pan: request.rate.pan as number, tilt: request.rate.tilt as number,
+          ...(request.rate.roll === undefined ? {} : { roll: request.rate.roll as number }) }),
         signal: controller.signal,
         isValid: () => {
           this.expire(this.clock.now());

@@ -17,8 +17,9 @@ function harness() {
   const readCameras = vi.fn(() => [camera]);
   const source = new AccessorySources({ cameras: readCameras, controllers: async () => ['test.udc'], deviceFactory: factory,
     mediaFactory: () => media, clock: { now: () => now.value, setTimer: (ms, fn) => setTimeout(fn, ms), clearTimer: token => clearTimeout(token as NodeJS.Timeout) } });
-  const live = () => { status = { ...status, state: 'live', manufacturer: 'DJI', model: 'HG211', lastCommandAt: now.value, lastVideoAt: now.value }; callbacks.onStatus!(status); };
-  return { source, camera, factory, device, media, now, live, readCameras, callbacks: () => callbacks,
+  const liveAs = (manufacturer: string, model: string) => { status = { ...status, state: 'live', manufacturer, model, lastCommandAt: now.value, lastVideoAt: now.value }; callbacks.onStatus!(status); };
+  const live = () => liveAs('DJI','HG211');
+  return { source, camera, factory, device, media, now, live, liveAs, readCameras, callbacks: () => callbacks,
     newLiveGeneration: () => { status = { ...status, state: 'live', generation: status.generation + 1 }; callbacks.onStatus!(status); },
     stale: () => { status = { ...status, state: 'stale', generation: status.generation + 1 }; callbacks.onStatus!(status); } };
 }
@@ -310,8 +311,59 @@ it('admits the bounded range probe only for the private bench owner; browser gra
   expect(validAimRequest(request)).toBe(false);
   expect(await h.source.aim(h.camera.device,'browser-owner',request)).toMatchObject({accepted:false});
   const g=await h.source.aim(h.camera.device,'bench-range-test',request) as any;expect(g.accepted).toBe(true);
-  expect(await h.source.aim(h.camera.device,'bench-range-test',{op:'slew',...g.grant,seq:1,pan:3,tilt:0})).toMatchObject({accepted:true});
+  expect(await h.source.aim(h.camera.device,'bench-range-test',{op:'slew',...g.grant,seq:0,pan:0,tilt:0,roll:1})).toMatchObject({accepted:false});
+  const next=await h.source.aim(h.camera.device,'bench-range-test',request) as any;expect(next.accepted).toBe(true);
+  expect(await h.source.aim(h.camera.device,'bench-range-test',{op:'slew',...next.grant,seq:1,pan:3,tilt:0})).toMatchObject({accepted:true});
   expect(Buffer.from((h.device.sendCommand.mock.calls[0][0] as any).payload)[6]).toBe(0x84);await h.source.close();
+});
+
+it('admits measured production roll while retaining the reserved bounded bench-roll epoch',async()=>{
+  const {validAimRequest}=await import('./requests.js');const h=harness();await h.source.discover();h.live();
+  const payload=Buffer.alloc(40);payload[6]=0x40;payload[10]=0x80;payload.writeFloatLE(1,24);
+  h.callbacks().onCommand!(decodeDuml(encodeDuml({sender:4,receiver:2,commandSet:4,commandId:5,payload}))!);
+  expect(h.source.snapshot(h.camera.device)).toMatchObject({rollControl:{available:true,reason:null,maxRate:1}});
+  const publicGrant=await h.source.aim(h.camera.device,'owner',{op:'issue',clientGesture:'roll'}) as any;
+  const publicSlew={op:'slew',...publicGrant.grant,seq:0,pan:0,tilt:0,roll:1};
+  expect(validAimRequest(publicSlew)).toBe(true);
+  expect(await h.source.aim(h.camera.device,'owner',publicSlew)).toMatchObject({accepted:true});
+  expect(h.source.snapshot(h.camera.device)).toMatchObject({admitted:{pan:0,tilt:0,roll:1},rollControl:{available:true,reason:null,maxRate:1}});
+  await h.source.aim(h.camera.device,'owner',{op:'stop',gesture:publicGrant.grant.gesture});
+  const over=await h.source.aim(h.camera.device,'owner',{op:'issue',clientGesture:'over-cap'}) as any;
+  expect(await h.source.aim(h.camera.device,'owner',{op:'slew',...over.grant,seq:0,pan:0,tilt:0,roll:1.1})).toMatchObject({accepted:false,reason:'rate-cap'});
+  expect(h.device.sendCommand).toHaveBeenCalledOnce();
+  await h.source.close();
+  const p=harness();await p.source.discover();p.live();
+  p.callbacks().onCommand!(decodeDuml(encodeDuml({sender:4,receiver:2,commandSet:4,commandId:5,payload}))!);
+  const issue={op:'probe-roll-issue',clientGesture:'bench'};expect(validAimRequest(issue)).toBe(false);
+  expect(await p.source.aim(p.camera.device,'bench-range-test',issue)).toMatchObject({accepted:false});
+  const grant=await p.source.aim(p.camera.device,'bench-roll-test',issue) as any;expect(grant.accepted).toBe(true);
+  expect(await p.source.aim(p.camera.device,'bench-roll-test',{op:'slew',...grant.grant,seq:0,pan:0,tilt:0,roll:1})).toMatchObject({accepted:true});
+  const bytes=Buffer.from((p.device.sendCommand.mock.calls[0][0] as any).payload);expect(bytes.readInt16LE(2)).toBe(10);expect(bytes[6]).toBe(0x80);
+  expect(p.source.snapshot(p.camera.device)).toMatchObject({admitted:{pan:0,tilt:0,roll:1},rollControl:{available:true}});
+  await expect(p.source.capturePosition(p.camera.device)).rejects.toThrow('Stop movement');
+  await p.source.close();
+});
+
+it('offers roll only for a live identified DJI HG211 in FPV with fresh native joints',async()=>{
+  const h=harness();await h.source.discover();h.live();
+  const push=(mode:number,native=true)=>{const payload=Buffer.alloc(native?40:11);payload[6]=mode<<6;payload[10]=0x80;if(native)payload.writeFloatLE(1,24);
+    h.callbacks().onCommand!(decodeDuml(encodeDuml({sender:4,receiver:2,commandSet:4,commandId:5,payload}))!)};
+  push(2);expect(h.source.snapshot(h.camera.device)?.rollControl).toMatchObject({available:false,reason:'Choose FPV mode to use roll control.',maxRate:1});
+  push(1,false);expect(h.source.snapshot(h.camera.device)?.rollControl).toMatchObject({available:false,reason:'Fresh native roll feedback is unavailable.',maxRate:1});
+  push(1);expect(h.source.snapshot(h.camera.device)?.rollControl).toEqual({available:true,reason:null,maxRate:1});
+  h.stale();expect(h.source.snapshot(h.camera.device)?.rollControl).toMatchObject({available:false,reason:'Roll control requires a live identified DJI HG211 camera.'});
+  await h.source.close();
+});
+
+it('does not offer or admit production roll for another accessory identity',async()=>{
+  const h=harness();await h.source.discover();h.liveAs('Other','HG211');
+  const payload=Buffer.alloc(40);payload[6]=0x40;payload[10]=0x80;payload.writeFloatLE(1,24);
+  h.callbacks().onCommand!(decodeDuml(encodeDuml({sender:4,receiver:2,commandSet:4,commandId:5,payload}))!);
+  expect(h.source.snapshot(h.camera.device)?.rollControl).toMatchObject({available:false,reason:'Roll control requires a live identified DJI HG211 camera.',maxRate:1});
+  const issued=await h.source.aim(h.camera.device,'owner',{op:'issue',clientGesture:'other-roll'}) as any;
+  expect(await h.source.aim(h.camera.device,'owner',{op:'slew',...issued.grant,seq:0,pan:0,tilt:0,roll:1})).toMatchObject({accepted:false,reason:'roll-unavailable'});
+  expect(h.device.sendCommand).not.toHaveBeenCalled();
+  h.liveAs('DJI','OTHER');expect(h.source.snapshot(h.camera.device)?.rollControl).toBeUndefined();await h.source.close();
 });
 
 it('keeps raw attitude inspection read-only and withdraws it on stale or disconnected feedback',async()=>{
@@ -330,6 +382,18 @@ it('captures fresh stationary native positions without issuing a motion command'
  const push=()=>{const p=Buffer.alloc(40);p[6]=0x40;p[10]=0x80;p.writeFloatLE(1,24);p.writeInt16LE(-2200,8);p.writeInt16LE(-1000,20);h.callbacks().onCommand!(decodeDuml(encodeDuml({sender:4,receiver:2,commandSet:4,commandId:5,payload:p}))!)};
  try {push();const position=h.source.capturePosition(h.camera.device);
   for(let i=0;i<5;i++){h.now.value+=100;push();await vi.advanceTimersByTimeAsync(100)}
+  await expect(position).resolves.toEqual({pan:-220,tilt:-100});expect(h.device.sendCommand).not.toHaveBeenCalled();
+ }finally{await h.source.close();vi.useRealTimers()}
+});
+
+it('waits for measured roll to settle while saving only the pan/tilt preset position',async()=>{
+ vi.useFakeTimers();const h=harness();await h.source.discover();h.live();let settled=false;
+ const push=(roll:number)=>{const p=Buffer.alloc(40);p[6]=0x40;p[10]=0x80;p.writeFloatLE(1,24);p.writeInt16LE(-2200,8);p.writeInt16LE(-1000,20);p.writeInt16LE(Math.trunc(roll*10),22);
+  h.callbacks().onCommand!(decodeDuml(encodeDuml({sender:4,receiver:2,commandSet:4,commandId:5,payload:p}))!)};
+ try {push(0);const position=h.source.capturePosition(h.camera.device).then(value=>{settled=true;return value});
+  for(let i=1;i<=5;i++){h.now.value+=100;push(i);await vi.advanceTimersByTimeAsync(100)}
+  expect(settled).toBe(false);
+  for(let i=0;i<5;i++){h.now.value+=100;push(5);await vi.advanceTimersByTimeAsync(100)}
   await expect(position).resolves.toEqual({pan:-220,tilt:-100});expect(h.device.sendCommand).not.toHaveBeenCalled();
  }finally{await h.source.close();vi.useRealTimers()}
 });

@@ -448,6 +448,7 @@ export function measure([liveSelectors, fixedSelector, specimenValues, maskedKey
     ".nrdb-ui-widget input", ".nrdb-ui-widget textarea", ".nrdb-ui-widget .v-label",
     ".nrdb-ui-widget label", ".nrdb-ui-widget .v-field__input",
     ".y-aimpanel__mode",
+    ".y-roll__head", ".y-roll__head output", ".y-roll__labels", ".y-roll__reason",
     ".nrdb-ui-widget .v-select__selection-text", ".nrdb-ui-widget .v-messages__message",
     // The table's own search box is not inside a widget wrapper of its own,
     // and it is a field an operator types into. It measured 1.03:1.

@@ -1,0 +1,50 @@
+{
+  "baseCommit": "ce27c65",
+  "files": [
+    {
+      "source": "packages/yonder-core/dist/video/accessory/guard.js",
+      "target": "/opt/yonder/packages/yonder-core/dist/video/accessory/guard.js",
+      "sha256": "cda90f29a240f6f95dde54b52a528bade25ec3d934f36e52c5f1f180dd861826"
+    },
+    {
+      "source": "packages/yonder-core/dist/video/accessory/intent.js",
+      "target": "/opt/yonder/packages/yonder-core/dist/video/accessory/intent.js",
+      "sha256": "7da6a59c5810ae32305c576153766a7f1287406c5529826925ddd17a14bb256a"
+    },
+    {
+      "source": "packages/yonder-core/dist/video/accessory/gimbal.js",
+      "target": "/opt/yonder/packages/yonder-core/dist/video/accessory/gimbal.js",
+      "sha256": "de0c8842454c21e1c28dcc801ba9d65758e7cc2aa2021fe28430f97f73ce227f"
+    },
+    {
+      "source": "packages/yonder-core/dist/video/accessory/rotation-progress.js",
+      "target": "/opt/yonder/packages/yonder-core/dist/video/accessory/rotation-progress.js",
+      "sha256": "c3c605b2990b9033fcb8995e415eb5e010bd61095bdbe78c261f053b3aa307a0"
+    },
+    {
+      "source": "packages/yonder-core/dist/video/accessory/requests.js",
+      "target": "/opt/yonder/packages/yonder-core/dist/video/accessory/requests.js",
+      "sha256": "b3f54e5d195f670b04257d132bf4d331b2b02bca9b043ad1ec10c875686c4510"
+    },
+    {
+      "source": "packages/yonder-core/dist/video/accessory/source.js",
+      "target": "/opt/yonder/packages/yonder-core/dist/video/accessory/source.js",
+      "sha256": "96eaa80d5aaa4b0e2ce7dbef8f6cb5930a474c7fd6608b9ef7e1459a6d54fab9"
+    },
+    {
+      "source": "packages/yonder-core/dist/video/present.js",
+      "target": "/opt/yonder/packages/yonder-core/dist/video/present.js",
+      "sha256": "c07fde088e1c03dcdad1996b850c14ac02274ec2856a2b9dff075fb631797339"
+    },
+    {
+      "source": "packages/node-red-dashboard-2-yonder/resources/ui-yonder-aim.umd.js",
+      "target": "/opt/yonder/console/node_modules/node-red-dashboard-2-yonder/resources/ui-yonder-aim.umd.js",
+      "sha256": "545af5002c2a15f7bcaa972ca518a6e60d84792765b9a595cda6c7da11da2af5"
+    },
+    {
+      "source": "packages/node-red-dashboard-2-yonder/resources/ui-yonder-picture.umd.js",
+      "target": "/opt/yonder/console/node_modules/node-red-dashboard-2-yonder/resources/ui-yonder-picture.umd.js",
+      "sha256": "432f8d6e2ea31ca6f11689dafdffaa4fc49194c0a4cadf4eb5a0d9d14d27c573"
+    }
+  ]
+}

@@ -11,6 +11,15 @@ ends it. The separate pad and video share the saved speed and expo preferences.
 Inputs smaller than the camera's 0.1 degree/s wire resolution remain at rest;
 they do not create a gesture that the driver immediately cancels.
 
+Pocket 2 also has a separate spring-return roll strip below the pan/tilt pad.
+Select FPV to use it, then hold left or right of center; release or return to
+center to stop requesting motion. It shows the measured native roll angle and
+its current maximum rate. The initial roll limit is 1°/s, with Shift available
+for finer input. The existing speed and expo preferences apply within that
+limit. Roll and pan/tilt holds are exclusive. The camera can take about 0.8 seconds
+to settle after release. Roll does not add a third coordinate to saved presets.
+See the [hardware check and its limits](../hardware/dji-pocket-2-roll-control.md).
+
 The daemon issues a single-use credential lasting 500 ms. Admitting a rate
 issues the next credential, but the admitted rate retains its original deadline
 through queued USB dispatch. Those two deadlines are different. Previously,

@@ -1351,7 +1351,9 @@ export interface AimPanel {
   readonly recentreLabel?: string;
   readonly imageDirection?: VideoDirection;
   readonly maxRate?: number;
-  readonly admitted?: { pan: number; tilt: number };
+  readonly admitted?: { pan: number; tilt: number; roll?: number };
+  readonly roll?: number | null;
+  readonly rollControl?: { available: boolean; reason: string | null; maxRate: number };
   readonly modeInhibited?: string | null;
   readonly recentreInhibited?: string | null;
   readonly motionNotice: string | null;
@@ -1394,6 +1396,7 @@ export function aimPanel(caps: CameraCapabilities | null, source?: ReturnType<im
     // additionally depends on that picture's media epoch and retires with it.
     const generation = scope === 'picture' ? source.input?.generation ?? source.generation : source.controlGeneration;
     return { camera, url: camera ? `/video/${camera}/aim` : undefined, generation, imageDirection: imageDirection(imageControls), maxRate: HG211_MAX_RATE_DEG_S, admitted: source.admitted,
+      roll: source.attitude?.joints?.roll ?? null, rollControl: source.rollControl,
       state: 'present', reason: null,
       positionFrame: source.attitude?.joints ? 'handle' : 'world',
       presets: source.model === 'HG211' ? presets??{revision:0,slots:[]} : undefined,
@@ -1414,7 +1417,7 @@ export function aimPanel(caps: CameraCapabilities | null, source?: ReturnType<im
   }
   const aim = (caps ?? noCapabilities()).aim;
   const empty = {
-    pan: null, tilt: null, bounds: null,
+    pan: null, tilt: null, roll: null, bounds: null,
     atLimit: { pitch: false, yaw: false },
     mode: null, modes: [] as string[],
     motionNotice: null,

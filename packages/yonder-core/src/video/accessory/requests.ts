@@ -17,11 +17,12 @@ export function validAimRequest(value: unknown): boolean {
       && typeof b.maxRate==='number' && Number.isFinite(b.maxRate) && b.maxRate>=1 && b.maxRate<=60;
     case 'recall': return exact('op','gesture','credential','deadline','seq') && id(b.gesture) && id(b.credential)
       && typeof b.deadline==='number' && Number.isFinite(b.deadline) && Number.isSafeInteger(b.seq) && (b.seq as number)>=0;
-    case 'slew': return exact('op','gesture','credential','deadline','seq','pan','tilt') && id(b.gesture) && id(b.credential)
+    case 'slew': return (exact('op','gesture','credential','deadline','seq','pan','tilt') || exact('op','gesture','credential','deadline','seq','pan','tilt','roll'))
+      && id(b.gesture) && id(b.credential)
       && typeof b.deadline === 'number' && Number.isFinite(b.deadline)
       && Number.isSafeInteger(b.seq) && (b.seq as number) >= 0
-      && [b.pan, b.tilt].every(v => typeof v === 'number' && Number.isFinite(v))
-      && Math.hypot(b.pan as number, b.tilt as number) <= HG211_MAX_RATE_DEG_S;
+      && [b.pan, b.tilt, ...(Object.hasOwn(b, 'roll') ? [b.roll] : [])].every(v => typeof v === 'number' && Number.isFinite(v))
+      && Math.hypot(b.pan as number, b.tilt as number, Object.hasOwn(b, 'roll') ? b.roll as number : 0) <= HG211_MAX_RATE_DEG_S;
     default: return false;
   }
 }
