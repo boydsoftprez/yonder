@@ -353,4 +353,90 @@ class LifecycleTests(unittest.TestCase):
                 self.assertEqual(gadget.close(), [])
                 read.assert_not_called()
 
+def envelope(route, payload):
+    return b'\x55\xcc' + route + struct.pack('<I', len(payload)) + payload
+
+
+COMMAND = b'\x49\x57'
+VIDEO = b'\x4a\x57'
+
+
+class RouteFilterTests(unittest.TestCase):
+    stream = (envelope(COMMAND, b'ping') + envelope(VIDEO, bytes(range(256)) * 32)
+              + envelope(COMMAND, b'status' * 7) + b'\x55' + envelope(VIDEO, b'x' * 700) + envelope(COMMAND, b''))
+
+    def chunked(self, data, sizes):
+        out = b''
+        for size in sizes:
+            for start in range(0, len(data), size):
+                out += self.filter.push(data[start:start + size])
+            break
+        return out
+
+    def test_forwarding_is_byte_for_byte_whatever_the_read_boundaries(self):
+        for size in (1, 3, 8, 9, 100, 4096, 100000):
+            self.filter = ffs.RouteFilter()
+            self.assertEqual(self.chunked(self.stream, [size]), self.stream, size)
+
+    def test_dropping_removes_only_media_envelopes_across_read_boundaries(self):
+        expected = (envelope(COMMAND, b'ping') + envelope(COMMAND, b'status' * 7) + b'\x55' + envelope(COMMAND, b''))
+        for size in (1, 5, 8, 13, 512, 100000):
+            self.filter = ffs.RouteFilter(); self.filter.drop_video = True
+            self.assertEqual(self.chunked(self.stream, [size]), expected, size)
+
+    def test_a_media_envelope_in_progress_is_dropped_to_its_end_after_forwarding_resumes(self):
+        f = ffs.RouteFilter(); f.drop_video = True
+        video = envelope(VIDEO, b'v' * 1000)
+        self.assertEqual(f.push(video[:300]), b'')
+        f.drop_video = False
+        self.assertEqual(f.push(video[300:] + envelope(COMMAND, b'k')), envelope(COMMAND, b'k'))
+        self.assertEqual(f.push(envelope(VIDEO, b'w' * 20)), envelope(VIDEO, b'w' * 20))
+
+    def test_bytes_that_are_not_an_envelope_pass_through_and_the_search_resumes(self):
+        f = ffs.RouteFilter(); f.drop_video = True
+        # Bytes that never form the magic pair: the parent's own splitter
+        # would take a `55 cc` anywhere as an envelope, and so does this.
+        junk = b'\x00\x55\xcd\x01\x55'
+        oversize = b'\x55\xcc' + VIDEO + struct.pack('<I', ffs.MAX_AOA_PAYLOAD + 1)
+        self.assertEqual(f.push(junk + oversize + envelope(VIDEO, b'gone') + envelope(COMMAND, b'kept')),
+                         junk + oversize + envelope(COMMAND, b'kept'))
+
+
+class VideoForwardingTests(unittest.TestCase):
+    def read_completes(self, helper, aio, token, data):
+        aio.poll.return_value = [(token, len(data), data)]
+        helper.read_token = token
+        helper.reap_bulk()
+
+    def test_helper_forwards_the_live_view_until_told_not_to_and_packs_only_command_route_after(self):
+        aio = MagicMock(); helper = ffs.Helper(bulk_factory=lambda: aio); helper.bulk = aio
+        helper.stages['accessory'] = SimpleNamespace(ep_in=6, ep_out=7)
+        both = envelope(VIDEO, b'v' * 100) + envelope(COMMAND, b'c')
+        self.read_completes(helper, aio, 1, both)
+        self.assertEqual(json.loads(helper.output.decode().splitlines()[0])['data'], base64.b64encode(both).decode())
+        helper.output.clear()
+        helper.handle({'type': 'video', 'forward': False})
+        self.read_completes(helper, aio, 2, both)
+        self.assertEqual([json.loads(l)['data'] for l in helper.output.decode().splitlines()],
+                         [base64.b64encode(envelope(COMMAND, b'c')).decode()])
+        helper.output.clear()
+        self.read_completes(helper, aio, 3, envelope(VIDEO, b'v' * 100))
+        self.assertEqual(helper.output, b'')
+        helper.handle({'type': 'video', 'forward': True})
+        self.read_completes(helper, aio, 4, both)
+        self.assertEqual(json.loads(helper.output.decode().splitlines()[0])['data'], base64.b64encode(both).decode())
+        with self.assertRaises(ValueError):
+            helper.handle({'type': 'video', 'forward': 'yes'})
+
+    def test_a_filtered_read_longer_than_one_chunk_is_split_into_lines_the_parent_joins(self):
+        aio = MagicMock(); helper = ffs.Helper(bulk_factory=lambda: aio); helper.bulk = aio
+        helper.stages['accessory'] = SimpleNamespace(ep_in=6, ep_out=7)
+        helper.route_filter.header = bytearray(b'\x55\xcc' + COMMAND + struct.pack('<I', ffs.MAX_CHUNK)[:2])
+        rest = struct.pack('<I', ffs.MAX_CHUNK)[2:] + b'c' * ffs.MAX_CHUNK
+        self.read_completes(helper, aio, 1, rest)
+        pieces = [base64.b64decode(json.loads(l)['data']) for l in helper.output.decode().splitlines()]
+        self.assertEqual(b''.join(pieces), envelope(COMMAND, b'c' * ffs.MAX_CHUNK))
+        self.assertTrue(all(len(piece) <= ffs.MAX_CHUNK for piece in pieces))
+
+
 if __name__ == '__main__': unittest.main()

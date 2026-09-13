@@ -469,3 +469,32 @@ sys.stdout.buffer.write(helper.output)
     }));
   }
 });
+
+it("forwards the live view by default and tells the helper once per change, never twice (R-VID-22)", async () => {
+  const f = fixture(); const h = await live(f);
+  const asked = () => h.messages.filter(m => m.type === "video");
+  expect(asked()).toEqual([]);
+  f.device.forwardVideo(false);
+  f.device.forwardVideo(false);
+  expect(asked()).toEqual([{ type: "video", forward: false }]);
+  f.device.forwardVideo(true);
+  expect(asked()).toEqual([{ type: "video", forward: false }, { type: "video", forward: true }]);
+  // Commands still travel: the link is alive on its own route either way.
+  f.device.forwardVideo(false);
+  const sent = f.device.sendCommand({ commandSet: 0, commandId: 14, ack: 0 });
+  await vi.advanceTimersByTimeAsync(0);
+  expect(h.messages.at(-1)).toMatchObject({ type: "write" });
+  h.emit({ type: "written", id: h.messages.at(-1)!.id });
+  await expect(sent).resolves.toBeUndefined();
+});
+
+it("starts every USB generation forwarding, whatever was chosen on the last one (R-VID-22)", async () => {
+  // A new link is a new device to ask: the helper starts forwarding and so does
+  // the daemon's own record of it, and the source decides again once it is live.
+  const f = fixture();
+  f.device.forwardVideo(false);
+  const h = await live(f);
+  expect(h.messages.filter(m => m.type === "video")).toEqual([]);
+  f.device.forwardVideo(false);
+  expect(h.messages.filter(m => m.type === "video")).toEqual([{ type: "video", forward: false }]);
+});

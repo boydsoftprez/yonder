@@ -88,7 +88,16 @@ export class AccessoryMedia {
   private pps?: Uint8Array;
   readonly clock = new FrameClock();
   dimensions: { width: number; height: number } | null = null;
+  /** Called on every consumer arriving or leaving (R-VID-22): the source pulls the live view only while `consumers` is above zero. */
+  onClients?: () => void;
   constructor(readonly endpoint: string) {}
+  get consumers(): number { return this.clients.size; }
+  /**
+   * The live view is about to resume after a pause the daemon itself asked
+   * for. The camera's clock kept running meanwhile, so the next timestamp is a
+   * fresh start, not a discontinuity to retire the consumer over.
+   */
+  expectResume(): void { this.clock.reset(); }
   async start(): Promise<void> {
     if (this.server) return;
     await mkdir(dirname(this.endpoint), { recursive: true, mode: 0o750 });
@@ -109,7 +118,9 @@ export class AccessoryMedia {
     const server = createServer(socket => {
       if (this.clients.size >= 4) { socket.destroy(); return; }
       this.clients.set(socket, false);
-      socket.on('error', () => socket.destroy()); socket.on('close', () => this.clients.delete(socket));
+      socket.on('error', () => socket.destroy());
+      socket.on('close', () => { this.clients.delete(socket); this.onClients?.(); });
+      this.onClients?.();
     });
     await new Promise<void>((resolve, reject) => { server.once('error', reject); server.listen(this.endpoint, () => { server.removeListener('error', reject); resolve(); }); });
     this.server = server; await chmod(this.endpoint, 0o600);

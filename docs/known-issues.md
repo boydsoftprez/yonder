@@ -2674,12 +2674,12 @@ work it is for.
 
 **Still open, in order of cost:**
 
-- The accessory transport. The helper encodes the Pocket's live view as base64
-  JSON at 1.5 MB/s (a third of a core) and the daemon decodes it on its main thread
-  (15 % after this change) whether or not a camera is running, because the Pocket is
-  only offered as a camera while that stream is seen flowing. Either presence is
-  established without pulling video, or the bytes travel over a binary pipe and are
-  not parsed until a consumer exists. A design change in the accessory subsystem.
+- ~~The accessory transport~~ — closed (R-VID-22, under R-CAM-14 as the operator ruled on
+  2026-09-13): the USB helper now drains the Pocket's live view without packing it while
+  nothing consumes it, and the daemon decodes nothing. The camera's native size and rate
+  are observed from the picture on each USB link before it is set aside, and again
+  whenever a consumer brings it back; presence and controls travel on the command route
+  and never depended on the picture.
 - The cost of a fork itself: about 35 ms of the main thread each, because the daemon
   is a 250 MB process on a small core. The reach monitor's five reads every 5 s from
   two callers and the router statistics read every 2 s are what remain at that

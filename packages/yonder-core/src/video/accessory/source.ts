@@ -26,7 +26,7 @@ export interface AccessoryInput {
 export interface AccessorySourceOptions {
   cameras(): readonly Camera[];
   controllers?: () => Promise<string[]>;
-  deviceFactory?: (options: Pocket2DeviceOptions) => Pick<Pocket2Device, 'start' | 'close' | 'snapshot' | 'sendCommand'>;
+  deviceFactory?: (options: Pocket2DeviceOptions) => Pick<Pocket2Device, 'start' | 'close' | 'snapshot' | 'sendCommand'> & Partial<Pick<Pocket2Device, 'forwardVideo'>>;
   mediaFactory?: (endpoint: string) => AccessoryMedia;
   mediaCapability?: () => Promise<string | null>;
   onFailure?: Pocket2DeviceOptions['onFailure'];
@@ -46,7 +46,9 @@ const HG211_NATIVE_ACTIONS = Object.freeze([
 ]);
 type Owned = { device: ReturnType<NonNullable<AccessorySourceOptions['deviceFactory']>>; media: AccessoryMedia;
   camera: CameraController; gimbal: GimbalController; attitude: GimbalAttitude | null; generation: number | null; error: string | null;
-  streamGeneration: number; rawAttitude?: string; admitted?: { owner: string; gesture: string; pan: number; tilt: number; until: number } };
+  streamGeneration: number; rawAttitude?: string; admitted?: { owner: string; gesture: string; pan: number; tilt: number; until: number };
+  /** The camera's native size and rate, observed from its live view on this USB link (R-CAM-14, R-VID-22). */
+  native: AccessoryInput['native']; /** Whether the helper is being asked to forward the live view right now. */ forwarding: boolean };
 
 /** R-CAM-15: exactly one asynchronous USB owner shared by all daemon consumers. */
 export class AccessorySources {
@@ -122,15 +124,19 @@ export class AccessorySources {
         // A timestamp discontinuity retires only media clients/decoder state.
         // Fresh DUML controls belong to the independently observed USB epoch.
         if (!media.push(unit)) source.streamGeneration++;
+        const fps = media.clock.fps();
+        if (media.dimensions && fps) source.native = { ...media.dimensions, fps };
+        this.steerVideo(source);
       },
     });
     const writer = new AccessoryWriter(this.clock, (command, options) => device.sendCommand(command, options));
-    source = { device, media, attitude: null, generation: null, error: null, streamGeneration: 0,
+    source = { device, media, attitude: null, generation: null, error: null, streamGeneration: 0, native: null, forwarding: true,
       camera: new CameraController({ clock: this.clock, write: (cmd, options) => writer.write(cmd, options) }),
       gimbal: new GimbalController({ clock: this.clock, context: () => this.context(source), write: (cmd, options) => writer.write(cmd, options),
         onMotionNotice: notice => { if (notice) source.admitted = undefined; } }),
     };
     source.camera.disconnect(); source.gimbal.disconnect(); this.owned.set(identity, source);
+    media.onClients = () => this.steerVideo(source);
     try { source.error = await this.options.mediaCapability?.() ?? null; await media.start(); if (!this.closed) await device.start(); else await media.close(); }
     catch (error) { source.error = error instanceof Error ? error.message : 'Accessory media unavailable'; }
   }
@@ -138,10 +144,14 @@ export class AccessorySources {
     if (status.state === 'live') {
       if (source.generation !== status.generation) {
         source.admitted = undefined; source.attitude = null; source.rawAttitude = undefined; source.gimbal.disconnect(); source.media.reset();
+        // A new USB link: what the last one answered is not this one's answer
+        // (R-CAM-14), so the live view is watched again until it says.
+        source.native = null; source.forwarding = true; source.device.forwardVideo?.(true);
         source.generation = status.generation; source.camera.connect(); source.gimbal.connect();
       }
     } else {
       source.generation = null; source.admitted = undefined; source.attitude = null; source.rawAttitude = undefined; source.camera.disconnect(); source.gimbal.disconnect(); source.media.reset();
+      source.native = null; source.forwarding = true;
     }
   }
   private context(source: Owned): GuardContext {
@@ -155,11 +165,30 @@ export class AccessorySources {
       discreteApplicable: false,
       nativeActions: status.state === 'live' && status.manufacturer === 'DJI' && status.model === 'HG211' ? HG211_NATIVE_ACTIONS : [] };
   }
+  /**
+   * R-VID-22, under R-CAM-14 as the operator ruled on 2026-09-13: the live
+   * view is forwarded while a consumer is attached to the media endpoint, and
+   * otherwise only until the camera's native size and rate have been observed
+   * on this USB link. Then it is set aside — drained by the helper, packed and
+   * decoded by nobody — until a consumer arrives, at which point the camera's
+   * clock is treated as resuming rather than as having jumped.
+   */
+  private steerVideo(source: Owned): void {
+    const want = source.media.consumers > 0 || source.native === null;
+    if (want === source.forwarding) return;
+    source.forwarding = want;
+    if (want) source.media.expectResume();
+    source.device.forwardVideo?.(want);
+  }
   input(identity: string): AccessoryInput | undefined {
     const source = this.owned.get(identity); if (!source) return undefined;
-    const status = source.device.snapshot(), fps = source.media.clock.fps();
-    const live = !source.error && status.state === 'live' && status.lastVideoAt !== null && this.clock.now() - status.lastVideoAt < 3000;
-    return { endpoint: source.media.endpoint, native: source.media.dimensions && fps ? { ...source.media.dimensions, fps } : null,
+    const status = source.device.snapshot();
+    const fresh = status.lastVideoAt !== null && this.clock.now() - status.lastVideoAt < 3000;
+    // A view set aside on purpose is not a stale one: the link is live on its
+    // command route, and what the device answered about its picture is held.
+    const setAside = !source.forwarding && source.native !== null;
+    const live = !source.error && status.state === 'live' && (fresh || setAside);
+    return { endpoint: source.media.endpoint, native: source.native,
       live, generation: status.generation * 1_000_000 + source.streamGeneration, reason: source.error ?? status.reason ?? (live ? null : 'Accessory video is not fresh') };
   }
   snapshot(identity: string) {
