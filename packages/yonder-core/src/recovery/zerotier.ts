@@ -19,6 +19,7 @@ const NETWORK = /^[0-9a-f]{16}$/;
 const MEMBERSHIP_FILE = /^([0-9a-f]{16})\.conf$/;
 const MANAGED_NETWORK_FILE = /^[0-9a-f]{16}(?:\.local)?\.conf$/;
 const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/;
+const NATIVE_STATE_HOME = "/var/lib/zerotier-one";
 
 export interface ZeroTierState {
   identitySecret: string;
@@ -62,6 +63,7 @@ export interface ZeroTierAdapterOptions {
   cliPath?: string;
   systemctlPath?: string;
   envPath?: string;
+  getentPath?: string;
   unit?: string;
   native?: ZeroTierNative;
   expectedUid?: number;
@@ -107,12 +109,15 @@ export class ZeroTierStateAdapter implements StateProjector {
   private readonly cli: string;
   private readonly systemctl: string;
   private readonly env: string;
+  private readonly getent: string;
   private readonly unit: string;
   private readonly native: ZeroTierNative;
   private readonly expectedUid: number;
   private readonly clientWaitMs: number;
   private readonly clientPollMs: number;
   private readonly sleep: (ms: number) => Promise<void>;
+  private nativeStateUid: number | undefined;
+  private nativeStateOwnerResolution: Promise<void> | undefined;
 
   constructor(options: ZeroTierAdapterOptions = {}) {
     this.directory = options.stateDirectory ?? "/var/lib/zerotier-one";
@@ -121,6 +126,7 @@ export class ZeroTierStateAdapter implements StateProjector {
     this.cli = options.cliPath ?? "/usr/sbin/zerotier-cli";
     this.systemctl = options.systemctlPath ?? "/usr/bin/systemctl";
     this.env = options.envPath ?? "/usr/bin/env";
+    this.getent = options.getentPath ?? "/usr/bin/getent";
     this.unit = options.unit ?? "zerotier-one.service";
     this.native = options.native ?? new SensitiveZeroTierNative();
     this.expectedUid = options.expectedUid ?? (process.getuid?.() ?? 0);
@@ -131,7 +137,7 @@ export class ZeroTierStateAdapter implements StateProjector {
       || !Number.isSafeInteger(this.clientPollMs) || this.clientPollMs < 1 || this.clientPollMs > 5_000) {
       throw new ZeroTierRecoveryError("ZEROTIER_STATE_INVALID");
     }
-    for (const path of [this.directory, this.scratch, this.idtool, this.cli, this.systemctl, this.env]) {
+    for (const path of [this.directory, this.scratch, this.idtool, this.cli, this.systemctl, this.env, this.getent]) {
       if (!path.startsWith("/") || path.includes("\0")) throw new ZeroTierRecoveryError("ZEROTIER_STATE_INVALID");
     }
   }
@@ -229,7 +235,7 @@ export class ZeroTierStateAdapter implements StateProjector {
     }
   }
 
-  private absentStateIsReallyAbsent(): null {
+  private async absentStateIsReallyAbsent(): Promise<null> {
     const secret = existsSync(join(this.directory, "identity.secret"));
     const publicIdentity = existsSync(join(this.directory, "identity.public"));
     if (secret || publicIdentity || this.hasMembershipFiles()) throw new ZeroTierRecoveryError("ZEROTIER_UNAVAILABLE");
@@ -237,7 +243,7 @@ export class ZeroTierStateAdapter implements StateProjector {
   }
 
   private async assertNullIsNonDestructive(): Promise<void> {
-    if (!existsSync(this.idtool)) { this.absentStateIsReallyAbsent(); return; }
+    if (!existsSync(this.idtool)) { await this.absentStateIsReallyAbsent(); return; }
     const live = await this.readFiles();
     if (live !== null) await this.validate(live);
   }
@@ -248,21 +254,21 @@ export class ZeroTierStateAdapter implements StateProjector {
     let mutationStarted = false;
     try {
       if (service.active) await this.stopAndVerify();
-      if (context === "recovery") this.assertOwnedRepairableProjection();
+      if (context === "recovery") await this.assertOwnedRepairableProjection();
       else previous = await this.readStopped();
       // From this point a failed write may have removed or replaced part of
       // the live state, so the validated snapshot above is authoritative for
       // rollback. Before this point, leave unreadable files byte-for-byte
       // untouched; null must never mean "safe to erase" after a read error.
       mutationStarted = true;
-      this.writeState(target);
+      await this.writeState(target);
       await this.setDesiredService(target.memberships.length > 0);
       await this.verify({ operationId: randomUUID(), expected: { config: {} as never, secrets: {}, linuxOwner: null, zeroTier: target } });
     } catch (error) {
       try {
         if (mutationStarted && context !== "recovery") {
           if ((await this.serviceState()).active) await this.stopAndVerify();
-          if (previous !== null) this.writeState(previous); else this.clearState();
+          if (previous !== null) await this.writeState(previous); else await this.clearState();
         }
         if (context === "recovery" && mutationStarted) {
           if ((await this.serviceState()).active) await this.stopAndVerify();
@@ -288,17 +294,19 @@ export class ZeroTierStateAdapter implements StateProjector {
   /**
    * Recovery replays a complete selected journal generation. It may replace
    * partial files created by an interrupted earlier projection, but only when
-   * every existing managed path still has the fixed root-owned shape.
+   * every existing managed path still has the fixed helper- or verified
+   * native-service-owned shape.
    */
-  private assertOwnedRepairableProjection(): void {
+  private async assertOwnedRepairableProjection(): Promise<void> {
+    await this.resolveNativeStateOwner();
     if (!this.lstatOptional(this.directory)) return;
-    this.safeDirectory(this.directory);
+    this.safeStateDirectory(this.directory);
     const secret = join(this.directory, "identity.secret"), publicPath = join(this.directory, "identity.public");
     if (this.lstatOptional(secret)) this.safeOwnedProjectionFile(secret, 0o600, false);
     if (this.lstatOptional(publicPath)) this.safeOwnedProjectionFile(publicPath, 0o644, false);
     const networks = join(this.directory, "networks.d");
     if (!this.lstatOptional(networks)) return;
-    this.safeDirectory(networks);
+    this.safeStateDirectory(networks);
     for (const name of readdirSync(networks)) {
       if (MANAGED_NETWORK_FILE.test(name)) this.safeOwnedProjectionFile(join(networks, name), undefined, true);
     }
@@ -314,7 +322,7 @@ export class ZeroTierStateAdapter implements StateProjector {
 
   private safeOwnedProjectionFile(path: string, mode: number | undefined, allowEmpty: boolean): void {
     const info = lstatSync(path);
-    if (!info.isFile() || info.isSymbolicLink() || info.nlink !== 1 || info.uid !== this.expectedUid
+    if (!info.isFile() || info.isSymbolicLink() || info.nlink !== 1 || !this.isStateOwner(info.uid)
       || (mode === undefined ? Boolean(info.mode & 0o022) : (info.mode & 0o777) !== mode)
       || (!allowEmpty && info.size < 1) || info.size > 64 * 1024) {
       throw new ZeroTierRecoveryError("ZEROTIER_STATE_INVALID");
@@ -322,6 +330,7 @@ export class ZeroTierStateAdapter implements StateProjector {
   }
 
   private async readFiles(): Promise<ZeroTierState | null> {
+    await this.resolveNativeStateOwner();
     const secretPath = join(this.directory, "identity.secret");
     const publicPath = join(this.directory, "identity.public");
     const secretExists = existsSync(secretPath), publicExists = existsSync(publicPath);
@@ -335,7 +344,7 @@ export class ZeroTierStateAdapter implements StateProjector {
     const networksDirectory = join(this.directory, "networks.d");
     let memberships: { networkId: string }[] = [];
     if (existsSync(networksDirectory)) {
-      this.safeDirectory(networksDirectory);
+      this.safeStateDirectory(networksDirectory);
       memberships = readdirSync(networksDirectory).flatMap(name => {
         const match = MEMBERSHIP_FILE.exec(name);
         if (!match) return [];
@@ -360,7 +369,8 @@ export class ZeroTierStateAdapter implements StateProjector {
     } finally { rmSync(temporary, { recursive: true, force: true }); }
   }
 
-  private writeState(state: ZeroTierState): void {
+  private async writeState(state: ZeroTierState): Promise<void> {
+    await this.resolveNativeStateOwner();
     this.ensureDirectory(this.directory, 0o700);
     const networks = join(this.directory, "networks.d");
     this.ensureDirectory(networks, 0o700);
@@ -374,7 +384,8 @@ export class ZeroTierStateAdapter implements StateProjector {
     for (const { networkId } of state.memberships) writeFileDurable(join(networks, `${networkId}.conf`), "", 0o600);
   }
 
-  private clearState(): void {
+  private async clearState(): Promise<void> {
+    await this.resolveNativeStateOwner();
     for (const name of ["identity.secret", "identity.public"]) unlinkDurable(join(this.directory, name));
     const networks = join(this.directory, "networks.d");
     if (!existsSync(networks)) return;
@@ -387,7 +398,7 @@ export class ZeroTierStateAdapter implements StateProjector {
 
   private privateFile(path: string, mode: number): string {
     const info = lstatSync(path);
-    if (!info.isFile() || info.isSymbolicLink() || info.nlink !== 1 || info.uid !== this.expectedUid
+    if (!info.isFile() || info.isSymbolicLink() || info.nlink !== 1 || !this.isStateOwner(info.uid)
       || (info.mode & 0o777) !== mode || info.size < 1 || info.size > 64 * 1024) {
       throw new ZeroTierRecoveryError("ZEROTIER_STATE_INVALID");
     }
@@ -396,16 +407,16 @@ export class ZeroTierStateAdapter implements StateProjector {
     return value;
   }
 
-  private safeDirectory(path: string): void {
+  private safeStateDirectory(path: string): void {
     const info = lstatSync(path);
-    if (!info.isDirectory() || info.isSymbolicLink() || info.uid !== this.expectedUid || (info.mode & 0o022)) {
+    if (!info.isDirectory() || info.isSymbolicLink() || !this.isStateOwner(info.uid) || (info.mode & 0o022)) {
       throw new ZeroTierRecoveryError("ZEROTIER_STATE_INVALID");
     }
   }
 
   private safeManagedFile(path: string): void {
     const info = lstatSync(path);
-    if (!info.isFile() || info.isSymbolicLink() || info.nlink !== 1 || info.uid !== this.expectedUid || (info.mode & 0o022)) {
+    if (!info.isFile() || info.isSymbolicLink() || info.nlink !== 1 || !this.isStateOwner(info.uid) || (info.mode & 0o022)) {
       throw new ZeroTierRecoveryError("ZEROTIER_STATE_INVALID");
     }
   }
@@ -413,22 +424,57 @@ export class ZeroTierStateAdapter implements StateProjector {
   private hasMembershipFiles(): boolean {
     const path = join(this.directory, "networks.d");
     if (!existsSync(path)) return false;
-    this.safeDirectory(path);
+    this.safeStateDirectory(path);
     return readdirSync(path).some(name => MEMBERSHIP_FILE.test(name));
   }
 
   private ensureDirectory(path: string, mode: number): void {
     if (!existsSync(path)) { mkdirSync(path, { mode, recursive: false }); fsyncDir(dirname(path)); }
-    this.safeDirectory(path);
+    this.safeStateDirectory(path);
     chmodSync(path, mode);
   }
 
   private temporary(prefix: string): string {
     if (!existsSync(this.scratch)) { mkdirSync(this.scratch, { mode: 0o700 }); fsyncDir(dirname(this.scratch)); }
-    this.safeDirectory(this.scratch);
+    this.safeHelperDirectory(this.scratch);
     const path = mkdtempSync(join(this.scratch, prefix));
     chmodSync(path, 0o700);
+    this.safeHelperDirectory(path);
     return path;
+  }
+
+  private safeHelperDirectory(path: string): void {
+    const info = lstatSync(path);
+    if (!info.isDirectory() || info.isSymbolicLink() || info.uid !== this.expectedUid || (info.mode & 0o022)) {
+      throw new ZeroTierRecoveryError("ZEROTIER_STATE_INVALID");
+    }
+  }
+
+  private isStateOwner(uid: number): boolean {
+    return uid === this.expectedUid || uid === this.nativeStateUid;
+  }
+
+  /** Resolve only the distribution's fixed non-login service account. */
+  private async resolveNativeStateOwner(): Promise<void> {
+    if (!this.nativeStateOwnerResolution) this.nativeStateOwnerResolution = this.readNativeStateOwner();
+    return this.nativeStateOwnerResolution;
+  }
+
+  private async readNativeStateOwner(): Promise<void> {
+    let output: string;
+    try { output = outputText(await this.native.run(this.getent, ["passwd"])); }
+    catch { throw new ZeroTierRecoveryError("ZEROTIER_STATE_INVALID"); }
+    const matches = output.split("\n").filter(line => line.startsWith("zerotier-one:"));
+    if (matches.length === 0) return; // Conventional root-owned daemon.
+    if (matches.length !== 1) throw new ZeroTierRecoveryError("ZEROTIER_STATE_INVALID");
+    const fields = matches[0]!.split(":");
+    if (fields.length !== 7 || fields[0] !== "zerotier-one" || !/^[1-9][0-9]{0,9}$/.test(fields[2]!)
+      || !/^[1-9][0-9]{0,9}$/.test(fields[3]!) || fields[5] !== NATIVE_STATE_HOME || fields[6] !== "/usr/sbin/nologin") {
+      throw new ZeroTierRecoveryError("ZEROTIER_STATE_INVALID");
+    }
+    const uid = Number(fields[2]!);
+    if (!Number.isSafeInteger(uid) || uid > 0xffff_fffe) throw new ZeroTierRecoveryError("ZEROTIER_STATE_INVALID");
+    this.nativeStateUid = uid;
   }
 
   private async serviceState(): Promise<ServiceState> {

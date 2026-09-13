@@ -22,6 +22,9 @@ namespace_test() {
     mounted_bind=0
     mounted_tmpfs=0
     mounted_ext4=0
+    handoff_root=/handoff-root
+    handoff_root_mounted=0
+    fresh_run_mounted=0
 
     loop_is_backed_by() {
         local candidate=$1 backing=$2 associated
@@ -37,7 +40,7 @@ namespace_test() {
         [[ -n $candidate ]] || return 0
         if loop_is_backed_by "$candidate" "$backing"; then
             for node in "${created_partition_nodes[@]}"; do
-                case "$node" in "$candidate"p[1-4]) rm -f "$node" ;; esac
+                case "$node" in "$candidate"p[1-6]) rm -f "$node" ;; esac
             done
             losetup -d "$candidate"
         fi
@@ -45,6 +48,14 @@ namespace_test() {
 
     cleanup_namespace() {
         set +e
+        # The fresh initramfs /run hides $fixture until initramfs-tools moves
+        # it onto the root. On an error before that move, unmount the root
+        # handoff first, then the fresh /run, so loop backing files are visible
+        # before their owned loops are detached.
+        (( handoff_root_mounted == 0 )) || umount --recursive "$initrd_root$handoff_root"
+        handoff_root_mounted=0
+        (( fresh_run_mounted == 0 )) || umount "$initrd_root/run"
+        fresh_run_mounted=0
         umount "$initrd_root$fixture/script-root/var/lib/yonder-state" 2>/dev/null || true
         umount "$initrd_root$fixture/script-root" 2>/dev/null || true
         (( mounted_ext4 == 0 )) || umount "$initrd_root$fixture/ext4"
@@ -174,18 +185,19 @@ namespace_test() {
     loop_backing=''
 
     # Invoke the packaged mount script with its normal private PATH against a
-    # real four-partition root disk. It should identify p1's parent, mount p2,
-    # and stop at the intentionally absent seed marker. The full successful
-    # mount lifecycle remains the responsibility of verify-mounts.sh.
+    # real legacy five-partition root disk. A terrain partition is accepted
+    # only by the explicit ZERO 3W bench marker; otherwise p2 must not mount.
+    # With the marker it should identify p1's parent, mount p2, preserve p4,
+    # and mount p5 without invoking the four-part grower.
     script_loop_backing=$initrd_root$fixture/script-disk.img
     truncate -s 96M "$script_loop_backing"
     initrd_tool sgdisk --clear \
-        --new=1:2048:+16M --new=2:0:+16M --new=3:0:+16M --new=4:0:0 \
+        --new=1:2048:+16M --new=2:0:+16M --new=3:0:+16M --new=4:0:+16M --new=5:0:+16M --new=6:0:0 \
         "$fixture/script-disk.img" >/dev/null
     script_loop=$(losetup --find --show "$script_loop_backing")
     initrd_tool partx --add "$script_loop"
     local script_name=${script_loop##*/} partition device major minor
-    for partition in {1..4}; do
+    for partition in {1..6}; do
         device=${script_loop}p$partition
         if [[ ! -b $device ]]; then
             IFS=: read -r major minor \
@@ -197,20 +209,48 @@ namespace_test() {
     done
     initrd_tool mkdir -p "$fixture/script-root"
     mount "${script_loop}p1" "$initrd_root$fixture/script-root"
-    mkdir -p "$initrd_root$fixture/script-root/etc" \
-        "$initrd_root$fixture/script-root/var/lib/yonder-state"
-    local root_uuid state_uuid log_uuid media_uuid
+    mkdir -p "$initrd_root$fixture/script-root/etc/yonder" \
+        "$initrd_root$fixture/script-root/etc/ssh" \
+        "$initrd_root$fixture/script-root/var/lib/yonder-state" \
+        "$initrd_root$fixture/script-root/var/lib/yonder/captures" \
+        "$initrd_root$fixture/script-root/var/lib/yonder/console" \
+        "$initrd_root$fixture/script-root/var/lib/yonder/terrain" \
+        "$initrd_root$fixture/script-root/var/lib/NetworkManager" \
+        "$initrd_root$fixture/script-root/var/lib/zerotier-one" \
+        "$initrd_root$fixture/script-root/var/lib/systemd" \
+        "$initrd_root$fixture/script-root/var/lib/dbus" \
+        "$initrd_root$fixture/script-root/var/log/journal" \
+        "$initrd_root$fixture/script-root/home" \
+        "$initrd_root$fixture/script-root/root" \
+        "$initrd_root$fixture/script-root/run" \
+        "$initrd_root$fixture/script-root/tmp" \
+        "$initrd_root$fixture/script-root/var/tmp" \
+        "$initrd_root$fixture/script-root/var/cache"
+    local root_uuid state_uuid log_uuid media_uuid terrain_uuid
     root_uuid=$(blkid -s UUID -o value "${script_loop}p1")
     state_uuid=$(blkid -s UUID -o value "${script_loop}p2")
     log_uuid=$(blkid -s UUID -o value "${script_loop}p3")
     media_uuid=$(blkid -s UUID -o value "${script_loop}p4")
+    terrain_uuid=$(blkid -s UUID -o value "${script_loop}p5")
     cat >"$initrd_root$fixture/script-root/etc/yonder-storage-prototype.conf" <<EOF
 ROOT_UUID=$root_uuid
 STATE_UUID=$state_uuid
 LOG_UUID=$log_uuid
 MEDIA_UUID=$media_uuid
+TERRAIN_UUID=$terrain_uuid
 EOF
+    initrd_tool mkdir -p "$fixture/script-state"
+    initrd_tool mount "${script_loop}p2" "$fixture/script-state"
+    initrd_tool mkdir -p "$fixture/script-state/config" "$fixture/script-state/ssh" \
+        "$fixture/script-state/app/console" "$fixture/script-state/app/captures" \
+        "$fixture/script-state/app/terrain" "$fixture/script-state/networkmanager" \
+        "$fixture/script-state/zerotier" "$fixture/script-state/systemd"
+    : >"$initrd_root$fixture/script-state/seed-complete"
+    initrd_tool umount "$fixture/script-state"
     local script_status
+    # Even a trusted marker/configuration may not relax the exact p1–p5
+    # topology. An extra p6 is rejected before state is touched.
+    printf '%s\n' 'target=radxa-zero3w' >"$initrd_root$fixture/script-root/etc/yonder/bench-image"
     set +e
     # shellcheck disable=SC2016 # $1 is expanded by the initramfs shell
     chroot "$initrd_root" /bin/sh -c \
@@ -220,17 +260,91 @@ EOF
     script_status=$?
     set -e
     [[ $script_status == 1 ]] || \
-        fail "the packaged yonder mount script returned $script_status in its state-mount probe"
-    grep -Fxq 'Yonder storage prototype: incomplete state seed; refusing fresh setup.' \
-        "$initrd_root$fixture/script-error" || \
-        fail 'the packaged yonder mount script did not reach incomplete-state refusal'
+        fail "the packaged yonder mount script returned $script_status for legacy p6"
+    if mountpoint -q "$initrd_root$fixture/script-root/var/lib/yonder-state"; then
+        fail 'the packaged yonder mount script mounted state for legacy p6'
+    fi
+    initrd_tool sgdisk --delete=6 "$fixture/script-disk.img" >/dev/null
+    initrd_tool partx --delete --nr 6 "$script_loop"
+    rm -f "${script_loop}p6"
+    # A terrain UUID is insufficient by itself: a non-bench image with p5
+    # must also be rejected before the state filesystem is touched.
+    rm "$initrd_root$fixture/script-root/etc/yonder/bench-image"
+    set +e
+    # shellcheck disable=SC2016 # $1 is expanded by the initramfs shell
+    chroot "$initrd_root" /bin/sh -c \
+        'PATH=/run/yonder-initramfs-tool-test/empty-path; export PATH; exec /bin/sh /scripts/yonder-mount-storage "$1"' \
+        yonder-initramfs-script "$fixture/script-root" \
+        2>"$initrd_root$fixture/script-error"
+    script_status=$?
+    set -e
+    [[ $script_status == 1 ]] || \
+        fail "the packaged yonder mount script returned $script_status for untrusted p5"
+    if mountpoint -q "$initrd_root$fixture/script-root/var/lib/yonder-state"; then
+        fail 'the packaged yonder mount script mounted state for an untrusted p5'
+    fi
+    printf '%s\n' 'target=radxa-zero3w' >"$initrd_root$fixture/script-root/etc/yonder/bench-image"
+    sed -i 's/^TERRAIN_UUID=.*/TERRAIN_UUID=not-a-uuid/' \
+        "$initrd_root$fixture/script-root/etc/yonder-storage-prototype.conf"
+    set +e
+    # shellcheck disable=SC2016 # $1 is expanded by the initramfs shell
+    chroot "$initrd_root" /bin/sh -c \
+        'PATH=/run/yonder-initramfs-tool-test/empty-path; export PATH; exec /bin/sh /scripts/yonder-mount-storage "$1"' \
+        yonder-initramfs-script "$fixture/script-root" \
+        2>"$initrd_root$fixture/script-error"
+    script_status=$?
+    set -e
+    [[ $script_status == 1 ]] || \
+        fail "the packaged yonder mount script returned $script_status for malformed terrain metadata"
+    if mountpoint -q "$initrd_root$fixture/script-root/var/lib/yonder-state"; then
+        fail 'the packaged yonder mount script mounted state for malformed terrain metadata'
+    fi
+    sed -i "s/^TERRAIN_UUID=.*/TERRAIN_UUID=$terrain_uuid/" \
+        "$initrd_root$fixture/script-root/etc/yonder-storage-prototype.conf"
+    cat >"$initrd_root/scripts/yonder-grow-media" <<'EOF'
+#!/bin/sh
+: >/run/yonder-initramfs-tool-test/grow-called
+exit 99
+EOF
+    chmod 0755 "$initrd_root/scripts/yonder-grow-media"
+    set +e
+    # shellcheck disable=SC2016 # $1 is expanded by the initramfs shell
+    chroot "$initrd_root" /bin/sh -c \
+        'PATH=/run/yonder-initramfs-tool-test/empty-path; export PATH; exec /bin/sh /scripts/yonder-mount-storage "$1"' \
+        yonder-initramfs-script "$fixture/script-root" \
+        2>"$initrd_root$fixture/script-error"
+    script_status=$?
+    set -e
+    [[ $script_status == 0 ]] || \
+        fail "the packaged yonder mount script returned $script_status for the trusted legacy layout"
     [[ $(findmnt -n -T "$initrd_root$fixture/script-root/var/lib/yonder-state" -o SOURCE) == "${script_loop}p2" ]] || \
         fail 'the packaged yonder mount script did not select state from the root parent disk'
-    umount "$initrd_root$fixture/script-root/var/lib/yonder-state"
-    umount "$initrd_root$fixture/script-root"
-    detach_owned_loop "$script_loop" "$script_loop_backing"
-    script_loop=''
-    script_loop_backing=''
+    [[ $(findmnt -n -T "$initrd_root$fixture/script-root/var/lib/yonder/terrain" -o SOURCE) == "${script_loop}p5" ]] || \
+        fail 'the packaged yonder mount script did not mount UUID-bound terrain from p5'
+    [[ ! -e $initrd_root$fixture/grow-called ]] || \
+        fail 'the packaged yonder mount script invoked the four-part media grower for legacy p5'
+    umount --recursive "$initrd_root$fixture/script-root"
+    mount -o rw "${script_loop}p1" "$initrd_root$fixture/script-root"
+    sed -i "s/^TERRAIN_UUID=.*/TERRAIN_UUID=$root_uuid/" \
+        "$initrd_root$fixture/script-root/etc/yonder-storage-prototype.conf"
+    set +e
+    # shellcheck disable=SC2016 # $1 is expanded by the initramfs shell
+    chroot "$initrd_root" /bin/sh -c \
+        'PATH=/run/yonder-initramfs-tool-test/empty-path; export PATH; exec /bin/sh /scripts/yonder-mount-storage "$1"' \
+        yonder-initramfs-script "$fixture/script-root" \
+        2>"$initrd_root$fixture/script-error"
+    script_status=$?
+    set -e
+    [[ $script_status == 0 ]] || \
+        fail "the packaged yonder mount script returned $script_status for mismatched legacy terrain"
+    [[ $(findmnt -n -T "$initrd_root$fixture/script-root/var/lib/yonder/terrain" -o FSTYPE) == tmpfs ]] || \
+        fail 'the packaged yonder mount script did not hide mismatched terrain behind tmpfs'
+    terrain_options=$(findmnt -n -T "$initrd_root$fixture/script-root/var/lib/yonder/terrain" -o OPTIONS)
+    [[ ,$terrain_options, == *,ro,* ]] || \
+        fail 'the mismatched terrain fallback is writable'
+    [[ ! -e $initrd_root$fixture/grow-called ]] || \
+        fail 'the packaged yonder mount script grew media for mismatched legacy terrain'
+    umount --recursive "$initrd_root$fixture/script-root"
 
     printf '%s\n' archived >"$initrd_root$fixture/copy-source/nested/value"
     ln -s nested/value "$initrd_root$fixture/copy-source/link"
@@ -250,6 +364,43 @@ EOF
         fail 'the extracted initramfs rmdir did not remove an empty directory'
     initrd_tool umount "$fixture/tmpfs"
     mounted_tmpfs=0
+
+    # initramfs-tools moves its own /run onto the mounted root after every
+    # init-bottom script has completed. Keep this boundary separate from the
+    # earlier rootfs-style calls: mounting a fresh initramfs /run here makes a
+    # stale root-side /run mount observable instead of papering it over.
+    initrd_tool mkdir -p "$handoff_root"
+    mount -o rw "${script_loop}p1" "$initrd_root$handoff_root"
+    handoff_root_mounted=1
+    sed -i "s/^TERRAIN_UUID=.*/TERRAIN_UUID=$terrain_uuid/" \
+        "$initrd_root$handoff_root/etc/yonder-storage-prototype.conf"
+    initrd_tool mount -t tmpfs -o size=1m,mode=0755,nosuid,nodev tmpfs /run
+    fresh_run_mounted=1
+    set +e
+    # shellcheck disable=SC2016 # $1 is expanded by the initramfs shell
+    chroot "$initrd_root" /bin/sh -c \
+        'PATH=/run/yonder-initramfs-tool-test/empty-path; export PATH; exec /bin/sh /scripts/yonder-mount-storage "$1"' \
+        yonder-initramfs-handoff "$handoff_root" \
+        2>"$initrd_root/handoff-script-error"
+    script_status=$?
+    set -e
+    [[ $script_status == 0 ]] || \
+        fail "the packaged yonder mount script returned $script_status before the /run handoff"
+    [[ ${YONDER_INITRAMFS_INJECT_PRE_MOVE_FAILURE:-0} != 1 ]] || \
+        fail 'injected failure before the initramfs /run handoff'
+    # This is the exact initramfs-tools handoff before run-init/PID 1.
+    initrd_tool mount -n -o move /run "$handoff_root/run"
+    fresh_run_mounted=0
+    [[ $(<"$initrd_root$handoff_root/run/yonder-storage-mode") == protected ]] || \
+        fail 'the initramfs /run handoff lost the protected storage marker'
+    handoff_options=$(findmnt -n -T "$initrd_root$handoff_root" -o OPTIONS)
+    [[ ,$handoff_options, == *,ro,* ]] || \
+        fail 'the /run handoff accepted a writable protected root'
+    umount --recursive "$initrd_root$handoff_root"
+    handoff_root_mounted=0
+    detach_owned_loop "$script_loop" "$script_loop_backing"
+    script_loop=''
+    script_loop_backing=''
     cleanup_namespace
     trap - EXIT INT TERM
 }
@@ -272,5 +423,25 @@ mapfile -t mount_scripts < <(find "$scratch/extracted" -type f -path '*/scripts/
 [[ ${#mount_scripts[@]} == 1 ]] || fail 'generated initramfs does not contain exactly one yonder mount script'
 initrd_root=${mount_scripts[0]%/scripts/yonder-mount-storage}
 [[ -x $initrd_root/scripts/yonder-grow-media ]] || fail 'generated initramfs lacks the media grow script'
+if [[ -n ${YONDER_INITRAMFS_STORAGE_SCRIPT_OVERLAY:-} ]]; then
+    [[ -f $YONDER_INITRAMFS_STORAGE_SCRIPT_OVERLAY && ! -L $YONDER_INITRAMFS_STORAGE_SCRIPT_OVERLAY ]] ||
+        fail 'storage-script overlay is not a regular file'
+    cp "$YONDER_INITRAMFS_STORAGE_SCRIPT_OVERLAY" "$initrd_root/scripts/yonder-mount-storage"
+    chmod 0755 "$initrd_root/scripts/yonder-mount-storage"
+fi
+inject_pre_move_failure=${YONDER_INITRAMFS_INJECT_PRE_MOVE_FAILURE:-0}
+[[ $inject_pre_move_failure == 0 || $inject_pre_move_failure == 1 ]] || exit 2
+if [[ $inject_pre_move_failure == 1 ]]; then
+    set +e
+    unshare --mount --fork /bin/bash "$0" --namespace "$initrd_root"
+    injected_status=$?
+    set -e
+    [[ $injected_status == 1 ]] || fail "injected pre-move failure returned $injected_status"
+    if losetup --list --noheadings --output BACK-FILE | grep -Fq "$initrd_root/run/yonder-initramfs-tool-test/script-disk.img"; then
+        fail 'injected pre-move failure retained an owned script loop'
+    fi
+    printf '%s\n' 'PASS: injected pre-move /run failure detached its owned script loop.'
+    exit
+fi
 unshare --mount --fork /bin/bash "$0" --namespace "$initrd_root"
-printf '%s\n' 'PASS: generated initramfs full tools performed bind, tmpfs and ext4 mounts, UUID lookup, archive copy, durable sync, rename and text operations; packaged storage script selected p2 from a real p1-p4 root disk.'
+printf '%s\n' 'PASS: generated initramfs full tools performed bind, tmpfs and ext4 mounts, UUID lookup, archive copy, durable sync, rename and text operations; packaged storage script rejected untrusted p5 and selected p2 from an explicit legacy ZERO 3W p1-p5 root disk, then preserved its storage-mode marker through the exact /run handoff.'
