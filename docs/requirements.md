@@ -138,6 +138,7 @@ Parameter writes are vehicle commands. R-CMD applies to every requirement here.
 | R-VID-18 | **The picture states what it is** — mode, size, rate, bitrate, and whether it is pinned, held, at full rate or on stills — on itself, and announces a step with its reason | 2 |
 | R-VID-19 | **Take in a browser's own measurement of the path its picture is arriving on** — round-trip time, loss and throughput it observed itself, reported continuously while its session is live — as evidence for R-VID-07's adaptation, on top of what the device can measure of its own output. A report always speaks for the session that sent it, and never another's | 2 |
 | R-VID-20 | **Select the browser-preview codec independently of the main stream.** Default to H.264 for compatibility; offer H.265 when the board encoder and the current browser's WebRTC receiver advertise it. Show an actionable H.264 compatibility choice on a browser that cannot receive the selected H.265 preview. Changing the main `codec` alone must not change the preview codec. Preview codec changes use Apply and disclose the video restart | 2 |
+| R-VID-21 | **Encode only what something consumes.** With no output enabled and no recording in progress, the full-rate encode is held closed at its input and costs nothing beyond an idle element; it opens the instant a recording attaches or an output is enabled, without restarting the camera, and closes again when the last consumer leaves. The browser preview (R-VID-13) is never behind that gate | 2 |
 
 ## R-CTL — Live camera control
 

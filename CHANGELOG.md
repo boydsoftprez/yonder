@@ -29,6 +29,9 @@ SD image or a claim of physical flight acceptance.
 - Keep the daemon's main thread free for telemetry on the Radxa bench board: camera probes are
   reused between sweeps, polled modem, network and mesh readings are memoised for a few seconds,
   ZeroTier state is read concurrently, and a missing `vcgencmd` is asked once (K-70, R-CAM-24).
+- The full-rate encode runs only while an output or a recording consumes it; a gate before the
+  encoder starts closed when no output is enabled and the pipeline host opens it for a recording
+  (R-VID-21, K-70).
 - Reconcile PR #7: recover two-camera/gimbal browser coverage, shared viewer
   validation and missing video requirements; repair Stills status delivery
   and narrow camera controls.

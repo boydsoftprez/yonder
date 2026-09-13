@@ -2685,6 +2685,12 @@ work it is for.
   two callers and the router statistics read every 2 s are what remain at that
   price. A long-lived helper that runs commands on the daemon's behalf would remove
   the cost rather than the cadence.
-- The preview encode at 1920×1080 and 30 fps, an operator selection on the camera
-  page; 1280×720 at 15 fps is what the flight display can show and costs a third
-  as much.
+- ~~The full-rate encode running with no output enabled~~ — closed: it is gated at its input
+  until an output or a recording consumes it (R-VID-21). The bench board's camera has no
+  output configured, so this was a quarter of a core spent on frames nobody received.
+- The per-branch cost of a full-HD encode itself, about 25 points of a core in frame
+  copies into the encoder: measured with five pipeline variants on the bench, the
+  vendor encoder plugin copies every frame through RGA, cannot take the ISP's two-plane
+  buffers in place, and refuses the mode where the capture fills encoder-owned buffers.
+  Only a single-plane NV12 capture is untested, and reaching it needs a modified
+  GStreamer capture element carried in the image.
