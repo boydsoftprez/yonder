@@ -46,20 +46,28 @@
             <div v-if="!effectiveReason && report.directionalRefusals?.length" class="y-aimpanel__reason">{{ report.directionalRefusals.join(' · ') }}</div>
 
             <p v-if="signInRequired" class="y-aimpanel__reason"><a :href="signInHref">Sign in</a> to use camera controls.</p>
-            <YonderAimPad
-                ref="aimPad"
-                :axes="PAD_AXES"
-                :max-rate="report.maxRate ?? 30"
-                :at-limit="atLimit"
-                :inhibited="padInhibited"
-                :note="effectiveReason ? '' : padInhibited"
-                @slew="onSlew"
-                @stop="onStop"
-            />
+            <div @pointerdown.capture="onPadPointerDown">
+                <YonderAimPad
+                    ref="aimPad"
+                    :axes="padAxes"
+                    :max-rate="report.maxRate ?? 30"
+                    :at-limit="atLimit"
+                    :inhibited="padInhibited"
+                    :note="effectiveReason ? '' : padInhibited"
+                    @slew="onSlew"
+                    @stop="onStop"
+                />
+            </div>
+            <YonderRollStrip v-if="rollControl" ref="rollStrip" :roll="roll" :max-rate="rollControl.maxRate"
+                :available="rollAvailable" :reason="rollControlReason" @start="onRollStart" @slew="onSlew" @stop="onStop" />
 
             <div v-if="aimState === 'present'" class="y-aimpanel__rate">
                 <span class="y-aimpanel__rate-l">Commanded rate</span>
                 <span class="y-aimpanel__rate-v">{{ rateShown }}<i>°/s</i></span>
+            </div>
+            <div v-if="aimState === 'present' && rollControl" class="y-aimpanel__rate">
+                <span class="y-aimpanel__rate-l">Commanded roll</span>
+                <span class="y-aimpanel__rate-v">{{ commandedRoll.toFixed(0) }}<i>°/s</i></span>
             </div>
 
             <div class="y-aimpanel__reported">{{ report.positionFrame === 'handle' ? 'Position relative to handle' : report.positionFrame === 'world' ? 'Camera attitude in the world' : 'Reported position' }}</div>
@@ -96,12 +104,13 @@
 <script>
 import { cameraSessionMixin } from './camera-session.ts'
 import YonderAimPad from './YonderAimPad.vue'
+import YonderRollStrip from './YonderRollStrip.vue'
 import YonderAimPresets from './YonderAimPresets.vue'
 import YonderPositionGauge from './YonderPositionGauge.vue'
 import YonderSegmented from './YonderSegmented.vue'
 import YonderColumn from './YonderColumn.vue'
 import { AimTransport } from './aim-transport.ts'
-import { SPEED_KEY, savedNumber } from './aim-response.ts'
+import { AIM_RESPONSE_CHANGED, SPEED_KEY, savedNumber } from './aim-response.ts'
 
 const DRAWER_PREFERENCE_PREFIX = 'yonder.aim.drawer.'
 
@@ -191,14 +200,10 @@ function saveDrawerPreference (cameraKey, open) {
  * temporarily inhibiting.
  *
  * **The dead state and the struck axis both stay drawn** (coordinator
- * resolution 7, R-UI-20). `PAD_AXES` hardcodes `roll: 'advertised'` — this
- * node's own payload carries no `axes` field at all (there is no report
- * channel for roll yet on any camera this project supports), the same fact
- * `YonderDeck.buildAim()` answers by hardcoding the identical object. When a
- * gimbal with a roll motor exists, both call sites gain a real source
- * together; until then, the pad still draws roll struck through rather than
- * silently two-axis, because a hidden axis reads as "this page forgot
- * roll", not "this camera cannot".
+ * resolution 7, R-UI-20). `PAD_AXES` is the legacy two-axis fallback. A
+ * verified `rollControl` renders a separate strip and makes roll `present`
+ * here, which removes the pad's struck-axis mark without mixing a third axis
+ * into its two-dimensional gesture.
  *
  * **The badge reuses `YonderColumn`'s own qualifier, not a new part.**
  * `YonderColumn`'s own doc comment gives "rate control" as one of its two
@@ -250,12 +255,8 @@ function saveDrawerPreference (cameraKey, open) {
  * listener in a real browser even though `.click()` does not.
  */
 
-/**
- * Roll has no motor on any camera this project supports yet, and this
- * node's own payload carries no `axes` field to say otherwise — see this
- * component's own doc comment on why this mirrors `YonderDeck.buildAim()`'s
- * identical, separately-hardcoded object rather than importing one from it.
- */
+/** The two-axis pad's legacy fallback. A verified roll control is composed
+ * beside it, and `padAxes` removes the pad's struck roll mark while live. */
 const PAD_AXES = { pan: 'present', tilt: 'present', roll: 'not-offered' }
 
 /** A payload `bounds` axis (`[lo, hi]` or missing) to the pair
@@ -275,7 +276,7 @@ export default {
     name: 'YonderAim',
     mixins: [cameraSessionMixin],
     inject: ['$socket', '$dataTracker'],
-    components: { YonderAimPad, YonderAimPresets, YonderPositionGauge, YonderSegmented, YonderColumn },
+    components: { YonderAimPad, YonderRollStrip, YonderAimPresets, YonderPositionGauge, YonderSegmented, YonderColumn },
     emits: ['drawer-change'],
     props: {
         id: { type: String, required: true },
@@ -292,6 +293,7 @@ export default {
          * See this component's own doc comment on "the rate block". */
         commandedPan: 0,
         commandedTilt: 0,
+        commandedRoll: 0,
         /** See this component's own doc comment on `Recentre`. */
         aimTransport: null,
         aimError: null,
@@ -367,6 +369,28 @@ export default {
         },
         tilt () {
             return this.report && typeof this.report.tilt === 'number' ? this.report.tilt : null
+        },
+        roll () {
+            return this.report && typeof this.report.roll === 'number' ? this.report.roll : null
+        },
+        rollControl () {
+            const value = this.report?.rollControl
+            return value && typeof value === 'object' && typeof value.available === 'boolean' && Number.isFinite(value.maxRate)
+                ? value : null
+        },
+        rollControlReason () {
+            if (!this.rollControl) return ''
+            if (this.signInRequired) return 'Sign in required.'
+            if (this.aimState !== 'present') return this.reason || 'The gimbal is not responding.'
+            if (this.inhibited) return this.inhibited
+            if (!this.rollControl.available) return this.rollControl.reason || 'Roll control is unavailable.'
+            return ''
+        },
+        rollAvailable () {
+            return Boolean(this.rollControl?.available) && !this.rollControlReason
+        },
+        padAxes () {
+            return { ...PAD_AXES, roll: this.rollAvailable ? 'present' : this.rollControl ? 'gated' : 'not-offered' }
         },
         bounds () {
             return (this.report && this.report.bounds) || null
@@ -486,6 +510,9 @@ export default {
         }
     },
     watch: {
+        signInRequired (now) {
+            if (now) this.stopAimControls()
+        },
         drawerCameraKey (now, before) {
             if (this.collapsible && now !== before) this.drawerOpen = drawerPreference(now)
         },
@@ -496,7 +523,7 @@ export default {
          * feed (page torn down, camera unplugged) simply keeps the guard
          * up, which is the safe direction to fail in. */
         report (now, before) {
-            if (now?.generation !== before?.generation || now?.url !== before?.url || now?.imageDirection !== before?.imageDirection) this.$refs.aimPad?.onEnd()
+            if (now?.generation !== before?.generation || now?.url !== before?.url || now?.imageDirection !== before?.imageDirection) this.stopAimControls()
             this.recentrePending = false
             this.aimTransport?.refresh()
         }
@@ -504,19 +531,21 @@ export default {
     created () {
         if (this.collapsible) this.drawerOpen = drawerPreference(this.drawerCameraKey)
         this.$dataTracker(this.id)
-        this.aimTransport = new AimTransport(() => this.report, (rate, reason) => { this.commandedPan = rate.pan; this.commandedTilt = rate.tilt; this.aimError = reason }, undefined, state => {
+        this.aimTransport = new AimTransport(() => this.report, (rate, reason) => { this.commandedPan = rate.pan; this.commandedTilt = rate.tilt; this.commandedRoll = rate.roll ?? 0; this.aimError = reason }, undefined, state => {
             this.activePreset = state?.state === 'moving' ? state.slot : null
             this.presetMessage = state ? `${state.state === 'moving' ? 'Moving to' : 'Reached'} ${state.name || `preset ${state.slot}`}.` : ''
         })
+        this.onAimResponseChanged = () => this.stopAimControls()
+        window.addEventListener(AIM_RESPONSE_CHANGED, this.onAimResponseChanged)
         this.$socket.on?.('disconnect', this.aimDisconnect)
     },
-    beforeUnmount () { this.aimTransport?.close(); this.$socket.off?.('disconnect', this.aimDisconnect) },
+    beforeUnmount () { window.removeEventListener(AIM_RESPONSE_CHANGED, this.onAimResponseChanged); this.aimTransport?.close(); this.$socket.off?.('disconnect', this.aimDisconnect) },
     methods: {
         setDrawerOpen (open) {
             if (!this.collapsible || !this.aimOffered || this.drawerOpen === open) return
             // Hiding a live pad ends its active gesture. `onEnd()` is
             // idempotent, so this relays a stop only when movement is active.
-            if (!open) this.$refs.aimPad?.onEnd()
+            if (!open) this.stopAimControls()
             this.drawerOpen = open
             saveDrawerPreference(this.drawerCameraKey, open)
             this.$emit('drawer-change', { cameraKey: this.drawerCameraKey, open })
@@ -524,11 +553,28 @@ export default {
         toggleDrawer () { this.setDrawerOpen(!this.drawerOpen) },
         recallPreset ({slot,revision}) {
             if (!this.presetReady) return
-            this.$refs.aimPad?.onEnd()
+            this.stopAimControls()
             this.aimTransport.recall(slot,revision,Math.min(60,savedNumber(SPEED_KEY,60,1,120)))
         },
         onCameraSessionExpired () { this.aimDisconnect() },
-        aimDisconnect () { this.aimTransport?.stop(); this.$refs.aimPad?.onEnd() },
+        stopAimControls () {
+            this.aimTransport?.stop()
+            this.$refs.aimPad?.onEnd()
+            this.$refs.rollStrip?.onEnd()
+        },
+        retireLocalAimPointers () {
+            this.$refs.aimPad?.onEnd()
+            this.$refs.rollStrip?.onEnd()
+        },
+        aimDisconnect () { this.stopAimControls() },
+        onPadPointerDown (event) {
+            if (this.padInhibited || (event.button !== undefined && event.button !== 0)) return
+            this.$refs.rollStrip?.onEnd()
+        },
+        onRollStart () {
+            this.aimTransport?.stop()
+            this.$refs.aimPad?.onEnd()
+        },
         /** Every message this node posts leaves through here — one seam,
          * the same reasoning `YonderDeck`'s own `post()` gives for having
          * exactly one. */
@@ -543,7 +589,8 @@ export default {
             if (this.report?.url) { this.aimTransport.update(e); return }
             this.commandedPan = e.pan
             this.commandedTilt = e.tilt
-            this.post({ slew: { pan: e.pan, tilt: e.tilt, seq: e.seq, gesture: e.gesture } })
+            this.commandedRoll = typeof e.roll === 'number' ? e.roll : 0
+            this.post({ slew: { pan: e.pan, tilt: e.tilt, ...(typeof e.roll === 'number' ? { roll: e.roll } : {}), seq: e.seq, gesture: e.gesture } })
         },
         /** `stop` carries `gesture` and nothing else, by the pad's own
          * design — see this component's own doc comment on why this
@@ -553,11 +600,20 @@ export default {
             if (this.report?.url) { this.aimTransport.stop(); return }
             this.commandedPan = 0
             this.commandedTilt = 0
+            this.commandedRoll = 0
             this.post({ stop: { gesture: e.gesture } })
         },
         onModeChange (m) {
             if (this.activePreset !== null) return
-            if (this.report?.url) { void this.aimTransport.action({ op: 'mode', mode: this.modes.indexOf(m) }); return }
+            if (this.report?.url) {
+                // `action()` clears an admitted hold without first sending a
+                // remote stop. Retire pointers only afterwards: their stop
+                // events then see no held rate and cannot queue beside mode.
+                void this.aimTransport.action({ op: 'mode', mode: this.modes.indexOf(m) })
+                this.retireLocalAimPointers()
+                return
+            }
+            this.stopAimControls()
             this.post({ mode: m })
         },
         pressRecentre () {
@@ -567,7 +623,12 @@ export default {
             // not reach in a real browser.
             if (this.recentreDisabled) return
             this.recentrePending = true
-            if (this.report?.url) { void this.aimTransport.action({ op: 'recentre' }).finally(() => { this.recentrePending = false }); return }
+            if (this.report?.url) {
+                void this.aimTransport.action({ op: 'recentre' }).finally(() => { this.recentrePending = false })
+                this.retireLocalAimPointers()
+                return
+            }
+            this.stopAimControls()
             this.post({ recentre: true })
         }
     }
@@ -623,6 +684,18 @@ export default {
     outline: none;
 }
 .y-aimpanel__handle i { display: block; margin-top: 5px; font-size: 16px; font-style: normal; line-height: 1; }
+.y-aimpanel[data-aim-state='closed'] .y-aimpanel__handle {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    gap: 5px;
+    box-sizing: border-box;
+    width: 56px;
+    height: 44px;
+    padding: 8px 6px;
+    border-radius: 3px;
+}
+.y-aimpanel[data-aim-state='closed'] .y-aimpanel__handle i { order: -1; margin: 0; }
 .y-aimpanel__drawer { order: 1; min-width: 0; flex: 1; padding: 0 4px; }
 
 /* A narrow screen keeps the receiver at its normal width. The drawer sits

@@ -10,7 +10,7 @@ export function normalizedQuaternion(value: unknown): WorldQuaternion | null {
 }
 
 type Window = {
-  epoch: object; axis: 'pan' | 'tilt'; sign: number; minimumRate: number;
+  epoch: object; axis: 'pan' | 'tilt' | 'roll'; sign: number; minimumRate: number;
   writtenAt: number; afterSampleAt: number; eligibleAt: number; lastSampleAt: number;
   baseline?: { quaternion: WorldQuaternion; at: number }; samples: number;
 };
@@ -31,11 +31,14 @@ const MAX_SAMPLE_GAP_MS = 500;
 export class RotationProgress {
   private window?: Window;
   reset(): void { this.window = undefined; }
-  completed(epoch: object, rate: { pan: number; tilt: number }, at: number, sampleAt: number, stopAllowanceMs: number): void {
-    const axis = rate.pan !== 0 && rate.tilt === 0 ? 'pan' : rate.tilt !== 0 && rate.pan === 0 ? 'tilt' : null;
+  completed(epoch: object, rate: { pan: number; tilt: number; roll?: number }, at: number, sampleAt: number, stopAllowanceMs: number): void {
+    const roll = rate.roll ?? 0;
+    const axis = rate.pan !== 0 && rate.tilt === 0 && roll === 0 ? 'pan'
+      : rate.tilt !== 0 && rate.pan === 0 && roll === 0 ? 'tilt'
+      : roll !== 0 && rate.pan === 0 && rate.tilt === 0 ? 'roll' : null;
     if (!axis) { this.reset(); return; }
-    const speed = Math.abs(rate[axis]);
-    const sign = Math.sign(rate[axis]);
+    const speed = Math.abs(axis === 'roll' ? roll : rate[axis]);
+    const sign = Math.sign(axis === 'roll' ? roll : rate[axis]);
     const w = this.window;
     if (!w || w.epoch !== epoch || w.axis !== axis || w.sign !== sign || at - w.writtenAt > MAX_WRITE_GAP_MS) {
       // A preceding native command can continue through its stopping tail.

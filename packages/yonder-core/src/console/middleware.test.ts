@@ -1198,6 +1198,16 @@ describe('private accessory aim proxy', () => {
     expect((await call('POST', '/video/cam1/aim', { cookie: f.cookie, headers: f.headers, json: request })).status).toBe(400);
     expect(f.transport.calls).toHaveLength(0);
   });
+  it('forwards authenticated roll grants intact while keeping roll probes private', async () => {
+    const f = await fixture();
+    const request = { op: 'slew', gesture: 'g', credential: 'c', deadline: 12, seq: 2, pan: 0, tilt: 0, roll: -2 };
+    expect((await call('POST', '/video/cam1/aim', { cookie: f.cookie, headers: f.headers, json: request })).status).toBe(200);
+    expect(f.transport.calls[0].body).toEqual({ owner: viewerFor(f.token), request });
+    expect((await call('POST', '/video/cam1/aim', { cookie: f.cookie, headers: f.headers,
+      json: { op: 'probe-roll-issue', clientGesture: 'bench-roll-browser' } })).status).toBe(400);
+    expect((await call('POST', '/video/cam1/aim', { headers: f.headers, json: request })).status).toBe(401);
+    expect(f.transport.calls).toHaveLength(1);
+  });
 });
 
 it('returns to the requested camera page after reauthentication and rejects external return URLs', async () => {

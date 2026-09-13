@@ -1,6 +1,8 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 /** Published Pocket 2 controllable speed; native joint/fault/intent guards still apply. */
 export const HG211_MAX_RATE_DEG_S = 120;
+/** Roll shares the configured rate ceiling; native joint/fault/intent guards still apply. */
+export const HG211_MAX_ROLL_RATE_DEG_S = HG211_MAX_RATE_DEG_S;
 /** R-CAM-11 / R-TEL-15: unknown measurements remain unknown. */
 export interface GimbalAttitude {
   pitch: number; roll: number; yaw: number; mode: number; at: number;
@@ -14,7 +16,7 @@ export interface GimbalAttitude {
   fault: boolean;
 }
 export type GimbalMode = 0 | 1 | 2;
-export type MotionCommand = { kind: 'rate'; pan: number; tilt: number }
+export type MotionCommand = { kind: 'rate'; pan: number; tilt: number; roll?: number }
   | { kind: 'recentre' } | { kind: 'mode'; mode: GimbalMode };
 export interface PoseRegion {
   yaw: readonly [number, number]; pitch: readonly [number, number]; roll: readonly [number, number];
@@ -31,6 +33,8 @@ export interface GuardContext {
   discreteApplicable?: boolean;
   /** Exact device-native actions established independently of world-angle boxes. */
   nativeActions?: readonly Exclude<MotionCommand, { kind: 'rate' }>[];
+  /** Explicit measured authorization for rate-controlled native roll. Defaults false. */
+  rollRateVerified?: boolean;
   mount: string | null; envelopes: MeasuredEnvelope[];
   /** Positive public rate to reported attitude, after wire conversion. */
   signs: { pan: 1 | -1 | null; tilt: 1 | -1 | null };
@@ -42,7 +46,8 @@ export interface GuardContext {
 export type GuardReason = 'malformed-command' | 'rate-cap' | 'attitude-missing' | 'attitude-stale'
   | 'attitude-malformed' | 'mode-unknown' | 'fault' | 'envelope-unknown' | 'outside-envelope'
   | 'sign-unknown' | 'stop-allowance-unknown' | 'stop-margin' | 'limit-direction-unknown'
-  | 'into-limit' | 'at-limit' | 'trajectory-unverified' | 'mode-unobserved' | 'discrete-mount-unverified';
+  | 'into-limit' | 'at-limit' | 'trajectory-unverified' | 'mode-unobserved' | 'discrete-mount-unverified'
+  | 'roll-unavailable' | 'roll-mode';
 export type GuardResult = { allowed: true } | { allowed: false; reason: GuardReason };
 const axes = ['yaw', 'pitch', 'roll'] as const;
 const refuse = (reason: GuardReason): GuardResult => ({ allowed: false, reason });
@@ -60,11 +65,13 @@ function inside(inner: PoseRegion, outer: PoseRegion): boolean {
 }
 /** Pure single guard for every exposed motion path. No factory geometry. */
 export function guard(cmd: MotionCommand, c: GuardContext): GuardResult {
-  if (!cmd || !['rate', 'recentre', 'mode'].includes(cmd.kind) || 'roll' in cmd
+  if (!cmd || !['rate', 'recentre', 'mode'].includes(cmd.kind)
     || (cmd.kind === 'mode' && ![0, 1, 2].includes(cmd.mode))) return refuse('malformed-command');
   if (cmd.kind === 'rate') {
-    if (![cmd.pan, cmd.tilt].every(Number.isFinite)) return refuse('malformed-command');
-    if (Math.hypot(cmd.pan, cmd.tilt) > HG211_MAX_RATE_DEG_S) return refuse('rate-cap');
+    const roll = cmd.roll ?? 0;
+    if (![cmd.pan, cmd.tilt, roll].every(Number.isFinite)) return refuse('malformed-command');
+    if (roll !== 0 && (cmd.pan !== 0 || cmd.tilt !== 0)) return refuse('malformed-command');
+    if (Math.abs(roll) > HG211_MAX_ROLL_RATE_DEG_S || Math.hypot(cmd.pan, cmd.tilt, roll) > HG211_MAX_RATE_DEG_S) return refuse('rate-cap');
   }
   const a = c.attitude;
   if (!a) return refuse('attitude-missing');
@@ -76,13 +83,19 @@ export function guard(cmd: MotionCommand, c: GuardContext): GuardResult {
   if (![0, 1, 2].includes(a.mode)) return refuse('mode-unknown');
   if (a.fault) return refuse('fault');
   if (cmd.kind === 'rate') {
+    const roll = cmd.roll ?? 0;
+    if (roll !== 0) {
+      if (c.rollRateVerified !== true) return refuse('roll-unavailable');
+      if (a.mode !== 1) return refuse('roll-mode');
+      if (!a.joints || ![a.joints.pan, a.joints.tilt, a.joints.roll].every(Number.isFinite)) return refuse('roll-unavailable');
+    }
     if (![c.intentAllowanceMs, c.deviceStopAllowanceMs].every(v => Number.isFinite(v) && v > 0)) return refuse('stop-allowance-unknown');
     // Native 0x80 rate control retains the camera's own clamps. Ground Euler
     // angles and the old sign/range profile cannot establish joint travel after
     // body reorientation. Neither the flagged joint's command-axis mapping nor
     // an escape direction is verified across orientations, so any lit flag
     // inhibits all nonzero motion, including a proposed other-axis escape.
-    if ((cmd.pan !== 0 || cmd.tilt !== 0) && (a.yawLimit || a.pitchLimit || a.rollLimit)) return refuse('limit-direction-unknown');
+    if ((cmd.pan !== 0 || cmd.tilt !== 0 || roll !== 0) && (a.yawLimit || a.pitchLimit || a.rollLimit)) return refuse('limit-direction-unknown');
     return { allowed: true };
   }
   if (a.pitchLimit || a.yawLimit || a.rollLimit) return refuse('at-limit');

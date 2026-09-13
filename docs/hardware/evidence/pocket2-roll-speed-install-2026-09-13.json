@@ -1,0 +1,100 @@
+{
+  "recordedAt": "2026-09-13T14:53:41.066266+00:00",
+  "baseCommit": "60a9a3e",
+  "model": "DJI HG211",
+  "board": "Mule / Radxa Zero 3W",
+  "rollMaximumDegS": 30,
+  "rollDefaultDegS": 30,
+  "rollPreference": "yonder:aim:roll-speed",
+  "panTiltDefaultDegS": 60,
+  "changedFiles": [
+    {
+      "source": "packages/yonder-core/dist/video/accessory/guard.js",
+      "target": "/opt/yonder/packages/yonder-core/dist/video/accessory/guard.js",
+      "before": "cda90f29a240f6f95dde54b52a528bade25ec3d934f36e52c5f1f180dd861826",
+      "after": "ccc2fa9878d655e02b6e9f0382df2ca2ae776de0056990db34941906373c9e9f"
+    },
+    {
+      "source": "packages/node-red-dashboard-2-yonder/resources/ui-yonder-aim.umd.js",
+      "target": "/opt/yonder/console/node_modules/node-red-dashboard-2-yonder/resources/ui-yonder-aim.umd.js",
+      "before": "545af5002c2a15f7bcaa972ca518a6e60d84792765b9a595cda6c7da11da2af5",
+      "after": "6ed310baf67ef0bdf525a841d5a65e8f7ac8cacdcfc70ba7e941505a3ce27cce"
+    }
+  ],
+  "verifiedRuntimeFiles": [
+    {
+      "source": "packages/yonder-core/dist/video/accessory/guard.js",
+      "target": "/opt/yonder/packages/yonder-core/dist/video/accessory/guard.js",
+      "hash": "ccc2fa9878d655e02b6e9f0382df2ca2ae776de0056990db34941906373c9e9f"
+    },
+    {
+      "source": "packages/yonder-core/dist/video/accessory/intent.js",
+      "target": "/opt/yonder/packages/yonder-core/dist/video/accessory/intent.js",
+      "hash": "7da6a59c5810ae32305c576153766a7f1287406c5529826925ddd17a14bb256a"
+    },
+    {
+      "source": "packages/yonder-core/dist/video/accessory/gimbal.js",
+      "target": "/opt/yonder/packages/yonder-core/dist/video/accessory/gimbal.js",
+      "hash": "de0c8842454c21e1c28dcc801ba9d65758e7cc2aa2021fe28430f97f73ce227f"
+    },
+    {
+      "source": "packages/yonder-core/dist/video/accessory/rotation-progress.js",
+      "target": "/opt/yonder/packages/yonder-core/dist/video/accessory/rotation-progress.js",
+      "hash": "c3c605b2990b9033fcb8995e415eb5e010bd61095bdbe78c261f053b3aa307a0"
+    },
+    {
+      "source": "packages/yonder-core/dist/video/accessory/requests.js",
+      "target": "/opt/yonder/packages/yonder-core/dist/video/accessory/requests.js",
+      "hash": "b3f54e5d195f670b04257d132bf4d331b2b02bca9b043ad1ec10c875686c4510"
+    },
+    {
+      "source": "packages/yonder-core/dist/video/accessory/source.js",
+      "target": "/opt/yonder/packages/yonder-core/dist/video/accessory/source.js",
+      "hash": "551fbb30c0d4e190ec7764d8c265619be6f8eeeabc91188a82dfc9c3482ea820"
+    },
+    {
+      "source": "packages/yonder-core/dist/video/present.js",
+      "target": "/opt/yonder/packages/yonder-core/dist/video/present.js",
+      "hash": "c07fde088e1c03dcdad1996b850c14ac02274ec2856a2b9dff075fb631797339"
+    },
+    {
+      "source": "packages/node-red-dashboard-2-yonder/resources/ui-yonder-aim.umd.js",
+      "target": "/opt/yonder/console/node_modules/node-red-dashboard-2-yonder/resources/ui-yonder-aim.umd.js",
+      "hash": "6ed310baf67ef0bdf525a841d5a65e8f7ac8cacdcfc70ba7e941505a3ce27cce"
+    },
+    {
+      "source": "packages/node-red-dashboard-2-yonder/resources/ui-yonder-picture.umd.js",
+      "target": "/opt/yonder/console/node_modules/node-red-dashboard-2-yonder/resources/ui-yonder-picture.umd.js",
+      "hash": "432f8d6e2ea31ca6f11689dafdffaa4fc49194c0a4cadf4eb5a0d9d14d27c573"
+    }
+  ],
+  "services": {
+    "yonder-core": "active",
+    "yonder-console": "active"
+  },
+  "rootMount": "read-only",
+  "configurationAndSecretsHashesUnchanged": true,
+  "activationUsbPauseSeconds": 45,
+  "initialCameraReport": {
+    "live": true,
+    "mode": 2,
+    "rollControl": {
+      "available": false,
+      "reason": "Choose FPV mode to use roll control.",
+      "maxRate": 30
+    }
+  },
+  "measurementStatus": "Not run: the operator began testing and explicitly asked to retain control. The mode-selection preflight detected changed mode/position and sent no action. No higher-rate bench pulse was sent.",
+  "operatorAcceptance": "Pending feedback",
+  "automatedChecks": {
+    "coreFocusedPassed": 306,
+    "widgetPassed": 1173,
+    "browserCasesPassed": 4,
+    "fullPageGate": {
+      "passed": 219,
+      "failed": 0,
+      "acceptedNewGeometry": false
+    },
+    "offlineSpeedHarnessPassed": 8
+  }
+}

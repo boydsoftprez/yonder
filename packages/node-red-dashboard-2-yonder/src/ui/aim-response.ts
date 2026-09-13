@@ -1,6 +1,7 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 export const EXPO_KEY = 'yonder:aim:expo';
 export const SPEED_KEY = 'yonder:aim:speed';
+export const ROLL_SPEED_KEY = 'yonder:aim:roll-speed';
 export const AIM_RESPONSE_CHANGED = 'yonder-aim-response-changed';
 
 /** Inverse displayed-image transform, with pan right and tilt up positive. */
@@ -15,6 +16,15 @@ export function screenToCamera(rate: { pan: number; tilt: number }, direction = 
     case '90l': return { pan: y, tilt: -x };
     case 'ul-lr': return { pan: -y, tilt: -x };
     case 'ur-ll': return { pan: y, tilt: x };
+    default: return null;
+  }
+}
+
+/** Image reflections reverse perceived roll; in-plane image rotations do not. */
+export function screenRollToCamera(roll: number, direction = 'identity'): number | null {
+  switch (direction) {
+    case 'identity': case '180': case '90r': case '90l': return roll;
+    case 'horiz': case 'vert': case 'ul-lr': case 'ur-ll': return -roll;
     default: return null;
   }
 }
@@ -58,6 +68,8 @@ export function aimFailure(reason: string): string {
     'preset-position': 'Fresh position relative to the handle is unavailable.',
     'preset-timeout': 'The preset move timed out and stopped.',
     'preset-stalled': 'The saved position could not be reached. Movement stopped.',
+    'roll-unavailable': 'Roll control is not available for this camera.',
+    'roll-mode': 'Choose FPV mode to control roll.',
   };
   return messages[reason] ?? reason;
 }
